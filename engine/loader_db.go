@@ -21,6 +21,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strconv"
 	"strings"
@@ -131,163 +132,183 @@ func (dbr *DbReader) ShowStatistics() {
 	// lcr rules
 	log.Print("LCR rules: ", len(dbr.lcrs))
 }
-
 func (dbr *DbReader) WriteToDatabase(flush, verbose bool) (err error) {
-	storage := dbr.dataDb
-	if flush {
-		storage.Flush("")
-	}
-	if verbose {
-		log.Print("Destinations")
-	}
-	for _, d := range dbr.destinations {
-		err = storage.SetDestination(d)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Print(d.Id, " : ", d.Prefixes)
-		}
-	}
-	if verbose {
-		log.Print("Rating plans")
-	}
-	for _, rp := range dbr.ratingPlans {
-		err = storage.SetRatingPlan(rp)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Print(rp.Id)
-		}
-	}
-	if verbose {
-		log.Print("Rating profiles")
-	}
-	for _, rp := range dbr.ratingProfiles {
-		err = storage.SetRatingProfile(rp)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Print(rp.Id)
-		}
-	}
-	if verbose {
-		log.Print("Action plans")
-	}
-	for k, ats := range dbr.actionsTimings {
-		err = accountingStorage.SetActionTimings(k, ats)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Println(k)
-		}
-	}
-	if verbose {
-		log.Print("Shared groups")
-	}
-	for k, sg := range dbr.sharedGroups {
-		err = accountingStorage.SetSharedGroup(sg)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Println(k)
-		}
-	}
-	if verbose {
-		log.Print("LCR Rules")
-	}
-	for k, lcr := range dbr.lcrs {
-		err = dataStorage.SetLCR(lcr)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Println(k)
-		}
-	}
-	if verbose {
-		log.Print("Actions")
-	}
-	for k, as := range dbr.actions {
-		err = accountingStorage.SetActions(k, as)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Println(k)
-		}
-	}
-	if verbose {
-		log.Print("Account actions")
-	}
-	for _, ub := range dbr.accountActions {
-		err = accountingStorage.SetAccount(ub)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Println(ub.Id)
-		}
-	}
-	if verbose {
-		log.Print("Rating profile aliases")
-	}
-	if err := storage.RemoveRpAliases(dbr.dirtyRpAliases); err != nil {
+	if err := dbr.dataDb.RatingMassInsert(dbr, flush, verbose); err != nil {
 		return err
 	}
-	for key, alias := range dbr.rpAliases {
-		err = storage.SetRpAlias(key, alias)
+	if err := dbr.accountDb.AccountingMassInsert(dbr, verbose); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (dbr *DbReader) WriteAccounting(massPipe io.Writer, verbose bool) (err error) {
+	accountDb := dbr.accountDb
+	if verbose {
+		log.Print("Action Plans:")
+	}
+	for k, ats := range dbr.actionsTimings {
+		err = accountDb.SetActionTimings(k, ats)
 		if err != nil {
 			return err
 		}
 		if verbose {
-			log.Println(key)
+			log.Println("\t", k)
 		}
 	}
 	if verbose {
-		log.Print("Account aliases")
+		log.Print("Shared Groups:")
 	}
-	if err := accountingStorage.RemoveAccAliases(dbr.dirtyAccAliases); err != nil {
+	for k, sg := range dbr.sharedGroups {
+		err = accountDb.SetSharedGroup(sg)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("Actions:")
+	}
+	for k, as := range dbr.actions {
+		err = accountDb.SetActions(k, as)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("Account Actions:")
+	}
+	for _, ub := range dbr.accountActions {
+		err = accountDb.SetAccount(ub)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", ub.Id)
+		}
+	}
+
+	if verbose {
+		log.Print("Account Aliases:")
+	}
+	if err := accountDb.RemoveAccAliases(dbr.dirtyAccAliases); err != nil {
 		return err
 	}
 	for key, alias := range dbr.accAliases {
-		err = accountingStorage.SetAccAlias(key, alias)
+		err = accountDb.SetAccAlias(key, alias)
 		if err != nil {
 			return err
 		}
 		if verbose {
-			log.Println(key)
+			log.Print("\t", key)
 		}
 	}
 	if verbose {
-		log.Print("Derived Chargers")
+		log.Print("Derived Chargers:")
 	}
 	for key, dcs := range dbr.derivedChargers {
-		err = accountingStorage.SetDerivedChargers(key, dcs)
+		err = accountDb.SetDerivedChargers(key, dcs)
 		if err != nil {
 			return err
 		}
 		if verbose {
-			log.Print(key)
+			log.Print("\t", key)
+		}
+	}
+
+	return
+}
+
+func (dbr *DbReader) WriteRating(massPipe io.Writer, flush, verbose bool) (err error) {
+	dataDb := dbr.dataDb
+	if dataDb == nil {
+		return errors.New("No database connection!")
+	}
+	if flush {
+		dataDb.Flush("")
+	}
+	if verbose {
+		log.Print("Destinations:")
+	}
+	for _, d := range dbr.destinations {
+		err = dataDb.SetDestination(d, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", d.Id, " : ", d.Prefixes)
 		}
 	}
 	if verbose {
-		log.Print("CDR Stats Queues")
+		log.Print("Rating Plans:")
 	}
-	for _, sq := range dbr.cdrStats {
-		err = dataStorage.SetCdrStats(sq)
+	for _, rp := range dbr.ratingPlans {
+		err = dataDb.SetRatingPlan(rp, massPipe)
 		if err != nil {
 			return err
 		}
 		if verbose {
-			log.Print(sq.Id)
+			log.Print("\t", rp.Id)
 		}
 	}
-	return
+	if verbose {
+		log.Print("Rating Profiles:")
+	}
+	for _, rp := range dbr.ratingProfiles {
+		err = dataDb.SetRatingProfile(rp, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", rp.Id)
+		}
+	}
+	if verbose {
+		log.Print("Rating Profile Aliases:")
+	}
+	if err := dataDb.RemoveRpAliases(dbr.dirtyRpAliases); err != nil {
+		return err
+	}
+	for key, alias := range dbr.rpAliases {
+		err = dataDb.SetRpAlias(key, alias, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", key)
+		}
+	}
+	if verbose {
+		log.Print("LCR Rules:")
+	}
+	for k, lcr := range dbr.lcrs {
+		err = dataDb.SetLCR(lcr, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("CDR Stats Queues:")
+	}
+	for _, sq := range dbr.cdrStats {
+		err = dataDb.SetCdrStats(sq, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", sq.Id)
+		}
+	}
+
+	return nil
 }
 
 func (dbr *DbReader) LoadDestinations() (err error) {
@@ -298,7 +319,7 @@ func (dbr *DbReader) LoadDestinations() (err error) {
 func (dbr *DbReader) LoadDestinationByTag(tag string) (bool, error) {
 	destinations, err := dbr.storDb.GetTpDestinations(dbr.tpid, tag)
 	for _, destination := range destinations {
-		dbr.dataDb.SetDestination(destination)
+		dbr.dataDb.SetDestination(destination, nil)
 	}
 	return len(destinations) > 0, err
 }
@@ -461,11 +482,11 @@ func (dbr *DbReader) LoadRatingPlanByTag(tag string) (bool, error) {
 					continue
 				}
 				for _, destination := range dms {
-					dbr.dataDb.SetDestination(destination)
+					dbr.dataDb.SetDestination(destination, nil)
 				}
 			}
 		}
-		if err := dbr.dataDb.SetRatingPlan(ratingPlan); err != nil {
+		if err := dbr.dataDb.SetRatingPlan(ratingPlan, nil); err != nil {
 			return false, err
 		}
 	}
@@ -501,7 +522,7 @@ func (dbr *DbReader) LoadRatingProfileFiltered(qriedRpf *utils.TPRatingProfile) 
 					CdrStatQueueIds: strings.Split(tpRa.CdrStatQueueIds, utils.INFIELD_SEP),
 				})
 		}
-		if err := dbr.dataDb.SetRatingProfile(resultRatingProfile); err != nil {
+		if err := dbr.dataDb.SetRatingProfile(resultRatingProfile, nil); err != nil {
 			return err
 		}
 	}
@@ -955,7 +976,7 @@ func (dbr *DbReader) LoadCdrStatsByTag(tag string, save bool) error {
 	}
 	if save {
 		for _, tag := range loadedTags {
-			if err := dbr.dataDb.SetCdrStats(dbr.cdrStats[tag]); err != nil {
+			if err := dbr.dataDb.SetCdrStats(dbr.cdrStats[tag], nil); err != nil {
 				return err
 			}
 		}

@@ -43,7 +43,7 @@ func (self *ApierV1) AddRatingSubjectAliases(attrs AttrAddRatingSubjectAliases, 
 	}
 	aliasesChanged := []string{}
 	for _, alias := range attrs.Aliases {
-		if err := self.RatingDb.SetRpAlias(utils.RatingSubjectAliasKey(attrs.Tenant, alias), attrs.Subject); err != nil {
+		if err := self.RatingDb.SetRpAlias(utils.RatingSubjectAliasKey(attrs.Tenant, alias), attrs.Subject, nil); err != nil {
 			return fmt.Errorf("%s:%s:%s", utils.ERR_SERVER_ERROR, alias, err.Error())
 		}
 		aliasesChanged = append(aliasesChanged, engine.RP_ALIAS_PREFIX+utils.RatingSubjectAliasKey(attrs.Tenant, alias))

@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
+	"bytes"
 	"reflect"
 	"sort"
 	"testing"
@@ -27,6 +28,13 @@ import (
 	"github.com/cgrates/cgrates/cache2go"
 	"github.com/cgrates/cgrates/utils"
 )
+
+func TestRedisGenProto(t *testing.T) {
+	cmd := GenRedisProtocol("SET", "mykey", "Hello World!")
+	if bytes.Compare(cmd, []byte("*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$12\r\nHello World!\r\n")) != 0 {
+		t.Error("Wrong redis protocol command: " + string(cmd))
+	}
+}
 
 func TestMsgpackStructsAdded(t *testing.T) {
 	var a = struct{ First string }{"test"}
@@ -101,9 +109,9 @@ func TestStorageDestinationContainsPrefixNotExisting(t *testing.T) {
 }
 
 func TestCacheRefresh(t *testing.T) {
-	dataStorage.SetDestination(&Destination{"T11", []string{"0"}})
+	dataStorage.SetDestination(&Destination{"T11", []string{"0"}}, nil)
 	dataStorage.GetDestination("T11")
-	dataStorage.SetDestination(&Destination{"T11", []string{"1"}})
+	dataStorage.SetDestination(&Destination{"T11", []string{"1"}}, nil)
 	t.Log("Test cache refresh")
 	dataStorage.CacheRating(nil, nil, nil, nil, nil)
 	d, err := dataStorage.GetDestination("T11")
@@ -130,13 +138,13 @@ func TestStoreInterfaces(t *testing.T) {
 }
 
 func TestGetRPAliases(t *testing.T) {
-	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("cgrates.org", "2001"), "1001"); err != nil {
+	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("cgrates.org", "2001"), "1001", nil); err != nil {
 		t.Error(err)
 	}
-	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("cgrates.org", "2002"), "1001"); err != nil {
+	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("cgrates.org", "2002"), "1001", nil); err != nil {
 		t.Error(err)
 	}
-	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("itsyscom.com", "2003"), "1001"); err != nil {
+	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("itsyscom.com", "2003"), "1001", nil); err != nil {
 		t.Error(err)
 	}
 	expectAliases := sort.StringSlice([]string{"2001", "2002"})
@@ -153,13 +161,13 @@ func TestGetRPAliases(t *testing.T) {
 }
 
 func TestRemRSubjAliases(t *testing.T) {
-	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("cgrates.org", "2001"), "1001"); err != nil {
+	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("cgrates.org", "2001"), "1001", nil); err != nil {
 		t.Error(err)
 	}
-	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("cgrates.org", "2002"), "1001"); err != nil {
+	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("cgrates.org", "2002"), "1001", nil); err != nil {
 		t.Error(err)
 	}
-	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("itsyscom.com", "2003"), "1001"); err != nil {
+	if err := dataStorage.SetRpAlias(utils.RatingSubjectAliasKey("itsyscom.com", "2003"), "1001", nil); err != nil {
 		t.Error(err)
 	}
 	if err := dataStorage.RemoveRpAliases([]*TenantRatingSubject{&TenantRatingSubject{Tenant: "cgrates.org", Subject: "1001"}}); err != nil {

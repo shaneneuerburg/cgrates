@@ -22,6 +22,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -180,50 +181,17 @@ func (csvr *CSVReader) ShowStatistics() {
 }
 
 func (csvr *CSVReader) WriteToDatabase(flush, verbose bool) (err error) {
-	dataStorage := csvr.dataStorage
+	if err := csvr.dataStorage.RatingMassInsert(csvr, flush, verbose); err != nil {
+		return err
+	}
+	if err := csvr.accountingStorage.AccountingMassInsert(csvr, verbose); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (csvr *CSVReader) WriteAccounting(massPipe io.Writer, verbose bool) (err error) {
 	accountingStorage := csvr.accountingStorage
-	if dataStorage == nil {
-		return errors.New("No database connection!")
-	}
-	if flush {
-		dataStorage.Flush("")
-	}
-	if verbose {
-		log.Print("Destinations:")
-	}
-	for _, d := range csvr.destinations {
-		err = dataStorage.SetDestination(d)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Print("\t", d.Id, " : ", d.Prefixes)
-		}
-	}
-	if verbose {
-		log.Print("Rating Plans:")
-	}
-	for _, rp := range csvr.ratingPlans {
-		err = dataStorage.SetRatingPlan(rp)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Print("\t", rp.Id)
-		}
-	}
-	if verbose {
-		log.Print("Rating Profiles:")
-	}
-	for _, rp := range csvr.ratingProfiles {
-		err = dataStorage.SetRatingProfile(rp)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Print("\t", rp.Id)
-		}
-	}
 	if verbose {
 		log.Print("Action Plans:")
 	}
@@ -241,18 +209,6 @@ func (csvr *CSVReader) WriteToDatabase(flush, verbose bool) (err error) {
 	}
 	for k, sg := range csvr.sharedGroups {
 		err = accountingStorage.SetSharedGroup(sg)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Println("\t", k)
-		}
-	}
-	if verbose {
-		log.Print("LCR Rules:")
-	}
-	for k, lcr := range csvr.lcrs {
-		err = dataStorage.SetLCR(lcr)
 		if err != nil {
 			return err
 		}
@@ -284,21 +240,7 @@ func (csvr *CSVReader) WriteToDatabase(flush, verbose bool) (err error) {
 			log.Println("\t", ub.Id)
 		}
 	}
-	if verbose {
-		log.Print("Rating Profile Aliases:")
-	}
-	if err := dataStorage.RemoveRpAliases(csvr.dirtyRpAliases); err != nil {
-		return err
-	}
-	for key, alias := range csvr.rpAliases {
-		err = dataStorage.SetRpAlias(key, alias)
-		if err != nil {
-			return err
-		}
-		if verbose {
-			log.Print("\t", key)
-		}
-	}
+
 	if verbose {
 		log.Print("Account Aliases:")
 	}
@@ -326,11 +268,86 @@ func (csvr *CSVReader) WriteToDatabase(flush, verbose bool) (err error) {
 			log.Print("\t", key)
 		}
 	}
+
+	return
+}
+
+func (csvr *CSVReader) WriteRating(massPipe io.Writer, flush, verbose bool) (err error) {
+	dataStorage := csvr.dataStorage
+	if dataStorage == nil {
+		return errors.New("No database connection!")
+	}
+	if flush {
+		dataStorage.Flush("")
+	}
+	if verbose {
+		log.Print("Destinations:")
+	}
+	for _, d := range csvr.destinations {
+		err = dataStorage.SetDestination(d, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", d.Id, " : ", d.Prefixes)
+		}
+	}
+	if verbose {
+		log.Print("Rating Plans:")
+	}
+	for _, rp := range csvr.ratingPlans {
+		err = dataStorage.SetRatingPlan(rp, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", rp.Id)
+		}
+	}
+	if verbose {
+		log.Print("Rating Profiles:")
+	}
+	for _, rp := range csvr.ratingProfiles {
+		err = dataStorage.SetRatingProfile(rp, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", rp.Id)
+		}
+	}
+	if verbose {
+		log.Print("Rating Profile Aliases:")
+	}
+	if err := dataStorage.RemoveRpAliases(csvr.dirtyRpAliases); err != nil {
+		return err
+	}
+	for key, alias := range csvr.rpAliases {
+		err = dataStorage.SetRpAlias(key, alias, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", key)
+		}
+	}
+	if verbose {
+		log.Print("LCR Rules:")
+	}
+	for k, lcr := range csvr.lcrs {
+		err = dataStorage.SetLCR(lcr, massPipe)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
 	if verbose {
 		log.Print("CDR Stats Queues:")
 	}
 	for _, sq := range csvr.cdrStats {
-		err = dataStorage.SetCdrStats(sq)
+		err = dataStorage.SetCdrStats(sq, massPipe)
 		if err != nil {
 			return err
 		}
@@ -338,7 +355,8 @@ func (csvr *CSVReader) WriteToDatabase(flush, verbose bool) (err error) {
 			log.Print("\t", sq.Id)
 		}
 	}
-	return
+
+	return nil
 }
 
 func (csvr *CSVReader) LoadDestinations() (err error) {

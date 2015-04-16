@@ -68,7 +68,7 @@ func TestGetDerivedMaxSessionTime(t *testing.T) {
 		t.Error("Unexpected maxSessionTime received: ", maxSessionTime)
 	}
 	deTMobile := &Destination{Id: "DE_TMOBILE", Prefixes: []string{"+49151", "+49160", "+49170", "+49171", "+49175"}}
-	if err := dataStorage.SetDestination(deTMobile); err != nil {
+	if err := dataStorage.SetDestination(deTMobile, nil); err != nil {
 		t.Error(err)
 	}
 	b10 := &Balance{Value: 10, Weight: 10, DestinationId: "DE_TMOBILE"}
@@ -163,7 +163,7 @@ func TestGetSessionRuns(t *testing.T) {
 
 func TestGetLCR(t *testing.T) {
 	dstDe := &Destination{Id: "GERMANY", Prefixes: []string{"+49"}}
-	if err := dataStorage.SetDestination(dstDe); err != nil {
+	if err := dataStorage.SetDestination(dstDe, nil); err != nil {
 		t.Error(err)
 	}
 	rp1 := &RatingPlan{
@@ -275,7 +275,7 @@ func TestGetLCR(t *testing.T) {
 		},
 	}
 	for _, rpf := range []*RatingPlan{rp1, rp2, rp3} {
-		if err := dataStorage.SetRatingPlan(rpf); err != nil {
+		if err := dataStorage.SetRatingPlan(rpf, nil); err != nil {
 			t.Error(err)
 		}
 	}
@@ -304,7 +304,7 @@ func TestGetLCR(t *testing.T) {
 		}},
 	}
 	for _, rpfl := range []*RatingProfile{danRpfl, rifRpfl, ivoRpfl} {
-		if err := dataStorage.SetRatingProfile(rpfl); err != nil {
+		if err := dataStorage.SetRatingProfile(rpfl, nil); err != nil {
 			t.Error(err)
 		}
 	}
@@ -327,7 +327,7 @@ func TestGetLCR(t *testing.T) {
 		},
 	}
 	for _, lcr := range []*LCR{lcrStatic, lcrLowestCost} {
-		if err := dataStorage.SetLCR(lcr); err != nil {
+		if err := dataStorage.SetLCR(lcr, nil); err != nil {
 			t.Error(err)
 		}
 	}

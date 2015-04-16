@@ -23,14 +23,26 @@ import (
 	"compress/zlib"
 	"errors"
 	"fmt"
+	"os/exec"
 
 	"github.com/cgrates/cgrates/cache2go"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/hoisie/redis"
 
+	"io"
 	"io/ioutil"
 	"time"
 )
+
+func GenRedisProtocol(cmd ...string) []byte {
+	proto := ""
+	proto += fmt.Sprintf("*%d\r\n", len(cmd))
+	for _, arg := range cmd {
+		proto += fmt.Sprintf("$%d\r\n", len([]byte(arg)))
+		proto += fmt.Sprintf("%s\r\n", arg)
+	}
+	return []byte(proto)
+}
 
 type RedisStorage struct {
 	dbNb int
@@ -310,13 +322,17 @@ func (rs *RedisStorage) GetRatingPlan(key string, skipCache bool) (rp *RatingPla
 	return
 }
 
-func (rs *RedisStorage) SetRatingPlan(rp *RatingPlan) (err error) {
+func (rs *RedisStorage) SetRatingPlan(rp *RatingPlan, massPipe io.Writer) (err error) {
 	result, err := rs.ms.Marshal(rp)
 	var b bytes.Buffer
 	w := zlib.NewWriter(&b)
 	w.Write(result)
 	w.Close()
-	err = rs.db.Set(RATING_PLAN_PREFIX+rp.Id, b.Bytes())
+	if massPipe != nil {
+		_, err = massPipe.Write(GenRedisProtocol("SET", RATING_PLAN_PREFIX+rp.Id, b.String()))
+	} else {
+		err = rs.db.Set(RATING_PLAN_PREFIX+rp.Id, b.Bytes())
+	}
 	if err == nil && historyScribe != nil {
 		response := 0
 		go historyScribe.Record(rp.GetHistoryRecord(), &response)
@@ -344,9 +360,13 @@ func (rs *RedisStorage) GetRatingProfile(key string, skipCache bool) (rpf *Ratin
 	return
 }
 
-func (rs *RedisStorage) SetRatingProfile(rpf *RatingProfile) (err error) {
+func (rs *RedisStorage) SetRatingProfile(rpf *RatingProfile, massPipe io.Writer) (err error) {
 	result, err := rs.ms.Marshal(rpf)
-	err = rs.db.Set(RATING_PROFILE_PREFIX+rpf.Id, result)
+	if massPipe != nil {
+		_, err = massPipe.Write(GenRedisProtocol("SET", RATING_PROFILE_PREFIX+rpf.Id, string(result)))
+	} else {
+		err = rs.db.Set(RATING_PROFILE_PREFIX+rpf.Id, result)
+	}
 	if err == nil && historyScribe != nil {
 		response := 0
 		go historyScribe.Record(rpf.GetHistoryRecord(), &response)
@@ -372,8 +392,12 @@ func (rs *RedisStorage) GetRpAlias(key string, skipCache bool) (alias string, er
 	return
 }
 
-func (rs *RedisStorage) SetRpAlias(key, alias string) (err error) {
-	err = rs.db.Set(RP_ALIAS_PREFIX+key, []byte(alias))
+func (rs *RedisStorage) SetRpAlias(key, alias string, massPipe io.Writer) (err error) {
+	if massPipe != nil {
+		_, err = massPipe.Write(GenRedisProtocol("SET", RP_ALIAS_PREFIX+key, alias))
+	} else {
+		err = rs.db.Set(RP_ALIAS_PREFIX+key, []byte(alias))
+	}
 	return
 }
 
@@ -445,9 +469,13 @@ func (rs *RedisStorage) GetLCR(key string, skipCache bool) (lcr *LCR, err error)
 	return
 }
 
-func (rs *RedisStorage) SetLCR(lcr *LCR) (err error) {
+func (rs *RedisStorage) SetLCR(lcr *LCR, massPipe io.Writer) (err error) {
 	result, err := rs.ms.Marshal(lcr)
-	err = rs.db.Set(LCR_PREFIX+lcr.GetId(), result)
+	if massPipe != nil {
+		_, err = massPipe.Write(GenRedisProtocol("SET", LCR_PREFIX+lcr.GetId(), string(result)))
+	} else {
+		err = rs.db.Set(LCR_PREFIX+lcr.GetId(), result)
+	}
 	cache2go.Cache(LCR_PREFIX+lcr.GetId(), lcr)
 	return
 }
@@ -552,7 +580,7 @@ func (rs *RedisStorage) GetDestination(key string) (dest *Destination, err error
 	return
 }
 
-func (rs *RedisStorage) SetDestination(dest *Destination) (err error) {
+func (rs *RedisStorage) SetDestination(dest *Destination, massPipe io.Writer) (err error) {
 	result, err := rs.ms.Marshal(dest)
 	if err != nil {
 		return err
@@ -561,7 +589,11 @@ func (rs *RedisStorage) SetDestination(dest *Destination) (err error) {
 	w := zlib.NewWriter(&b)
 	w.Write(result)
 	w.Close()
-	err = rs.db.Set(DESTINATION_PREFIX+dest.Id, b.Bytes())
+	if massPipe != nil {
+		_, err = massPipe.Write(GenRedisProtocol("SET", DESTINATION_PREFIX+dest.Id, b.String()))
+	} else {
+		err = rs.db.Set(DESTINATION_PREFIX+dest.Id, b.Bytes())
+	}
 	if err == nil && historyScribe != nil {
 		response := 0
 		go historyScribe.Record(dest.GetHistoryRecord(), &response)
@@ -712,9 +744,13 @@ func (rs *RedisStorage) SetDerivedChargers(key string, dcs utils.DerivedChargers
 	return err
 }
 
-func (rs *RedisStorage) SetCdrStats(cs *CdrStats) error {
+func (rs *RedisStorage) SetCdrStats(cs *CdrStats, massPipe io.Writer) error {
 	marshaled, err := rs.ms.Marshal(cs)
-	err = rs.db.Set(CDR_STATS_PREFIX+cs.Id, marshaled)
+	if massPipe != nil {
+		_, err = massPipe.Write(GenRedisProtocol("SET", CDR_STATS_PREFIX+cs.Id, string(marshaled)))
+	} else {
+		err = rs.db.Set(CDR_STATS_PREFIX+cs.Id, marshaled)
+	}
 	return err
 }
 
@@ -790,4 +826,37 @@ func (rs *RedisStorage) LogActionTiming(source string, at *ActionTiming, as Acti
 func (rs *RedisStorage) LogError(uuid, source, runid, errstr string) (err error) {
 	err = rs.db.Set(LOG_ERR+source+runid+"_"+uuid, []byte(errstr))
 	return
+}
+
+func (rs *RedisStorage) RatingMassInsert(loader TPLoader, flush, verbose bool) error {
+	// check for redis-cli
+	path, err := exec.LookPath("redis-cli")
+	if err != nil {
+		Logger.Warning("redis-cli not found in path")
+	}
+	Logger.Info(fmt.Sprintf("found redis-cli at %s", path))
+	// start mass insert
+	cmd := exec.Command("redis-cli", "--pipe")
+	inPipe, err := cmd.StdinPipe()
+	if err != nil {
+		inPipe = nil
+		Logger.Err("error getting stdin pipe to redis-cli")
+	}
+	outPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		Logger.Warning("error getting stdout pipe to redis-cli")
+	}
+	cmd.Start()
+	err = loader.WriteRating(inPipe, flush, verbose)
+	// close mass insert
+	inPipe.Close()
+	buf := make([]byte, 256)
+	outPipe.Read(buf)
+	//log.Print(string(buf))
+	cmd.Wait()
+	return err
+}
+
+func (rs *RedisStorage) AccountingMassInsert(loader TPLoader, verbose bool) error {
+	return nil
 }

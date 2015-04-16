@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
+	"io"
 	"reflect"
 
 	"github.com/cgrates/cgrates/utils"
@@ -73,20 +74,21 @@ type RatingStorage interface {
 	CacheRating([]string, []string, []string, []string, []string) error
 	HasData(string, string) (bool, error)
 	GetRatingPlan(string, bool) (*RatingPlan, error)
-	SetRatingPlan(*RatingPlan) error
+	SetRatingPlan(*RatingPlan, io.Writer) error
 	GetRatingProfile(string, bool) (*RatingProfile, error)
-	SetRatingProfile(*RatingProfile) error
+	SetRatingProfile(*RatingProfile, io.Writer) error
 	GetRpAlias(string, bool) (string, error)
-	SetRpAlias(string, string) error
+	SetRpAlias(string, string, io.Writer) error
 	RemoveRpAliases([]*TenantRatingSubject) error
 	GetRPAliases(string, string, bool) ([]string, error)
 	GetDestination(string) (*Destination, error)
-	SetDestination(*Destination) error
+	SetDestination(*Destination, io.Writer) error
 	GetLCR(string, bool) (*LCR, error)
-	SetLCR(*LCR) error
-	SetCdrStats(*CdrStats) error
+	SetLCR(*LCR, io.Writer) error
+	SetCdrStats(*CdrStats, io.Writer) error
 	GetCdrStats(string) (*CdrStats, error)
 	GetAllCdrStats() ([]*CdrStats, error)
+	RatingMassInsert(TPLoader, bool, bool) error
 }
 
 type AccountingStorage interface {
@@ -108,6 +110,7 @@ type AccountingStorage interface {
 	GetAllActionTimings() (map[string]ActionPlan, error)
 	GetDerivedChargers(string, bool) (utils.DerivedChargers, error)
 	SetDerivedChargers(string, utils.DerivedChargers) error
+	AccountingMassInsert(TPLoader, bool) error
 }
 
 type CdrStorage interface {

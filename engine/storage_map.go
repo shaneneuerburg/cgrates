@@ -23,6 +23,7 @@ import (
 	"compress/zlib"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 
 	"strings"
@@ -211,7 +212,7 @@ func (ms *MapStorage) GetRatingPlan(key string, skipCache bool) (rp *RatingPlan,
 	return
 }
 
-func (ms *MapStorage) SetRatingPlan(rp *RatingPlan) (err error) {
+func (ms *MapStorage) SetRatingPlan(rp *RatingPlan, massPipe io.Writer) (err error) {
 	result, err := ms.ms.Marshal(rp)
 	var b bytes.Buffer
 	w := zlib.NewWriter(&b)
@@ -246,7 +247,7 @@ func (ms *MapStorage) GetRatingProfile(key string, skipCache bool) (rpf *RatingP
 	return
 }
 
-func (ms *MapStorage) SetRatingProfile(rpf *RatingProfile) (err error) {
+func (ms *MapStorage) SetRatingProfile(rpf *RatingProfile, massPipe io.Writer) (err error) {
 	result, err := ms.ms.Marshal(rpf)
 	ms.dict[RATING_PROFILE_PREFIX+rpf.Id] = result
 	response := 0
@@ -275,7 +276,7 @@ func (ms *MapStorage) GetLCR(key string, skipCache bool) (lcr *LCR, err error) {
 	return
 }
 
-func (ms *MapStorage) SetLCR(lcr *LCR) (err error) {
+func (ms *MapStorage) SetLCR(lcr *LCR, massPipe io.Writer) (err error) {
 	result, err := ms.ms.Marshal(lcr)
 	ms.dict[LCR_PREFIX+lcr.GetId()] = result
 	//cache2go.Cache(LCR_PREFIX+key, lcr)
@@ -300,7 +301,7 @@ func (ms *MapStorage) GetRpAlias(key string, skipCache bool) (alias string, err 
 	return
 }
 
-func (ms *MapStorage) SetRpAlias(key, alias string) (err error) {
+func (ms *MapStorage) SetRpAlias(key, alias string, massPipe io.Writer) (err error) {
 	ms.dict[RP_ALIAS_PREFIX+key] = []byte(alias)
 	//cache2go.Cache(ALIAS_PREFIX+key, alias)
 	return
@@ -420,7 +421,7 @@ func (ms *MapStorage) GetDestination(key string) (dest *Destination, err error) 
 	return
 }
 
-func (ms *MapStorage) SetDestination(dest *Destination) (err error) {
+func (ms *MapStorage) SetDestination(dest *Destination, massPipe io.Writer) (err error) {
 	result, err := ms.ms.Marshal(dest)
 	var b bytes.Buffer
 	w := zlib.NewWriter(&b)
@@ -571,7 +572,7 @@ func (ms *MapStorage) SetDerivedChargers(key string, dcs utils.DerivedChargers) 
 	return err
 }
 
-func (ms *MapStorage) SetCdrStats(cs *CdrStats) error {
+func (ms *MapStorage) SetCdrStats(cs *CdrStats, massPipe io.Writer) error {
 	result, err := ms.ms.Marshal(cs)
 	ms.dict[CDR_STATS_PREFIX+cs.Id] = result
 	return err
@@ -641,5 +642,15 @@ func (ms *MapStorage) LogActionTiming(source string, at *ActionTiming, as Action
 
 func (ms *MapStorage) LogError(uuid, source, runid, errstr string) (err error) {
 	ms.dict[LOG_ERR+source+runid+"_"+uuid] = []byte(errstr)
+	return nil
+}
+
+func (ms *MapStorage) RatingMassInsert(loader TPLoader, flush, verbose bool) error {
+	loader.WriteRating(nil, flush, verbose)
+	return nil
+}
+
+func (ms *MapStorage) AccountingMassInsert(loader TPLoader, verbose bool) error {
+	loader.WriteAccounting(nil, verbose)
 	return nil
 }

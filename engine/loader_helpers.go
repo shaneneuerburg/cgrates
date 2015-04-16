@@ -22,6 +22,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -93,6 +94,8 @@ type TPLoader interface {
 	GetLoadedIds(string) ([]string, error)
 	ShowStatistics()
 	WriteToDatabase(bool, bool) error
+	WriteRating(io.Writer, bool, bool) error
+	WriteAccounting(io.Writer, bool) error
 }
 
 func NewLoadRate(tag, connectFee, price, ratedUnits, rateIncrements, groupInterval string) (r *utils.TPRate, err error) {
