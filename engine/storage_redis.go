@@ -43,7 +43,7 @@ func NewRedisStorage(address string, db int, pass, mrshlerStr string) (*RedisSto
 
 	var mrshler Marshaler
 	if mrshlerStr == utils.MSGPACK {
-		mrshler = NewCodecMsgpackMarshaler()
+		mrshler = new(MsgpackMarshaler)
 	} else if mrshlerStr == utils.JSON {
 		mrshler = new(JSONMarshaler)
 	} else {

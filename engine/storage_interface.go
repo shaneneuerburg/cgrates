@@ -22,11 +22,10 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
-	"reflect"
 
 	"github.com/cgrates/cgrates/utils"
-	"github.com/ugorji/go/codec"
 	"gopkg.in/mgo.v2/bson"
+	msgpack "gopkg.in/vmihailenco/msgpack.v2"
 )
 
 type Storage interface {
@@ -180,6 +179,7 @@ func (jbm *JSONBufMarshaler) Unmarshal(data []byte, v interface{}) error {
 	return json.NewDecoder(bytes.NewBuffer(data)).Decode(v)
 }
 
+/*
 type CodecMsgpackMarshaler struct {
 	mh *codec.MsgpackHandle
 }
@@ -219,7 +219,7 @@ func (bm *BincMarshaler) Marshal(v interface{}) (b []byte, err error) {
 func (bm *BincMarshaler) Unmarshal(data []byte, v interface{}) error {
 	dec := codec.NewDecoderBytes(data, bm.bh)
 	return dec.Decode(&v)
-}
+}*/
 
 type GOBMarshaler struct{}
 
@@ -232,4 +232,14 @@ func (gm *GOBMarshaler) Marshal(v interface{}) (data []byte, err error) {
 
 func (gm *GOBMarshaler) Unmarshal(data []byte, v interface{}) error {
 	return gob.NewDecoder(bytes.NewBuffer(data)).Decode(v)
+}
+
+type MsgpackMarshaler struct{}
+
+func (jm *MsgpackMarshaler) Marshal(v interface{}) ([]byte, error) {
+	return msgpack.Marshal(v)
+}
+
+func (jm *MsgpackMarshaler) Unmarshal(data []byte, v interface{}) error {
+	return msgpack.Unmarshal(data, v)
 }

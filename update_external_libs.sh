@@ -8,7 +8,7 @@ go get -u -v github.com/cgrates/gorm
 go get -u -v github.com/cgrates/kamevapi
 
 go get -v -u github.com/lib/pq
-go get -v -u github.com/ugorji/go/codec
+go get -v -u gopkg.in/vmihailenco/msgpack.v2
 go get -v -u gopkg.in/mgo.v2
 go get -u -v github.com/go-sql-driver/mysql
 go get -u -v github.com/hoisie/redis

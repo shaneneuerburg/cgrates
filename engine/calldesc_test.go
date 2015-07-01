@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	marsh = NewCodecMsgpackMarshaler()
+	marsh = new(MsgpackMarshaler)
 )
 
 func init() {

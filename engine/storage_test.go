@@ -34,7 +34,7 @@ func TestMsgpackStructsAdded(t *testing.T) {
 		First  string
 		Second string
 	}{}
-	m := NewCodecMsgpackMarshaler()
+	m := new(MsgpackMarshaler)
 	buf, err := m.Marshal(&a)
 	if err != nil {
 		t.Error("error marshaling structure: ", err)
@@ -51,7 +51,7 @@ func TestMsgpackStructsMissing(t *testing.T) {
 		Second string
 	}{"test1", "test2"}
 	var b = struct{ First string }{}
-	m := NewCodecMsgpackMarshaler()
+	m := new(MsgpackMarshaler)
 	buf, err := m.Marshal(&a)
 	if err != nil {
 		t.Error("error marshaling structure: ", err)
@@ -64,14 +64,14 @@ func TestMsgpackStructsMissing(t *testing.T) {
 
 func TestMsgpackTime(t *testing.T) {
 	t1 := time.Date(2013, 8, 28, 22, 27, 0, 0, time.UTC)
-	m := NewCodecMsgpackMarshaler()
+	m := new(MsgpackMarshaler)
 	buf, err := m.Marshal(&t1)
 	if err != nil {
 		t.Error("error marshaling structure: ", err)
 	}
 	var t2 time.Time
 	err = m.Unmarshal(buf, &t2)
-	if err != nil || t1 != t2 || !t1.Equal(t2) {
+	if err != nil || !t1.Equal(t2) {
 		t.Errorf("error unmarshalling structure: %#v %#v %v", t1, t2, err)
 	}
 }
@@ -279,6 +279,31 @@ func BenchmarkMarshallerBSONStoreRestore(b *testing.B) {
 	}
 }
 
+func BenchmarkMarshallerMsgpackStoreRestore(b *testing.B) {
+	b.StopTimer()
+	i := &RateInterval{
+		Timing: &RITiming{
+			Months:    []time.Month{time.February},
+			MonthDays: []int{1},
+			WeekDays:  []time.Weekday{time.Wednesday, time.Thursday},
+			StartTime: "14:30:00",
+			EndTime:   "15:00:00"}}
+	ap := &RatingPlan{Id: "test"}
+	ap.AddRateInterval("NAT", i)
+	ub := GetUB()
+
+	ap1 := RatingPlan{}
+	ub1 := &Account{}
+	b.StartTimer()
+	ms := new(MsgpackMarshaler)
+	for i := 0; i < b.N; i++ {
+		result, _ := ms.Marshal(ap)
+		ms.Unmarshal(result, ap1)
+		result, _ = ms.Marshal(ub)
+		ms.Unmarshal(result, ub1)
+	}
+}
+
 func BenchmarkMarshallerJSONBufStoreRestore(b *testing.B) {
 	b.StopTimer()
 	i := &RateInterval{
@@ -327,6 +352,7 @@ func BenchmarkMarshallerGOBStoreRestore(b *testing.B) {
 	}
 }
 
+/*
 func BenchmarkMarshallerCodecMsgpackStoreRestore(b *testing.B) {
 	b.StopTimer()
 	i := &RateInterval{
@@ -376,3 +402,4 @@ func BenchmarkMarshallerBincStoreRestore(b *testing.B) {
 		ms.Unmarshal(result, ub1)
 	}
 }
+*/

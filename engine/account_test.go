@@ -33,7 +33,7 @@ var (
 
 func TestBalanceStoreRestore(t *testing.T) {
 	b := &Balance{Value: 14, Weight: 1, Uuid: "test", ExpirationDate: time.Date(2013, time.July, 15, 17, 48, 0, 0, time.UTC)}
-	marsh := NewCodecMsgpackMarshaler()
+	marsh := new(MsgpackMarshaler)
 	output, err := marsh.Marshal(b)
 	if err != nil {
 		t.Error("Error storing balance: ", err)
