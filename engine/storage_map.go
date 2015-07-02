@@ -566,7 +566,7 @@ func (ms *MapStorage) GetPubSubSubscribers() (result map[string]map[string]time.
 	for key, value := range ms.dict {
 		if strings.HasPrefix(key, utils.PUBSUB_SUBSCRIBERS_PREFIX) {
 			subs := make(map[string]time.Time)
-			if err = ms.ms.Unmarshal(value, subs); err == nil {
+			if err = ms.ms.Unmarshal(value, &subs); err == nil {
 				result[key[len(utils.PUBSUB_SUBSCRIBERS_PREFIX):]] = subs
 			}
 		}
