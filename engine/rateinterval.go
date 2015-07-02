@@ -119,6 +119,7 @@ func (rit *RITiming) CronString() string {
 // Returns wheter the Timing is active at the specified time
 func (rit *RITiming) IsActiveAt(t time.Time, endTime bool) bool {
 	// if the received time represents an endtime consider it 24 instead of 0
+	t = t.In(time.UTC)
 	hour := t.Hour()
 	if endTime && hour == 0 {
 		hour = 24
