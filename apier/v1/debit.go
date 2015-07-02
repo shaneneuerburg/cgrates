@@ -19,15 +19,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"strconv"
-	"time"
-
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/utils"
 )
 
-// Returns MaxUsage (for calls in seconds), -1 for no limit
-func (self *ApierV1) GetMaxUsage(usageRecord engine.UsageRecord, maxUsage *float64) error {
+func (self *ApierV1) DebitUsage(usageRecord engine.UsageRecord, reply *string) error {
+	if missing := utils.MissingStructFields(&usageRecord, []string{"Account", "Destination", "Usage"}); len(missing) != 0 {
+		return utils.NewErrMandatoryIeMissing(missing...)
+	}
 	if usageRecord.TOR == "" {
 		usageRecord.TOR = utils.VOICE
 	}
@@ -46,24 +45,17 @@ func (self *ApierV1) GetMaxUsage(usageRecord engine.UsageRecord, maxUsage *float
 	if usageRecord.Subject == "" {
 		usageRecord.Subject = usageRecord.Account
 	}
-	if usageRecord.SetupTime == "" {
-		usageRecord.SetupTime = utils.META_NOW
+	if usageRecord.AnswerTime == "" {
+		usageRecord.AnswerTime = utils.META_NOW
 	}
-	if usageRecord.Usage == "" {
-		usageRecord.Usage = strconv.FormatFloat(self.Config.MaxCallDuration.Seconds(), 'f', -1, 64)
-	}
-	storedCdr, err := usageRecord.AsStoredCdr()
+	cd, err := usageRecord.AsCallDescriptor()
 	if err != nil {
 		return utils.NewErrServerError(err)
 	}
-	var maxDur float64
-	if err := self.Responder.GetDerivedMaxSessionTime(storedCdr, &maxDur); err != nil {
-		return err
+	var cc engine.CallCost
+	if err := self.Responder.Debit(cd, &cc); err != nil {
+		return utils.NewErrServerError(err)
 	}
-	if maxDur == -1.0 {
-		*maxUsage = -1.0
-		return nil
-	}
-	*maxUsage = time.Duration(maxDur).Seconds()
+	*reply = OK
 	return nil
 }
