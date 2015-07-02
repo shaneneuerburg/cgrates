@@ -22,7 +22,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
-	"time"
 
 	"github.com/cgrates/cgrates/utils"
 	"gopkg.in/mgo.v2/bson"
@@ -79,8 +78,9 @@ type AccountingStorage interface {
 	SetAccount(*Account) error
 	GetCdrStatsQueue(string) (*StatsQueue, error)
 	SetCdrStatsQueue(*StatsQueue) error
-	GetPubSubSubscribers() (map[string]map[string]time.Time, error)
-	SetPubSubSubscribers(string, map[string]time.Time) error
+	GetSubscribers() (map[string]*SubscriberData, error)
+	SetSubscriber(string, *SubscriberData) error
+	RemoveSubscriber(string) error
 }
 
 type CdrStorage interface {
