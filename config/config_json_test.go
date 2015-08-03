@@ -38,14 +38,16 @@ func TestDfNewdfCgrJsonCfgFromReader(t *testing.T) {
 
 func TestDfGeneralJsonCfg(t *testing.T) {
 	eCfg := &GeneralJsonCfg{
-		Http_skip_tls_veify: utils.BoolPointer(false),
-		Rounding_decimals:   utils.IntPointer(10),
-		Dbdata_encoding:     utils.StringPointer("msgpack"),
-		Tpexport_dir:        utils.StringPointer("/var/log/cgrates/tpe"),
-		Default_reqtype:     utils.StringPointer(utils.META_RATED),
-		Default_category:    utils.StringPointer("call"),
-		Default_tenant:      utils.StringPointer("cgrates.org"),
-		Default_subject:     utils.StringPointer("cgrates")}
+		Http_skip_tls_verify: utils.BoolPointer(false),
+		Rounding_decimals:    utils.IntPointer(10),
+		Dbdata_encoding:      utils.StringPointer("msgpack"),
+		Tpexport_dir:         utils.StringPointer("/var/log/cgrates/tpe"),
+		Default_reqtype:      utils.StringPointer(utils.META_RATED),
+		Default_category:     utils.StringPointer("call"),
+		Default_tenant:       utils.StringPointer("cgrates.org"),
+		Default_subject:      utils.StringPointer("cgrates"),
+		Connect_attempts:     utils.IntPointer(3),
+		Reconnects:           utils.IntPointer(-1)}
 	if gCfg, err := dfCgrJsonCfg.GeneralJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, gCfg) {
@@ -74,7 +76,7 @@ func TestDfDbJsonCfg(t *testing.T) {
 		Db_user:   utils.StringPointer(""),
 		Db_passwd: utils.StringPointer(""),
 	}
-	if cfg, err := dfCgrJsonCfg.DbJsonCfg(RATINGDB_JSN); err != nil {
+	if cfg, err := dfCgrJsonCfg.DbJsonCfg(TPDB_JSN); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Error("Received: ", cfg)
@@ -87,7 +89,7 @@ func TestDfDbJsonCfg(t *testing.T) {
 		Db_user:   utils.StringPointer(""),
 		Db_passwd: utils.StringPointer(""),
 	}
-	if cfg, err := dfCgrJsonCfg.DbJsonCfg(ACCOUNTINGDB_JSN); err != nil {
+	if cfg, err := dfCgrJsonCfg.DbJsonCfg(DATADB_JSN); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Error("Received: ", cfg)
@@ -99,8 +101,8 @@ func TestDfDbJsonCfg(t *testing.T) {
 		Db_name:        utils.StringPointer("cgrates"),
 		Db_user:        utils.StringPointer("cgrates"),
 		Db_passwd:      utils.StringPointer("CGRateS.org"),
-		Max_open_conns: utils.IntPointer(0),
-		Max_idle_conns: utils.IntPointer(-1),
+		Max_open_conns: utils.IntPointer(100),
+		Max_idle_conns: utils.IntPointer(10),
 	}
 	if cfg, err := dfCgrJsonCfg.DbJsonCfg(STORDB_JSN); err != nil {
 		t.Error(err)
@@ -119,7 +121,8 @@ func TestDfBalancerJsonCfg(t *testing.T) {
 }
 
 func TestDfRaterJsonCfg(t *testing.T) {
-	eCfg := &RaterJsonCfg{Enabled: utils.BoolPointer(false), Balancer: utils.StringPointer(""), Cdrstats: utils.StringPointer("")}
+	eCfg := &RaterJsonCfg{Enabled: utils.BoolPointer(false), Balancer: utils.StringPointer(""), Cdrstats: utils.StringPointer(""),
+		Historys: utils.StringPointer(""), Pubsubs: utils.StringPointer(""), Users: utils.StringPointer("")}
 	if cfg, err := dfCgrJsonCfg.RaterJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
@@ -257,6 +260,7 @@ func TestDfCdreJsonCfgs(t *testing.T) {
 }
 
 func TestDfCdrcJsonCfg(t *testing.T) {
+	eFields := []*CdrFieldJsonCfg{}
 	cdrFields := []*CdrFieldJsonCfg{
 		&CdrFieldJsonCfg{Tag: utils.StringPointer("tor"), Cdr_field_id: utils.StringPointer("tor"), Type: utils.StringPointer(utils.CDRFIELD),
 			Value: utils.StringPointer("2"), Mandatory: utils.BoolPointer(true)},
@@ -286,22 +290,28 @@ func TestDfCdrcJsonCfg(t *testing.T) {
 	eCfg := map[string]*CdrcJsonCfg{
 		"*default": &CdrcJsonCfg{
 			Enabled:                    utils.BoolPointer(false),
+			Dry_run:                    utils.BoolPointer(false),
 			Cdrs:                       utils.StringPointer("internal"),
 			Cdr_format:                 utils.StringPointer("csv"),
 			Field_separator:            utils.StringPointer(","),
 			Run_delay:                  utils.IntPointer(0),
+			Max_open_files:             utils.IntPointer(1024),
 			Data_usage_multiply_factor: utils.Float64Pointer(1024.0),
 			Cdr_in_dir:                 utils.StringPointer("/var/log/cgrates/cdrc/in"),
 			Cdr_out_dir:                utils.StringPointer("/var/log/cgrates/cdrc/out"),
+			Failed_calls_prefix:        utils.StringPointer("missed_calls"),
 			Cdr_source_id:              utils.StringPointer("freeswitch_csv"),
 			Cdr_filter:                 utils.StringPointer(""),
-			Cdr_fields:                 &cdrFields,
+			Partial_record_cache:       utils.StringPointer("10s"),
+			Header_fields:              &eFields,
+			Content_fields:             &cdrFields,
+			Trailer_fields:             &eFields,
 		},
 	}
 	if cfg, err := dfCgrJsonCfg.CdrcJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Error("Received: ", cfg)
+		t.Error("Received: ", cfg["*default"])
 	}
 }
 
@@ -394,18 +404,6 @@ func TestDfHistServJsonCfg(t *testing.T) {
 	}
 }
 
-func TestDfHistAgentJsonCfg(t *testing.T) {
-	eCfg := &HistAgentJsonCfg{
-		Enabled: utils.BoolPointer(false),
-		Server:  utils.StringPointer("internal"),
-	}
-	if cfg, err := dfCgrJsonCfg.HistAgentJsonCfg(); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Error("Received: ", cfg)
-	}
-}
-
 func TestDfPubSubServJsonCfg(t *testing.T) {
 	eCfg := &PubSubServJsonCfg{
 		Enabled: utils.BoolPointer(false),
@@ -417,12 +415,12 @@ func TestDfPubSubServJsonCfg(t *testing.T) {
 	}
 }
 
-func TestDfPubSubAgentJsonCfg(t *testing.T) {
-	eCfg := &PubSubAgentJsonCfg{
+func TestDfUserServJsonCfg(t *testing.T) {
+	eCfg := &UserServJsonCfg{
 		Enabled: utils.BoolPointer(false),
-		Server:  utils.StringPointer("internal"),
+		Indexes: utils.StringSlicePointer([]string{}),
 	}
-	if cfg, err := dfCgrJsonCfg.PubSubAgentJsonCfg(); err != nil {
+	if cfg, err := dfCgrJsonCfg.UserServJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		t.Error("Received: ", cfg)
@@ -430,6 +428,7 @@ func TestDfPubSubAgentJsonCfg(t *testing.T) {
 }
 
 func TestDfMailerJsonCfg(t *testing.T) {
+
 	eCfg := &MailerJsonCfg{
 		Server:       utils.StringPointer("localhost"),
 		Auth_user:    utils.StringPointer("cgrates"),
@@ -473,23 +472,13 @@ func TestNewCgrJsonCfgFromFile(t *testing.T) {
 			Cdr_in_dir:                 utils.StringPointer("/tmp/cgrates/cdrc2/in"),
 			Cdr_out_dir:                utils.StringPointer("/tmp/cgrates/cdrc2/out"),
 			Cdr_source_id:              utils.StringPointer("csv2"),
-			Cdr_fields:                 &cdrFields,
+			Content_fields:             &cdrFields,
 		},
 	}
 	if cfg, err := cgrJsonCfg.CdrcJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfgCdrc, cfg) {
-		t.Error("Received: ", cfg)
-	}
-	if cfg, err := cgrJsonCfg.HistAgentJsonCfg(); err != nil {
-		t.Error(err)
-	} else if cfg != nil {
-		t.Error("Received: ", cfg)
-	}
-	if cfg, err := cgrJsonCfg.PubSubAgentJsonCfg(); err != nil {
-		t.Error(err)
-	} else if cfg != nil {
-		t.Error("Received: ", cfg)
+		t.Error("Received: ", cfg["CDRC-CSV2"])
 	}
 	eCfgSmFs := &SmFsJsonCfg{
 		Enabled: utils.BoolPointer(true),

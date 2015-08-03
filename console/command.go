@@ -84,3 +84,13 @@ func GetCommandValue(command string, verbose bool) (Commander, error) {
 type StringWrapper struct {
 	Item string
 }
+
+type StringSliceWrapper struct {
+	Items []string
+}
+
+type StringMapWrapper struct {
+	Items map[string]string
+}
+
+type EmptyWrapper struct{}

@@ -21,6 +21,7 @@ package config
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/cgrates/cgrates/utils"
 )
@@ -41,11 +42,15 @@ func TestLoadCdrcConfigMultipleFiles(t *testing.T) {
 			FieldSeparator:          ',',
 			DataUsageMultiplyFactor: 1024,
 			RunDelay:                0,
+			MaxOpenFiles:            1024,
 			CdrInDir:                "/var/log/cgrates/cdrc/in",
 			CdrOutDir:               "/var/log/cgrates/cdrc/out",
+			FailedCallsPrefix:       "missed_calls",
 			CdrSourceId:             "freeswitch_csv",
 			CdrFilter:               utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP),
-			CdrFields: []*CfgCdrField{
+			PartialRecordCache:      time.Duration(10) * time.Second,
+			HeaderFields:            make([]*CfgCdrField, 0),
+			ContentFields: []*CfgCdrField{
 				&CfgCdrField{Tag: "tor", Type: "cdrfield", CdrFieldId: "tor", Value: utils.ParseRSRFieldsMustCompile("2", utils.INFIELD_SEP),
 					FieldFilter: utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP), Width: 0, Strip: "", Padding: "", Layout: "", Mandatory: true},
 				&CfgCdrField{Tag: "accid", Type: "cdrfield", CdrFieldId: "accid", Value: utils.ParseRSRFieldsMustCompile("3", utils.INFIELD_SEP),
@@ -71,6 +76,7 @@ func TestLoadCdrcConfigMultipleFiles(t *testing.T) {
 				&CfgCdrField{Tag: "usage", Type: "cdrfield", CdrFieldId: "usage", Value: utils.ParseRSRFieldsMustCompile("13", utils.INFIELD_SEP),
 					FieldFilter: utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP), Width: 0, Strip: "", Padding: "", Layout: "", Mandatory: true},
 			},
+			TrailerFields: make([]*CfgCdrField, 0),
 		},
 	}
 	eCgrCfg.CdrcProfiles["/tmp/cgrates/cdrc1/in"] = map[string]*CdrcConfig{
@@ -81,11 +87,13 @@ func TestLoadCdrcConfigMultipleFiles(t *testing.T) {
 			FieldSeparator:          ',',
 			DataUsageMultiplyFactor: 1024,
 			RunDelay:                0,
+			MaxOpenFiles:            1024,
 			CdrInDir:                "/tmp/cgrates/cdrc1/in",
 			CdrOutDir:               "/tmp/cgrates/cdrc1/out",
 			CdrSourceId:             "csv1",
 			CdrFilter:               utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP),
-			CdrFields: []*CfgCdrField{
+			HeaderFields:            make([]*CfgCdrField, 0),
+			ContentFields: []*CfgCdrField{
 				&CfgCdrField{Tag: "tor", Type: "cdrfield", CdrFieldId: "tor", Value: utils.ParseRSRFieldsMustCompile("2", utils.INFIELD_SEP),
 					FieldFilter: utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP), Width: 0, Strip: "", Padding: "", Layout: "", Mandatory: true},
 				&CfgCdrField{Tag: "accid", Type: "cdrfield", CdrFieldId: "accid", Value: utils.ParseRSRFieldsMustCompile("3", utils.INFIELD_SEP),
@@ -111,6 +119,7 @@ func TestLoadCdrcConfigMultipleFiles(t *testing.T) {
 				&CfgCdrField{Tag: "usage", Type: "cdrfield", CdrFieldId: "usage", Value: utils.ParseRSRFieldsMustCompile("13", utils.INFIELD_SEP),
 					FieldFilter: utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP), Width: 0, Strip: "", Padding: "", Layout: "", Mandatory: true},
 			},
+			TrailerFields: make([]*CfgCdrField, 0),
 		},
 	}
 	eCgrCfg.CdrcProfiles["/tmp/cgrates/cdrc2/in"] = map[string]*CdrcConfig{
@@ -121,16 +130,19 @@ func TestLoadCdrcConfigMultipleFiles(t *testing.T) {
 			FieldSeparator:          ',',
 			DataUsageMultiplyFactor: 0.000976563,
 			RunDelay:                0,
+			MaxOpenFiles:            1024,
 			CdrInDir:                "/tmp/cgrates/cdrc2/in",
 			CdrOutDir:               "/tmp/cgrates/cdrc2/out",
 			CdrSourceId:             "csv2",
 			CdrFilter:               utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP),
-			CdrFields: []*CfgCdrField{
+			HeaderFields:            make([]*CfgCdrField, 0),
+			ContentFields: []*CfgCdrField{
 				&CfgCdrField{Tag: "", Type: "", CdrFieldId: "tor", Value: utils.ParseRSRFieldsMustCompile("~7:s/^(voice|data|sms|generic)$/*$1/", utils.INFIELD_SEP),
 					FieldFilter: utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP), Width: 0, Strip: "", Padding: "", Layout: "", Mandatory: false},
 				&CfgCdrField{Tag: "", Type: "", CdrFieldId: "answer_time", Value: utils.ParseRSRFieldsMustCompile("2", utils.INFIELD_SEP),
 					FieldFilter: utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP), Width: 0, Strip: "", Padding: "", Layout: "", Mandatory: false},
 			},
+			TrailerFields: make([]*CfgCdrField, 0),
 		},
 	}
 	eCgrCfg.CdrcProfiles["/tmp/cgrates/cdrc3/in"] = map[string]*CdrcConfig{
@@ -141,11 +153,13 @@ func TestLoadCdrcConfigMultipleFiles(t *testing.T) {
 			FieldSeparator:          ',',
 			DataUsageMultiplyFactor: 1024,
 			RunDelay:                0,
+			MaxOpenFiles:            1024,
 			CdrInDir:                "/tmp/cgrates/cdrc3/in",
 			CdrOutDir:               "/tmp/cgrates/cdrc3/out",
 			CdrSourceId:             "csv3",
 			CdrFilter:               utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP),
-			CdrFields: []*CfgCdrField{
+			HeaderFields:            make([]*CfgCdrField, 0),
+			ContentFields: []*CfgCdrField{
 				&CfgCdrField{Tag: "tor", Type: "cdrfield", CdrFieldId: "tor", Value: utils.ParseRSRFieldsMustCompile("2", utils.INFIELD_SEP),
 					FieldFilter: utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP), Width: 0, Strip: "", Padding: "", Layout: "", Mandatory: true},
 				&CfgCdrField{Tag: "accid", Type: "cdrfield", CdrFieldId: "accid", Value: utils.ParseRSRFieldsMustCompile("3", utils.INFIELD_SEP),
@@ -171,6 +185,7 @@ func TestLoadCdrcConfigMultipleFiles(t *testing.T) {
 				&CfgCdrField{Tag: "usage", Type: "cdrfield", CdrFieldId: "usage", Value: utils.ParseRSRFieldsMustCompile("13", utils.INFIELD_SEP),
 					FieldFilter: utils.ParseRSRFieldsMustCompile("", utils.INFIELD_SEP), Width: 0, Strip: "", Padding: "", Layout: "", Mandatory: true},
 			},
+			TrailerFields: make([]*CfgCdrField, 0),
 		},
 	}
 	if !reflect.DeepEqual(eCgrCfg.CdrcProfiles, cgrCfg.CdrcProfiles) {

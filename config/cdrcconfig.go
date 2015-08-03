@@ -26,16 +26,22 @@ import (
 
 type CdrcConfig struct {
 	Enabled                 bool            // Enable/Disable the profile
+	DryRun                  bool            // Do not post CDRs to the server
 	Cdrs                    string          // The address where CDRs can be reached
-	CdrFormat               string          // The type of CDR file to process <csv>
+	CdrFormat               string          // The type of CDR file to process <csv|opensips_flatstore>
 	FieldSeparator          rune            // The separator to use when reading csvs
 	DataUsageMultiplyFactor float64         // Conversion factor for data usage
 	RunDelay                time.Duration   // Delay between runs, 0 for inotify driven requests
+	MaxOpenFiles            int             // Maximum number of files opened simultaneously
 	CdrInDir                string          // Folder to process CDRs from
 	CdrOutDir               string          // Folder to move processed CDRs to
+	FailedCallsPrefix       string          // Used in case of flatstore CDRs to avoid searching for BYE records
 	CdrSourceId             string          // Source identifier for the processed CDRs
 	CdrFilter               utils.RSRFields // Filter CDR records to import
-	CdrFields               []*CfgCdrField  // List of fields to be processed
+	PartialRecordCache      time.Duration   // Duration to cache partial records when not pairing
+	HeaderFields            []*CfgCdrField
+	ContentFields           []*CfgCdrField
+	TrailerFields           []*CfgCdrField
 }
 
 func (self *CdrcConfig) loadFromJsonCfg(jsnCfg *CdrcJsonCfg) error {
@@ -45,6 +51,9 @@ func (self *CdrcConfig) loadFromJsonCfg(jsnCfg *CdrcJsonCfg) error {
 	var err error
 	if jsnCfg.Enabled != nil {
 		self.Enabled = *jsnCfg.Enabled
+	}
+	if jsnCfg.Dry_run != nil {
+		self.DryRun = *jsnCfg.Dry_run
 	}
 	if jsnCfg.Cdrs != nil {
 		self.Cdrs = *jsnCfg.Cdrs
@@ -62,11 +71,17 @@ func (self *CdrcConfig) loadFromJsonCfg(jsnCfg *CdrcJsonCfg) error {
 	if jsnCfg.Run_delay != nil {
 		self.RunDelay = time.Duration(*jsnCfg.Run_delay) * time.Second
 	}
+	if jsnCfg.Max_open_files != nil {
+		self.MaxOpenFiles = *jsnCfg.Max_open_files
+	}
 	if jsnCfg.Cdr_in_dir != nil {
 		self.CdrInDir = *jsnCfg.Cdr_in_dir
 	}
 	if jsnCfg.Cdr_out_dir != nil {
 		self.CdrOutDir = *jsnCfg.Cdr_out_dir
+	}
+	if jsnCfg.Failed_calls_prefix != nil {
+		self.FailedCallsPrefix = *jsnCfg.Failed_calls_prefix
 	}
 	if jsnCfg.Cdr_source_id != nil {
 		self.CdrSourceId = *jsnCfg.Cdr_source_id
@@ -76,8 +91,23 @@ func (self *CdrcConfig) loadFromJsonCfg(jsnCfg *CdrcJsonCfg) error {
 			return err
 		}
 	}
-	if jsnCfg.Cdr_fields != nil {
-		if self.CdrFields, err = CfgCdrFieldsFromCdrFieldsJsonCfg(*jsnCfg.Cdr_fields); err != nil {
+	if jsnCfg.Partial_record_cache != nil {
+		if self.PartialRecordCache, err = utils.ParseDurationWithSecs(*jsnCfg.Partial_record_cache); err != nil {
+			return err
+		}
+	}
+	if jsnCfg.Header_fields != nil {
+		if self.HeaderFields, err = CfgCdrFieldsFromCdrFieldsJsonCfg(*jsnCfg.Header_fields); err != nil {
+			return err
+		}
+	}
+	if jsnCfg.Content_fields != nil {
+		if self.ContentFields, err = CfgCdrFieldsFromCdrFieldsJsonCfg(*jsnCfg.Content_fields); err != nil {
+			return err
+		}
+	}
+	if jsnCfg.Trailer_fields != nil {
+		if self.TrailerFields, err = CfgCdrFieldsFromCdrFieldsJsonCfg(*jsnCfg.Trailer_fields); err != nil {
 			return err
 		}
 	}
@@ -93,13 +123,24 @@ func (self *CdrcConfig) Clone() *CdrcConfig {
 	clnCdrc.FieldSeparator = self.FieldSeparator
 	clnCdrc.DataUsageMultiplyFactor = self.DataUsageMultiplyFactor
 	clnCdrc.RunDelay = self.RunDelay
+	clnCdrc.MaxOpenFiles = self.MaxOpenFiles
 	clnCdrc.CdrInDir = self.CdrInDir
 	clnCdrc.CdrOutDir = self.CdrOutDir
 	clnCdrc.CdrSourceId = self.CdrSourceId
-	clnCdrc.CdrFields = make([]*CfgCdrField, len(self.CdrFields))
-	for idx, fld := range self.CdrFields {
+	clnCdrc.HeaderFields = make([]*CfgCdrField, len(self.HeaderFields))
+	clnCdrc.ContentFields = make([]*CfgCdrField, len(self.ContentFields))
+	clnCdrc.TrailerFields = make([]*CfgCdrField, len(self.TrailerFields))
+	for idx, fld := range self.HeaderFields {
 		clonedVal := *fld
-		clnCdrc.CdrFields[idx] = &clonedVal
+		clnCdrc.HeaderFields[idx] = &clonedVal
+	}
+	for idx, fld := range self.ContentFields {
+		clonedVal := *fld
+		clnCdrc.ContentFields[idx] = &clonedVal
+	}
+	for idx, fld := range self.TrailerFields {
+		clonedVal := *fld
+		clnCdrc.TrailerFields[idx] = &clonedVal
 	}
 	return clnCdrc
 }

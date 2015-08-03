@@ -77,11 +77,17 @@ func executeCommand(command string) {
 	}
 	if cmd.RpcMethod() != "" {
 		res := cmd.RpcResult()
-		param := cmd.RpcParams(true)
+		param := cmd.RpcParams(false)
 		//log.Print(reflect.TypeOf(param))
 		switch param.(type) {
+		case *console.EmptyWrapper:
+			param = ""
 		case *console.StringWrapper:
 			param = param.(*console.StringWrapper).Item
+		case *console.StringSliceWrapper:
+			param = param.(*console.StringSliceWrapper).Items
+		case *console.StringMapWrapper:
+			param = param.(*console.StringMapWrapper).Items
 		}
 		//log.Printf("Param: %+v", param)
 
@@ -103,7 +109,7 @@ func main() {
 		return
 	}
 	var err error
-	client, err = rpcclient.NewRpcClient("tcp", *server, 3, *rpc_encoding)
+	client, err = rpcclient.NewRpcClient("tcp", *server, 3, 3, *rpc_encoding)
 	if err != nil {
 		flag.PrintDefaults()
 		log.Fatal("Could not connect to server " + *server)

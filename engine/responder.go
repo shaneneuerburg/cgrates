@@ -45,17 +45,28 @@ type Responder struct {
 	ExitChan chan bool
 	CdrSrv   *CdrServer
 	Stats    StatsInterface
+	cnt      int64
 }
 
 /*
 RPC method thet provides the external RPC interface for getting the rating information.
 */
 func (rs *Responder) GetCost(arg *CallDescriptor, reply *CallCost) (err error) {
+	rs.cnt += 1
+	if arg.Subject == "" {
+		arg.Subject = arg.Account
+	}
+	if upData, err := LoadUserProfile(arg, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*CallDescriptor)
+		*arg = *udRcv
+	}
 	if rs.Bal != nil {
 		r, e := rs.getCallCost(arg, "Responder.GetCost")
 		*reply, err = *r, e
 	} else {
-		r, e := AccLock.Guard(func() (interface{}, error) {
+		r, e := Guardian.Guard(func() (interface{}, error) {
 			return arg.GetCost()
 		}, arg.GetAccountKey())
 		if e != nil {
@@ -68,6 +79,15 @@ func (rs *Responder) GetCost(arg *CallDescriptor, reply *CallCost) (err error) {
 }
 
 func (rs *Responder) Debit(arg *CallDescriptor, reply *CallCost) (err error) {
+	if arg.Subject == "" {
+		arg.Subject = arg.Account
+	}
+	if upData, err := LoadUserProfile(arg, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*CallDescriptor)
+		*arg = *udRcv
+	}
 	if rs.Bal != nil {
 		r, e := rs.getCallCost(arg, "Responder.Debit")
 		*reply, err = *r, e
@@ -83,6 +103,15 @@ func (rs *Responder) Debit(arg *CallDescriptor, reply *CallCost) (err error) {
 }
 
 func (rs *Responder) MaxDebit(arg *CallDescriptor, reply *CallCost) (err error) {
+	if arg.Subject == "" {
+		arg.Subject = arg.Account
+	}
+	if upData, err := LoadUserProfile(arg, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*CallDescriptor)
+		*arg = *udRcv
+	}
 	if rs.Bal != nil {
 		r, e := rs.getCallCost(arg, "Responder.MaxDebit")
 		*reply, err = *r, e
@@ -98,10 +127,19 @@ func (rs *Responder) MaxDebit(arg *CallDescriptor, reply *CallCost) (err error) 
 }
 
 func (rs *Responder) RefundIncrements(arg *CallDescriptor, reply *float64) (err error) {
+	if arg.Subject == "" {
+		arg.Subject = arg.Account
+	}
+	if upData, err := LoadUserProfile(arg, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*CallDescriptor)
+		*arg = *udRcv
+	}
 	if rs.Bal != nil {
 		*reply, err = rs.callMethod(arg, "Responder.RefundIncrements")
 	} else {
-		r, e := AccLock.Guard(func() (interface{}, error) {
+		r, e := Guardian.Guard(func() (interface{}, error) {
 			return arg.RefundIncrements()
 		}, arg.GetAccountKey())
 		*reply, err = r.(float64), e
@@ -110,6 +148,15 @@ func (rs *Responder) RefundIncrements(arg *CallDescriptor, reply *float64) (err 
 }
 
 func (rs *Responder) GetMaxSessionTime(arg *CallDescriptor, reply *float64) (err error) {
+	if arg.Subject == "" {
+		arg.Subject = arg.Account
+	}
+	if upData, err := LoadUserProfile(arg, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*CallDescriptor)
+		*arg = *udRcv
+	}
 	if rs.Bal != nil {
 		*reply, err = rs.callMethod(arg, "Responder.GetMaxSessionTime")
 	} else {
@@ -123,6 +170,15 @@ func (rs *Responder) GetMaxSessionTime(arg *CallDescriptor, reply *float64) (err
 func (rs *Responder) GetDerivedMaxSessionTime(ev *StoredCdr, reply *float64) error {
 	if rs.Bal != nil {
 		return errors.New("unsupported method on the balancer")
+	}
+	if ev.Subject == "" {
+		ev.Subject = ev.Account
+	}
+	if upData, err := LoadUserProfile(ev, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*StoredCdr)
+		*ev = *udRcv
 	}
 	maxCallDuration := -1.0
 	attrsDC := &utils.AttrDerivedChargers{Tenant: ev.GetTenant(utils.META_DEFAULT), Category: ev.GetCategory(utils.META_DEFAULT), Direction: ev.GetDirection(utils.META_DEFAULT),
@@ -190,6 +246,15 @@ func (rs *Responder) GetSessionRuns(ev *StoredCdr, sRuns *[]*SessionRun) error {
 	if rs.Bal != nil {
 		return errors.New("Unsupported method on the balancer")
 	}
+	if ev.Subject == "" {
+		ev.Subject = ev.Account
+	}
+	if upData, err := LoadUserProfile(ev, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*StoredCdr)
+		*ev = *udRcv
+	}
 	attrsDC := &utils.AttrDerivedChargers{Tenant: ev.GetTenant(utils.META_DEFAULT), Category: ev.GetCategory(utils.META_DEFAULT), Direction: ev.GetDirection(utils.META_DEFAULT),
 		Account: ev.GetAccount(utils.META_DEFAULT), Subject: ev.GetSubject(utils.META_DEFAULT)}
 	var dcs utils.DerivedChargers
@@ -236,6 +301,12 @@ func (rs *Responder) ProcessCdr(cdr *StoredCdr, reply *string) error {
 	if rs.CdrSrv == nil {
 		return errors.New("CDR_SERVER_NOT_RUNNING")
 	}
+	if upData, err := LoadUserProfile(cdr, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*StoredCdr)
+		*cdr = *udRcv
+	}
 	if err := rs.CdrSrv.ProcessCdr(cdr); err != nil {
 		return err
 	}
@@ -255,6 +326,15 @@ func (rs *Responder) LogCallCost(ccl *CallCostLog, reply *string) error {
 }
 
 func (rs *Responder) GetLCR(cd *CallDescriptor, reply *LCRCost) error {
+	if cd.Subject == "" {
+		cd.Subject = cd.Account
+	}
+	if upData, err := LoadUserProfile(cd, "ExtraFields"); err != nil {
+		return err
+	} else {
+		udRcv := upData.(*CallDescriptor)
+		*cd = *udRcv
+	}
 	lcrCost, err := cd.GetLCR(rs.Stats)
 	if err != nil {
 		return err
@@ -267,7 +347,7 @@ func (rs *Responder) FlushCache(arg *CallDescriptor, reply *float64) (err error)
 	if rs.Bal != nil {
 		*reply, err = rs.callMethod(arg, "Responder.FlushCache")
 	} else {
-		r, e := AccLock.Guard(func() (interface{}, error) {
+		r, e := Guardian.Guard(func() (interface{}, error) {
 			return 0, arg.FlushCache()
 		}, arg.GetAccountKey())
 		*reply, err = r.(float64), e
@@ -312,7 +392,7 @@ func (rs *Responder) getCallCost(key *CallDescriptor, method string) (reply *Cal
 			Logger.Info("<Balancer> Waiting for raters to register...")
 			time.Sleep(1 * time.Second) // wait one second and retry
 		} else {
-			_, err = AccLock.Guard(func() (interface{}, error) {
+			_, err = Guardian.Guard(func() (interface{}, error) {
 				err = client.Call(method, *key, reply)
 				return reply, err
 			}, key.GetAccountKey())
@@ -335,7 +415,7 @@ func (rs *Responder) callMethod(key *CallDescriptor, method string) (reply float
 			Logger.Info("Waiting for raters to register...")
 			time.Sleep(1 * time.Second) // wait one second and retry
 		} else {
-			_, err = AccLock.Guard(func() (interface{}, error) {
+			_, err = Guardian.Guard(func() (interface{}, error) {
 				err = client.Call(method, *key, &reply)
 				return reply, err
 			}, key.GetAccountKey())

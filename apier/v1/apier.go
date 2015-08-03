@@ -46,7 +46,8 @@ type ApierV1 struct {
 	Sched       *scheduler.Scheduler
 	Config      *config.CGRConfig
 	Responder   *engine.Responder
-	CdrStatsSrv *engine.Stats
+	CdrStatsSrv engine.StatsInterface
+	Users       engine.UserService
 }
 
 func (self *ApierV1) GetDestination(dstId string, reply *engine.Destination) error {
@@ -69,10 +70,25 @@ func (apier *ApierV1) GetSharedGroup(sgId string, reply *engine.SharedGroup) err
 	return nil
 }
 
-type AttrSetDestination struct { //ToDo
-	Id        string
-	Prefixes  []string
-	Overwrite bool
+func (self *ApierV1) SetDestination(attrs utils.AttrSetDestination, reply *string) error {
+	if missing := utils.MissingStructFields(&attrs, []string{"Id", "Prefixes"}); len(missing) != 0 {
+		return utils.NewErrMandatoryIeMissing(missing...)
+	}
+
+	if !attrs.Overwrite {
+		if exists, err := self.RatingDb.HasData(utils.DESTINATION_PREFIX, attrs.Id); err != nil {
+			return utils.NewErrServerError(err)
+		} else if exists {
+			return utils.ErrExists
+		}
+	}
+	dest := &engine.Destination{Id: attrs.Id, Prefixes: attrs.Prefixes}
+	if err := self.RatingDb.SetDestination(dest); err != nil {
+		return utils.NewErrServerError(err)
+	}
+	self.RatingDb.CachePrefixValues(map[string][]string{utils.DESTINATION_PREFIX: []string{dest.Id}})
+	*reply = OK
+	return nil
 }
 
 func (self *ApierV1) GetRatingPlan(rplnId string, reply *engine.RatingPlan) error {
@@ -432,14 +448,7 @@ func (self *ApierV1) LoadTariffPlanFromStorDb(attrs AttrLoadTpFromStorDb, reply 
 	return nil
 }
 
-type AttrImportTPFromFolder struct {
-	TPid         string
-	FolderPath   string
-	RunId        string
-	CsvSeparator string
-}
-
-func (self *ApierV1) ImportTariffPlanFromFolder(attrs AttrImportTPFromFolder, reply *string) error {
+func (self *ApierV1) ImportTariffPlanFromFolder(attrs utils.AttrImportTPFromFolder, reply *string) error {
 	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "FolderPath"}); len(missing) != 0 {
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
@@ -593,7 +602,7 @@ func (self *ApierV1) GetActions(actsId string, reply *[]*utils.TPAction) error {
 			Weight:          engAct.Weight,
 		}
 		if engAct.Balance != nil {
-			act.Units = engAct.Balance.Value
+			act.Units = engAct.Balance.GetValue()
 			act.DestinationIds = engAct.Balance.DestinationIds
 			act.RatingSubject = engAct.Balance.RatingSubject
 			act.SharedGroup = engAct.Balance.SharedGroup
@@ -717,7 +726,7 @@ func (self *ApierV1) AddTriggeredAction(attr AttrAddActionTrigger, reply *string
 	}
 
 	tag := utils.AccountKey(attr.Tenant, attr.Account, attr.BalanceDirection)
-	_, err = engine.AccLock.Guard(func() (interface{}, error) {
+	_, err = engine.Guardian.Guard(func() (interface{}, error) {
 		userBalance, err := self.AccountDb.GetAccount(tag)
 		if err != nil {
 			return 0, err
@@ -787,7 +796,7 @@ func (self *ApierV1) ResetTriggeredActions(attr AttrResetTriggeredAction, reply 
 		}
 	}
 	accID := utils.AccountKey(attr.Tenant, attr.Account, attr.Direction)
-	_, err := engine.AccLock.Guard(func() (interface{}, error) {
+	_, err := engine.Guardian.Guard(func() (interface{}, error) {
 		acc, err := self.AccountDb.GetAccount(accID)
 		if err != nil {
 			return 0, err
@@ -814,7 +823,7 @@ func (self *ApierV1) LoadAccountActions(attrs utils.TPAccountActions, reply *str
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
 	dbReader := engine.NewTpReader(self.RatingDb, self.AccountDb, self.StorDb, attrs.TPid)
-	if _, err := engine.AccLock.Guard(func() (interface{}, error) {
+	if _, err := engine.Guardian.Guard(func() (interface{}, error) {
 		aas := engine.APItoModelAccountAction(&attrs)
 		if err := dbReader.LoadAccountActionsFiltered(aas); err != nil {
 			return 0, err
@@ -932,6 +941,20 @@ func (self *ApierV1) GetCacheStats(attrs utils.AttrCacheStats, reply *utils.Cach
 	cs.AccountAliases = cache2go.CountEntries(utils.ACC_ALIAS_PREFIX)
 	cs.DerivedChargers = cache2go.CountEntries(utils.DERIVEDCHARGERS_PREFIX)
 	cs.LcrProfiles = cache2go.CountEntries(utils.LCR_PREFIX)
+	if self.CdrStatsSrv != nil && self.Config.CDRStatsEnabled {
+		var queueIds []string
+		if err := self.CdrStatsSrv.GetQueueIds(0, &queueIds); err != nil {
+			return utils.NewErrServerError(err)
+		}
+		cs.CdrStats = len(queueIds)
+	}
+	if self.Config.RaterUserServer == utils.INTERNAL {
+		var ups engine.UserProfiles
+		if err := self.Users.GetUsers(engine.UserProfile{}, &ups); err != nil {
+			return utils.NewErrServerError(err)
+		}
+		cs.Users = len(ups)
+	}
 	*reply = *cs
 	return nil
 }
@@ -1000,7 +1023,8 @@ func (self *ApierV1) LoadTariffPlanFromFolder(attrs utils.AttrLoadTpFromFolder, 
 		path.Join(attrs.FolderPath, utils.ACTION_TRIGGERS_CSV),
 		path.Join(attrs.FolderPath, utils.ACCOUNT_ACTIONS_CSV),
 		path.Join(attrs.FolderPath, utils.DERIVED_CHARGERS_CSV),
-		path.Join(attrs.FolderPath, utils.CDR_STATS_CSV)), "")
+		path.Join(attrs.FolderPath, utils.CDR_STATS_CSV),
+		path.Join(attrs.FolderPath, utils.USERS_CSV)), "")
 	if err := loader.LoadAll(); err != nil {
 		return utils.NewErrServerError(err)
 	}
@@ -1089,6 +1113,14 @@ func (self *ApierV1) LoadTariffPlanFromFolder(attrs utils.AttrLoadTpFromFolder, 
 	cstKeys, _ := loader.GetLoadedIds(utils.CDR_STATS_PREFIX)
 	if len(cstKeys) != 0 && self.CdrStatsSrv != nil {
 		if err := self.CdrStatsSrv.ReloadQueues(cstKeys, nil); err != nil {
+			return err
+		}
+	}
+
+	userKeys, _ := loader.GetLoadedIds(utils.USERS_PREFIX)
+	if len(userKeys) != 0 && self.Users != nil {
+		var r string
+		if err := self.Users.ReloadUsers("", &r); err != nil {
 			return err
 		}
 	}

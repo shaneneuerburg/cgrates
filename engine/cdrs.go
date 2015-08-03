@@ -65,7 +65,7 @@ func fsCdrHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func NewCdrServer(cgrCfg *config.CGRConfig, cdrDb CdrStorage, rater Connector, stats StatsInterface) (*CdrServer, error) {
-	return &CdrServer{cgrCfg: cgrCfg, cdrDb: cdrDb, rater: rater, stats: stats, guard: &AccountLock{queue: make(map[string]chan bool)}}, nil
+	return &CdrServer{cgrCfg: cgrCfg, cdrDb: cdrDb, rater: rater, stats: stats, guard: &GuardianLock{queue: make(map[string]chan bool)}}, nil
 }
 
 type CdrServer struct {
@@ -73,12 +73,12 @@ type CdrServer struct {
 	cdrDb  CdrStorage
 	rater  Connector
 	stats  StatsInterface
-	guard  *AccountLock
+	guard  *GuardianLock
 }
 
 func (self *CdrServer) RegisterHanlersToServer(server *Server) {
 	cdrServer = self // Share the server object for handlers
-	server.RegisterHttpFunc("/cdr_post", cgrCdrHandler)
+	server.RegisterHttpFunc("/cdr_http", cgrCdrHandler)
 	server.RegisterHttpFunc("/freeswitch_json", fsCdrHandler)
 }
 
@@ -89,6 +89,9 @@ func (self *CdrServer) ProcessCdr(cdr *StoredCdr) error {
 
 // RPC method, used to process external CDRs
 func (self *CdrServer) ProcessExternalCdr(cdr *ExternalCdr) error {
+	if cdr.Subject == "" { // Use account information as rating subject if missing
+		cdr.Subject = cdr.Account
+	}
 	storedCdr, err := NewStoredCdrFromExternalCdr(cdr)
 	if err != nil {
 		return err
@@ -144,6 +147,12 @@ func (self *CdrServer) RateCdrs(cgrIds, runIds, tors, cdrHosts, cdrSources, reqT
 
 // Returns error if not able to properly store the CDR, mediation is async since we can always recover offline
 func (self *CdrServer) processCdr(storedCdr *StoredCdr) (err error) {
+	if upData, err := LoadUserProfile(storedCdr, "ExtraFields"); err != nil {
+		return err
+	} else {
+		cdrRcv := upData.(*StoredCdr)
+		*storedCdr = *cdrRcv
+	}
 	if storedCdr.ReqType == utils.META_NONE {
 		return nil
 	}
@@ -188,7 +197,7 @@ func (self *CdrServer) deriveRateStoreStatsReplicate(storedCdr *StoredCdr) error
 				Logger.Err(fmt.Sprintf("<CDRS> Could not append cdr to stats: %s", err.Error()))
 			}
 		}
-		if self.cgrCfg.CDRSCdrReplication != nil {
+		if len(self.cgrCfg.CDRSCdrReplication) != 0 {
 			self.replicateCdr(cdr)
 		}
 	}
@@ -313,6 +322,7 @@ func (self *CdrServer) rateCDR(storedCdr *StoredCdr) error {
 
 // ToDo: Add websocket support
 func (self *CdrServer) replicateCdr(cdr *StoredCdr) error {
+	Logger.Debug(fmt.Sprintf("replicateCdr cdr: %+v, configuration: %+v", cdr, self.cgrCfg.CDRSCdrReplication))
 	for _, rplCfg := range self.cgrCfg.CDRSCdrReplication {
 		passesFilters := true
 		for _, cdfFltr := range rplCfg.CdrFilter {
@@ -329,7 +339,7 @@ func (self *CdrServer) replicateCdr(cdr *StoredCdr) error {
 			httpClient := new(http.Client)
 			errChan := make(chan error)
 			go func(cdr *StoredCdr, rplCfg *config.CdrReplicationCfg, errChan chan error) {
-				if _, err := httpClient.PostForm(fmt.Sprintf("http://%s/cdr_post", rplCfg.Server), cdr.AsHttpForm()); err != nil {
+				if _, err := httpClient.PostForm(fmt.Sprintf("%s", rplCfg.Server), cdr.AsHttpForm()); err != nil {
 					Logger.Err(fmt.Sprintf("<CDRReplicator> Replicating CDR: %+v, got error: %s", cdr, err.Error()))
 					errChan <- err
 				}

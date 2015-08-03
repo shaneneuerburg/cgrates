@@ -133,9 +133,7 @@ func TestPublish(t *testing.T) {
 	}
 	m := make(map[string]string)
 	m["EventFilter"] = "test"
-	if err := ps.Publish(PublishInfo{
-		Event: m,
-	}, &r); err != nil {
+	if err := ps.Publish(m, &r); err != nil {
 		t.Error("Error publishing: ", err)
 	}
 	for i := 0; i < 1000; i++ { // wait for the theread to populate map
@@ -166,9 +164,7 @@ func TestPublishExpired(t *testing.T) {
 	}, &r); err != nil {
 		t.Error("Error subscribing: ", err)
 	}
-	if err := ps.Publish(PublishInfo{
-		Event: map[string]string{"EventFilter": "test"},
-	}, &r); err != nil {
+	if err := ps.Publish(map[string]string{"EventFilter": "test"}, &r); err != nil {
 		t.Error("Error publishing: ", err)
 	}
 	if len(ps.subscribers) != 0 {
@@ -196,13 +192,45 @@ func TestPublishExpiredSave(t *testing.T) {
 	if err != nil || len(subs) != 1 {
 		t.Error("Error saving subscribers: ", err, subs)
 	}
-	if err := ps.Publish(PublishInfo{
-		Event: map[string]string{"EventFilter": "test"},
-	}, &r); err != nil {
+	if err := ps.Publish(map[string]string{"EventFilter": "test"}, &r); err != nil {
 		t.Error("Error publishing: ", err)
 	}
 	subs, err = accountingStorage.GetSubscribers()
 	if err != nil || len(subs) != 0 {
 		t.Error("Error saving subscribers: ", err, subs)
+	}
+}
+
+func TestCgrEventPassFilters(t *testing.T) {
+	ev := CgrEvent{"EventName": "TEST_EVENT", "Header1": "Value1", "Header2": "Value2"}
+	if !ev.PassFilters(utils.ParseRSRFieldsMustCompile("EventName(TEST_EVENT)", utils.INFIELD_SEP)) {
+		t.Error("Not passing filter")
+	}
+	if ev.PassFilters(utils.ParseRSRFieldsMustCompile("EventName(DUMMY_EVENT)", utils.INFIELD_SEP)) {
+		t.Error("Passing filter")
+	}
+	if !ev.PassFilters(utils.ParseRSRFieldsMustCompile("^EventName::TEST_EVENT(TEST_EVENT)", utils.INFIELD_SEP)) {
+		t.Error("Not passing filter")
+	}
+	if !ev.PassFilters(utils.ParseRSRFieldsMustCompile("^EventName::DUMMY", utils.INFIELD_SEP)) { // Should pass since we have no filter defined
+		t.Error("Not passing no filter")
+	}
+	if !ev.PassFilters(utils.ParseRSRFieldsMustCompile("~EventName:s/^(\\w*)_/$1/(TEST)", utils.INFIELD_SEP)) {
+		t.Error("Not passing filter")
+	}
+	if !ev.PassFilters(utils.ParseRSRFieldsMustCompile("~EventName:s/^(\\w*)_/$1/:s/^(\\w)(\\w)(\\w)(\\w)/$1$3$4/(TST)", utils.INFIELD_SEP)) {
+		t.Error("Not passing filter")
+	}
+	if !ev.PassFilters(utils.ParseRSRFieldsMustCompile("EventName(TEST_EVENT);Header1(Value1)", utils.INFIELD_SEP)) {
+		t.Error("Not passing filter")
+	}
+	if ev.PassFilters(utils.ParseRSRFieldsMustCompile("EventName(TEST_EVENT);Header1(Value2)", utils.INFIELD_SEP)) {
+		t.Error("Passing filter")
+	}
+	if !ev.PassFilters(utils.ParseRSRFieldsMustCompile("EventName(TEST_EVENT);~Header1:s/(\\d)/$1/(1)", utils.INFIELD_SEP)) {
+		t.Error("Not passing filter")
+	}
+	if ev.PassFilters(utils.ParseRSRFieldsMustCompile("EventName(TEST_EVENT);~Header1:s/(\\d)/$1/(2)", utils.INFIELD_SEP)) {
+		t.Error("Passing filter")
 	}
 }

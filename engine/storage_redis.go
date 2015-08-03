@@ -23,6 +23,8 @@ import (
 	"compress/zlib"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 
 	"github.com/cgrates/cgrates/cache2go"
 	"github.com/cgrates/cgrates/utils"
@@ -410,30 +412,56 @@ func (rs *RedisStorage) SetRpAlias(key, alias string) (err error) {
 }
 
 // Removes the aliases of a specific account, on a tenant
-func (rs *RedisStorage) RemoveRpAliases(tenantRtSubjects []*TenantRatingSubject) (err error) {
-	alsKeys, err := rs.db.Keys(utils.RP_ALIAS_PREFIX + "*")
-	if err != nil {
-		return err
-	}
-	for _, key := range alsKeys {
-		alias, err := rs.GetRpAlias(key[len(utils.RP_ALIAS_PREFIX):], true)
+func (rs *RedisStorage) RemoveRpAliases(tenantRtSubjects []*TenantRatingSubject, skipCache bool) (err error) {
+	if skipCache {
+		alsKeys, err := rs.db.Keys(utils.RP_ALIAS_PREFIX + "*")
 		if err != nil {
 			return err
 		}
-		for _, tntRSubj := range tenantRtSubjects {
-			tenantPrfx := utils.RP_ALIAS_PREFIX + tntRSubj.Tenant + utils.CONCATENATED_KEY_SEP
-			if len(key) < len(tenantPrfx) || tenantPrfx != key[:len(tenantPrfx)] { // filter out the tenant for accounts
-				continue
+		for _, key := range alsKeys {
+			for _, tntRSubj := range tenantRtSubjects {
+				tenantPrfx := utils.RP_ALIAS_PREFIX + tntRSubj.Tenant + utils.CONCATENATED_KEY_SEP
+				if len(key) < len(tenantPrfx) || tenantPrfx != key[:len(tenantPrfx)] { // filter out the tenant for accounts
+					continue
+				}
+				alias, err := rs.GetRpAlias(key[len(utils.RP_ALIAS_PREFIX):], true)
+				if err != nil {
+					return err
+				}
+				if tntRSubj.Subject != alias {
+					continue
+				}
+				if _, err = rs.db.Del(key); err != nil {
+					return err
+				}
+				cache2go.RemKey(key)
+				break
 			}
-			if tntRSubj.Subject != alias {
-				continue
-			}
-			cache2go.RemKey(key)
-			if _, err = rs.db.Del(key); err != nil {
-				return err
-			}
-			break
 		}
+	} else {
+		alsMap, err := cache2go.GetAllEntries(utils.RP_ALIAS_PREFIX)
+		if err != nil {
+			return err
+		}
+
+		for key, aliasInterface := range alsMap {
+			alias := aliasInterface.Value().(string)
+			for _, tntRSubj := range tenantRtSubjects {
+				tenantPrfx := tntRSubj.Tenant + utils.CONCATENATED_KEY_SEP
+				if len(key) < len(tenantPrfx) || !strings.HasPrefix(key, tenantPrfx) { // filter out the tenant for accounts
+					continue
+				}
+				if tntRSubj.Subject != alias {
+					continue
+				}
+				if _, err = rs.db.Del(utils.RP_ALIAS_PREFIX + key); err != nil {
+					return err
+				}
+				cache2go.RemKey(utils.RP_ALIAS_PREFIX + key)
+				break
+			}
+		}
+
 	}
 	return
 }
@@ -507,27 +535,55 @@ func (rs *RedisStorage) SetAccAlias(key, alias string) (err error) {
 	return
 }
 
-func (rs *RedisStorage) RemoveAccAliases(tenantAccounts []*TenantAccount) (err error) {
-	alsKeys, err := rs.db.Keys(utils.ACC_ALIAS_PREFIX + "*")
-	if err != nil {
-		return err
-	}
-	for _, key := range alsKeys {
-		alias, err := rs.GetAccAlias(key[len(utils.ACC_ALIAS_PREFIX):], true)
+func (rs *RedisStorage) RemoveAccAliases(tenantAccounts []*TenantAccount, skipCache bool) (err error) {
+	if skipCache {
+		alsKeys, err := rs.db.Keys(utils.ACC_ALIAS_PREFIX + "*")
 		if err != nil {
 			return err
 		}
-		for _, tntAcnt := range tenantAccounts {
-			tenantPrfx := utils.ACC_ALIAS_PREFIX + tntAcnt.Tenant + utils.CONCATENATED_KEY_SEP
-			if len(key) < len(tenantPrfx) || tenantPrfx != key[:len(tenantPrfx)] { // filter out the tenant for accounts
-				continue
+		for _, key := range alsKeys {
+			for _, tntAcnt := range tenantAccounts {
+				tenantPrfx := utils.ACC_ALIAS_PREFIX + tntAcnt.Tenant + utils.CONCATENATED_KEY_SEP
+				if len(key) < len(tenantPrfx) || tenantPrfx != key[:len(tenantPrfx)] { // filter out the tenant for accounts
+					continue
+				}
+				alias, err := rs.GetAccAlias(key[len(utils.ACC_ALIAS_PREFIX):], true)
+				if err != nil {
+					return err
+				}
+				if tntAcnt.Account != alias {
+					continue
+				}
+				if _, err = rs.db.Del(key); err != nil {
+					log.Print("")
+					return err
+				}
+				cache2go.RemKey(key)
+				break
 			}
-			if tntAcnt.Account != alias {
-				continue
-			}
-			cache2go.RemKey(key)
-			if _, err = rs.db.Del(key); err != nil {
-				return err
+		}
+
+	} else {
+		alsMap, err := cache2go.GetAllEntries(utils.ACC_ALIAS_PREFIX)
+		if err != nil {
+			return err
+		}
+
+		for key, aliasInterface := range alsMap {
+			alias := aliasInterface.Value().(string)
+			for _, tntAcnt := range tenantAccounts {
+				tenantPrfx := tntAcnt.Tenant + utils.CONCATENATED_KEY_SEP
+				if len(key) < len(tenantPrfx) || !strings.HasPrefix(key, tenantPrfx) { // filter out the tenant for accounts
+					continue
+				}
+				if tntAcnt.Account != alias {
+					continue
+				}
+				if _, err = rs.db.Del(utils.ACC_ALIAS_PREFIX + key); err != nil {
+					return err
+				}
+				cache2go.RemKey(utils.ACC_ALIAS_PREFIX + key)
+				break
 			}
 		}
 	}
@@ -674,6 +730,12 @@ func (rs *RedisStorage) SetAccount(ub *Account) (err error) {
 	return
 }
 
+func (rs *RedisStorage) RemoveAccount(key string) (err error) {
+	_, err = rs.db.Del(utils.ACCOUNT_PREFIX + key)
+	return
+
+}
+
 func (rs *RedisStorage) GetCdrStatsQueue(key string) (sq *StatsQueue, err error) {
 	var values []byte
 	if values, err = rs.db.Get(utils.CDR_STATS_QUEUE_PREFIX + key); err == nil {
@@ -707,6 +769,32 @@ func (rs *RedisStorage) GetSubscribers() (result map[string]*SubscriberData, err
 	return
 }
 
+func (rs *RedisStorage) GetUser(key string) (up *UserProfile, err error) {
+	var values []byte
+	if values, err = rs.db.Get(utils.USERS_PREFIX + key); err == nil {
+		up = &UserProfile{}
+		err = rs.ms.Unmarshal(values, &up)
+	}
+	return
+}
+
+func (rs *RedisStorage) GetUsers() (result []*UserProfile, err error) {
+	keys, err := rs.db.Keys(utils.USERS_PREFIX + "*")
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range keys {
+		if values, err := rs.db.Get(key); err == nil {
+			up := &UserProfile{}
+			err = rs.ms.Unmarshal(values, up)
+			result = append(result, up)
+		} else {
+			return nil, utils.ErrNotFound
+		}
+	}
+	return
+}
+
 func (rs *RedisStorage) SetSubscriber(key string, sub *SubscriberData) (err error) {
 	result, err := rs.ms.Marshal(sub)
 	rs.db.Set(utils.PUBSUB_SUBSCRIBERS_PREFIX+key, result)
@@ -714,7 +802,18 @@ func (rs *RedisStorage) SetSubscriber(key string, sub *SubscriberData) (err erro
 }
 
 func (rs *RedisStorage) RemoveSubscriber(key string) (err error) {
-	rs.db.Del(utils.PUBSUB_SUBSCRIBERS_PREFIX + key)
+	_, err = rs.db.Del(utils.PUBSUB_SUBSCRIBERS_PREFIX + key)
+	return
+}
+
+func (rs *RedisStorage) SetUser(up *UserProfile) (err error) {
+	result, err := rs.ms.Marshal(up)
+	rs.db.Set(utils.USERS_PREFIX+up.GetId(), result)
+	return
+}
+
+func (rs *RedisStorage) RemoveUser(key string) (err error) {
+	_, err = rs.db.Del(utils.USERS_PREFIX + key)
 	return
 }
 

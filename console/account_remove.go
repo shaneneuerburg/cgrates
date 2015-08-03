@@ -18,47 +18,45 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package console
 
-import "github.com/cgrates/cgrates/engine"
+import "github.com/cgrates/cgrates/utils"
 
 func init() {
-	c := &CmdShowSubscribers{
-		name:      "show_subscribers",
-		rpcMethod: "PubSubV1.ShowSubscribers",
+	c := &CmdRemoveAccount{
+		name:      "account_remove",
+		rpcMethod: "ApierV1.RemoveAccount",
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}
 }
 
-type CmdShowSubscribers struct {
+// Commander implementation
+type CmdRemoveAccount struct {
 	name      string
 	rpcMethod string
-	rpcParams *StringWrapper
+	rpcParams *utils.AttrRemoveAccount
 	*CommandExecuter
 }
 
-func (self *CmdShowSubscribers) Name() string {
+func (self *CmdRemoveAccount) Name() string {
 	return self.name
 }
 
-func (self *CmdShowSubscribers) RpcMethod() string {
+func (self *CmdRemoveAccount) RpcMethod() string {
 	return self.rpcMethod
 }
 
-func (self *CmdShowSubscribers) RpcParams(ptr bool) interface{} {
-	if self.rpcParams == nil {
-		self.rpcParams = &StringWrapper{}
+func (self *CmdRemoveAccount) RpcParams(reset bool) interface{} {
+	if reset || self.rpcParams == nil {
+		self.rpcParams = &utils.AttrRemoveAccount{Direction: utils.OUT}
 	}
-	if ptr {
-		return self.rpcParams
-	}
-	return *self.rpcParams
+	return self.rpcParams
 }
 
-func (self *CmdShowSubscribers) PostprocessRpcParams() error {
+func (self *CmdRemoveAccount) PostprocessRpcParams() error {
 	return nil
 }
 
-func (self *CmdShowSubscribers) RpcResult() interface{} {
-	var s map[string]*engine.SubscriberData
+func (self *CmdRemoveAccount) RpcResult() interface{} {
+	var s string
 	return &s
 }

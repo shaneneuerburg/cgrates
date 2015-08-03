@@ -33,12 +33,12 @@ import (
 )
 
 func InitDataDb(cfg *config.CGRConfig) error {
-	ratingDb, err := ConfigureRatingStorage(cfg.RatingDBType, cfg.RatingDBHost, cfg.RatingDBPort, cfg.RatingDBName, cfg.RatingDBUser, cfg.RatingDBPass, cfg.DBDataEncoding)
+	ratingDb, err := ConfigureRatingStorage(cfg.TpDbType, cfg.TpDbHost, cfg.TpDbPort, cfg.TpDbName, cfg.TpDbUser, cfg.TpDbPass, cfg.DBDataEncoding)
 	if err != nil {
 		return err
 	}
-	accountDb, err := ConfigureAccountingStorage(cfg.AccountDBType, cfg.AccountDBHost, cfg.AccountDBPort, cfg.AccountDBName,
-		cfg.AccountDBUser, cfg.AccountDBPass, cfg.DBDataEncoding)
+	accountDb, err := ConfigureAccountingStorage(cfg.DataDbType, cfg.DataDbHost, cfg.DataDbPort, cfg.DataDbName,
+		cfg.DataDbUser, cfg.DataDbPass, cfg.DBDataEncoding)
 	if err != nil {
 		return err
 	}
@@ -105,7 +105,8 @@ func LoadTariffPlanFromFolder(tpPath string, ratingDb RatingStorage, accountingD
 		path.Join(tpPath, utils.ACTION_TRIGGERS_CSV),
 		path.Join(tpPath, utils.ACCOUNT_ACTIONS_CSV),
 		path.Join(tpPath, utils.DERIVED_CHARGERS_CSV),
-		path.Join(tpPath, utils.CDR_STATS_CSV)), "")
+		path.Join(tpPath, utils.CDR_STATS_CSV),
+		path.Join(tpPath, utils.USERS_CSV)), "")
 	if err := loader.LoadAll(); err != nil {
 		return utils.NewErrServerError(err)
 	}
@@ -120,8 +121,8 @@ type PjsuaAccount struct {
 }
 
 // Returns file reference where we can write to control pjsua in terminal
-func StartPjsuaListener(acnts []*PjsuaAccount, waitMs int) (*os.File, error) {
-	cmdArgs := []string{"--local-port=5070", "--null-audio", "--auto-answer=200", "--max-calls=32", "--app-log-level=0"}
+func StartPjsuaListener(acnts []*PjsuaAccount, localPort, waitMs int) (*os.File, error) {
+	cmdArgs := []string{fmt.Sprintf("--local-port=%d", localPort), "--null-audio", "--auto-answer=200", "--max-calls=32", "--app-log-level=0"}
 	for idx, acnt := range acnts {
 		if idx != 0 {
 			cmdArgs = append(cmdArgs, "--next-account")

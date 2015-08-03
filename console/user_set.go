@@ -18,51 +18,45 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package console
 
-import (
-	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
-)
+import "github.com/cgrates/cgrates/engine"
 
 func init() {
-	c := &CmdGetAccount{
-		name:      "account",
-		rpcMethod: "ApierV1.GetAccount",
-		rpcParams: &utils.AttrGetAccount{Direction: "*out"},
+	c := &CmdSetUser{
+		name:      "user_set",
+		rpcMethod: "UsersV1.SetUser",
 	}
 	commands[c.Name()] = c
 	c.CommandExecuter = &CommandExecuter{c}
 }
 
 // Commander implementation
-type CmdGetAccount struct {
+type CmdSetUser struct {
 	name      string
 	rpcMethod string
-	rpcParams *utils.AttrGetAccount
+	rpcParams *engine.UserProfile
 	*CommandExecuter
 }
 
-func (self *CmdGetAccount) Name() string {
+func (self *CmdSetUser) Name() string {
 	return self.name
 }
 
-func (self *CmdGetAccount) RpcMethod() string {
+func (self *CmdSetUser) RpcMethod() string {
 	return self.rpcMethod
 }
 
-func (self *CmdGetAccount) RpcParams(ptr bool) interface{} {
-	if self.rpcParams == nil {
-		self.rpcParams = &utils.AttrGetAccount{Direction: "*out"}
+func (self *CmdSetUser) RpcParams(reset bool) interface{} {
+	if reset || self.rpcParams == nil {
+		self.rpcParams = &engine.UserProfile{}
 	}
-	if ptr {
-		return self.rpcParams
-	}
-	return *self.rpcParams
+	return self.rpcParams
 }
 
-func (self *CmdGetAccount) PostprocessRpcParams() error {
+func (self *CmdSetUser) PostprocessRpcParams() error {
 	return nil
 }
 
-func (self *CmdGetAccount) RpcResult() interface{} {
-	return &engine.Account{}
+func (self *CmdSetUser) RpcResult() interface{} {
+	var s string
+	return &s
 }

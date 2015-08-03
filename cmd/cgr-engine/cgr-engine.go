@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cgrates/cgrates/apier/v1"
@@ -66,10 +67,11 @@ var (
 	bal          = balancer2go.NewBalancer()
 	exitChan     = make(chan bool)
 	server       = &engine.Server{}
+	cdrServer    *engine.CdrServer
+	cdrStats     engine.StatsInterface
 	scribeServer history.Scribe
 	pubSubServer engine.PublisherSubscriber
-	cdrServer    *engine.CdrServer
-	cdrStats     *engine.Stats
+	userServer   engine.UserService
 	cfg          *config.CGRConfig
 	sms          []sessionmanager.SessionManager
 	smRpc        *v1.SessionManagerV1
@@ -86,15 +88,25 @@ func cacheData(ratingDb engine.RatingStorage, accountDb engine.AccountingStorage
 }
 
 // Fires up a cdrc instance
-func startCdrc(cdrsChan chan struct{}, cdrcCfgs map[string]*config.CdrcConfig, httpSkipTlsCheck bool, closeChan chan struct{}) {
+func startCdrc(responder *engine.Responder, cdrsChan chan struct{}, cdrcCfgs map[string]*config.CdrcConfig, httpSkipTlsCheck bool, closeChan chan struct{}) {
+	var cdrsConn engine.Connector
 	var cdrcCfg *config.CdrcConfig
 	for _, cdrcCfg = range cdrcCfgs { // Take the first config out, does not matter which one
 		break
 	}
 	if cdrcCfg.Cdrs == utils.INTERNAL {
 		<-cdrsChan // Wait for CDRServer to come up before start processing
+		cdrsConn = responder
+	} else {
+		conn, err := rpcclient.NewRpcClient("tcp", cdrcCfg.Cdrs, cfg.ConnectAttempts, cfg.Reconnects, utils.GOB)
+		if err != nil {
+			engine.Logger.Crit(fmt.Sprintf("<CDRC> Could not connect to CDRS via RPC: %v", err))
+			exitChan <- true
+			return
+		}
+		cdrsConn = &engine.RPCClientConnector{Client: conn}
 	}
-	cdrc, err := cdrc.NewCdrc(cdrcCfgs, httpSkipTlsCheck, cdrServer, closeChan)
+	cdrc, err := cdrc.NewCdrc(cdrcCfgs, httpSkipTlsCheck, cdrsConn, closeChan)
 	if err != nil {
 		engine.Logger.Crit(fmt.Sprintf("Cdrc config parsing error: %s", err.Error()))
 		exitChan <- true
@@ -116,7 +128,7 @@ func startSmFreeSWITCH(responder *engine.Responder, cdrDb engine.CdrStorage, cac
 	} else {
 		var err error
 		for i := 0; i < cfg.SmFsConfig.Reconnects; i++ {
-			client, err = rpcclient.NewRpcClient("tcp", cfg.SmFsConfig.Rater, cfg.SmFsConfig.Reconnects, utils.GOB)
+			client, err = rpcclient.NewRpcClient("tcp", cfg.SmFsConfig.Rater, cfg.ConnectAttempts, cfg.SmFsConfig.Reconnects, utils.GOB)
 			if err == nil { //Connected so no need to reiterate
 				break
 			}
@@ -137,7 +149,7 @@ func startSmFreeSWITCH(responder *engine.Responder, cdrDb engine.CdrStorage, cac
 	} else if len(cfg.SmFsConfig.Cdrs) != 0 {
 		delay = utils.Fib()
 		for i := 0; i < cfg.SmFsConfig.Reconnects; i++ {
-			client, err = rpcclient.NewRpcClient("tcp", cfg.SmFsConfig.Cdrs, cfg.SmFsConfig.Reconnects, utils.GOB)
+			client, err = rpcclient.NewRpcClient("tcp", cfg.SmFsConfig.Cdrs, cfg.ConnectAttempts, cfg.SmFsConfig.Reconnects, utils.GOB)
 			if err == nil { //Connected so no need to reiterate
 				break
 			}
@@ -169,7 +181,7 @@ func startSmKamailio(responder *engine.Responder, cdrDb engine.CdrStorage, cache
 		var err error
 		delay := utils.Fib()
 		for i := 0; i < cfg.SmKamConfig.Reconnects; i++ {
-			client, err = rpcclient.NewRpcClient("tcp", cfg.SmKamConfig.Rater, cfg.SmKamConfig.Reconnects, utils.GOB)
+			client, err = rpcclient.NewRpcClient("tcp", cfg.SmKamConfig.Rater, cfg.ConnectAttempts, cfg.SmKamConfig.Reconnects, utils.GOB)
 			if err == nil { //Connected so no need to reiterate
 				break
 			}
@@ -189,7 +201,7 @@ func startSmKamailio(responder *engine.Responder, cdrDb engine.CdrStorage, cache
 	} else if len(cfg.SmKamConfig.Cdrs) != 0 {
 		delay := utils.Fib()
 		for i := 0; i < cfg.SmKamConfig.Reconnects; i++ {
-			client, err = rpcclient.NewRpcClient("tcp", cfg.SmKamConfig.Cdrs, cfg.SmKamConfig.Reconnects, utils.GOB)
+			client, err = rpcclient.NewRpcClient("tcp", cfg.SmKamConfig.Cdrs, cfg.ConnectAttempts, cfg.SmKamConfig.Reconnects, utils.GOB)
 			if err == nil { //Connected so no need to reiterate
 				break
 			}
@@ -221,7 +233,7 @@ func startSmOpenSIPS(responder *engine.Responder, cdrDb engine.CdrStorage, cache
 		var err error
 		delay := utils.Fib()
 		for i := 0; i < cfg.SmOsipsConfig.Reconnects; i++ {
-			client, err = rpcclient.NewRpcClient("tcp", cfg.SmOsipsConfig.Rater, cfg.SmOsipsConfig.Reconnects, utils.GOB)
+			client, err = rpcclient.NewRpcClient("tcp", cfg.SmOsipsConfig.Rater, cfg.ConnectAttempts, cfg.SmOsipsConfig.Reconnects, utils.GOB)
 			if err == nil { //Connected so no need to reiterate
 				break
 			}
@@ -241,7 +253,7 @@ func startSmOpenSIPS(responder *engine.Responder, cdrDb engine.CdrStorage, cache
 	} else if len(cfg.SmOsipsConfig.Cdrs) != 0 {
 		delay := utils.Fib()
 		for i := 0; i < cfg.SmOsipsConfig.Reconnects; i++ {
-			client, err = rpcclient.NewRpcClient("tcp", cfg.SmOsipsConfig.Cdrs, cfg.SmOsipsConfig.Reconnects, utils.GOB)
+			client, err = rpcclient.NewRpcClient("tcp", cfg.SmOsipsConfig.Cdrs, cfg.ConnectAttempts, cfg.SmOsipsConfig.Reconnects, utils.GOB)
 			if err == nil { //Connected so no need to reiterate
 				break
 			}
@@ -274,7 +286,7 @@ func startCDRS(logDb engine.LogStorage, cdrDb engine.CdrStorage, responder *engi
 	} else if len(cfg.CDRSRater) != 0 {
 		delay := utils.Fib()
 		for i := 0; i < cfg.CDRSReconnects; i++ {
-			client, err = rpcclient.NewRpcClient("tcp", cfg.CDRSRater, cfg.CDRSReconnects, utils.GOB)
+			client, err = rpcclient.NewRpcClient("tcp", cfg.CDRSRater, cfg.ConnectAttempts, cfg.CDRSReconnects, utils.GOB)
 			if err == nil { //Connected so no need to reiterate
 				break
 			}
@@ -297,7 +309,7 @@ func startCDRS(logDb engine.LogStorage, cdrDb engine.CdrStorage, responder *engi
 		} else {
 			delay := utils.Fib()
 			for i := 0; i < cfg.CDRSReconnects; i++ {
-				client, err = rpcclient.NewRpcClient("tcp", cfg.CDRSStats, cfg.CDRSReconnects, utils.GOB)
+				client, err = rpcclient.NewRpcClient("tcp", cfg.CDRSStats, cfg.ConnectAttempts, cfg.CDRSReconnects, utils.GOB)
 				if err == nil { //Connected so no need to reiterate
 					break
 				}
@@ -322,85 +334,6 @@ func startCDRS(logDb engine.LogStorage, cdrDb engine.CdrStorage, responder *engi
 	// Make the cdr servers available for internal communication
 	responder.CdrSrv = cdrServer
 	close(doneChan)
-}
-
-func startHistoryServer(chanDone chan struct{}) {
-	if scribeServer, err = history.NewFileScribe(cfg.HistoryDir, cfg.HistorySaveInterval); err != nil {
-		engine.Logger.Crit(fmt.Sprintf("<HistoryServer> Could not start, error: %s", err.Error()))
-		exitChan <- true
-		return
-	}
-	server.RpcRegisterName("Scribe", scribeServer)
-	close(chanDone)
-}
-
-// chanStartServer will report when server is up, useful for internal requests
-func startHistoryAgent(chanServerStarted chan struct{}) {
-	if cfg.HistoryServer == utils.INTERNAL { // For internal requests, wait for server to come online before connecting
-		//engine.Logger.Crit(fmt.Sprintf("<HistoryAgent> Connecting internally to HistoryServer"))
-		select {
-		case <-time.After(1 * time.Minute):
-			engine.Logger.Crit(fmt.Sprintf("<HistoryAgent> Timeout waiting for server to start."))
-			exitChan <- true
-			return
-		case <-chanServerStarted:
-		}
-		//<-chanServerStarted // If server is not enabled, will have deadlock here
-	} else { // Connect in iteration since there are chances of concurrency here
-		delay := utils.Fib()
-		for i := 0; i < 3; i++ { //ToDo: Make it globally configurable
-			//engine.Logger.Crit(fmt.Sprintf("<HistoryAgent> Trying to connect, iteration: %d, time %s", i, time.Now()))
-			if scribeServer, err = history.NewProxyScribe(cfg.HistoryServer); err == nil {
-				break //Connected so no need to reiterate
-			} else if i == 2 && err != nil {
-				engine.Logger.Crit(fmt.Sprintf("<HistoryAgent> Could not connect to the server, error: %s", err.Error()))
-				exitChan <- true
-				return
-			}
-			time.Sleep(delay())
-		}
-	}
-	engine.SetHistoryScribe(scribeServer) // scribeServer comes from global variable
-	return
-}
-
-func startPubSubServer(chanDone chan struct{}, accountDb engine.AccountingStorage) {
-	if pubSubServer = engine.NewPubSub(accountDb, cfg.HttpSkipTlsVerify); err != nil {
-		engine.Logger.Crit(fmt.Sprintf("<PubSubServer> Could not start, error: %s", err.Error()))
-		exitChan <- true
-		return
-	}
-	server.RpcRegisterName("PubSubV1", pubSubServer)
-	close(chanDone)
-}
-
-// chanStartServer will report when server is up, useful for internal requests
-func startPubSubAgent(chanServerStarted chan struct{}, accountDb engine.AccountingStorage) {
-	if cfg.PubSubServer == utils.INTERNAL { // For internal requests, wait for server to come online before connecting
-		select {
-		case <-time.After(1 * time.Minute):
-			engine.Logger.Crit(fmt.Sprintf("<PubSubAgent> Timeout waiting for server to start."))
-			exitChan <- true
-			return
-		case <-chanServerStarted:
-		}
-		//<-chanServerStarted // If server is not enabled, will have deadlock here
-	} else { // Connect in iteration since there are chances of concurrency here
-		delay := utils.Fib()
-		for i := 0; i < 3; i++ { //ToDo: Make it globally configurable
-			//engine.Logger.Crit(fmt.Sprintf("<PubSubAgent> Trying to connect, iteration: %d, time %s", i, time.Now()))
-			if pubSubServer = engine.NewPubSub(accountDb, cfg.HttpSkipTlsVerify); err == nil {
-				break //Connected so no need to reiterate
-			} else if i == 2 && err != nil {
-				engine.Logger.Crit(fmt.Sprintf("<PubSubAgent> Could not connect to the server, error: %s", err.Error()))
-				exitChan <- true
-				return
-			}
-			time.Sleep(delay())
-		}
-	}
-	engine.SetPubSub(pubSubServer) // scribeServer comes from global variable
-	return
 }
 
 // Starts the rpc server, waiting for the necessary components to finish their tasks
@@ -474,16 +407,16 @@ func main() {
 	var loadDb engine.LoadStorage
 	var cdrDb engine.CdrStorage
 	if cfg.RaterEnabled || cfg.SchedulerEnabled { // Only connect to dataDb if required
-		ratingDb, err = engine.ConfigureRatingStorage(cfg.RatingDBType, cfg.RatingDBHost, cfg.RatingDBPort,
-			cfg.RatingDBName, cfg.RatingDBUser, cfg.RatingDBPass, cfg.DBDataEncoding)
+		ratingDb, err = engine.ConfigureRatingStorage(cfg.TpDbType, cfg.TpDbHost, cfg.TpDbPort,
+			cfg.TpDbName, cfg.TpDbUser, cfg.TpDbPass, cfg.DBDataEncoding)
 		if err != nil { // Cannot configure getter database, show stopper
 			engine.Logger.Crit(fmt.Sprintf("Could not configure dataDb: %s exiting!", err))
 			return
 		}
 		defer ratingDb.Close()
 		engine.SetRatingStorage(ratingDb)
-		accountDb, err = engine.ConfigureAccountingStorage(cfg.AccountDBType, cfg.AccountDBHost, cfg.AccountDBPort,
-			cfg.AccountDBName, cfg.AccountDBUser, cfg.AccountDBPass, cfg.DBDataEncoding)
+		accountDb, err = engine.ConfigureAccountingStorage(cfg.DataDbType, cfg.DataDbHost, cfg.DataDbPort,
+			cfg.DataDbName, cfg.DataDbUser, cfg.DataDbPass, cfg.DBDataEncoding)
 		if err != nil { // Cannot configure getter database, show stopper
 			engine.Logger.Crit(fmt.Sprintf("Could not configure dataDb: %s exiting!", err))
 			return
@@ -536,15 +469,89 @@ func main() {
 		server.RpcRegister(&v1.CDRStatsV1{CdrStats: cdrStats}) // Public APIs
 	}
 
+	if cfg.PubSubServerEnabled {
+		pubSubServer = engine.NewPubSub(accountDb, cfg.HttpSkipTlsVerify)
+		server.RpcRegisterName("PubSubV1", pubSubServer)
+	}
+
+	if cfg.HistoryServerEnabled {
+		scribeServer, err = history.NewFileScribe(cfg.HistoryDir, cfg.HistorySaveInterval)
+		if err != nil {
+			engine.Logger.Crit(fmt.Sprintf("<HistoryServer> Could not start, error: %s", err.Error()))
+			exitChan <- true
+		}
+		server.RpcRegisterName("ScribeV1", scribeServer)
+	}
+	if cfg.UserServerEnabled {
+		userServer, err = engine.NewUserMap(accountDb, cfg.UserServerIndexes)
+		if err != nil {
+			engine.Logger.Crit(fmt.Sprintf("<UsersService> Could not start, error: %s", err.Error()))
+			exitChan <- true
+		}
+		server.RpcRegisterName("UsersV1", userServer)
+	}
+
 	// Register session manager service // FixMe: make sure this is thread safe
 	if cfg.SmFsConfig.Enabled || cfg.SmKamConfig.Enabled || cfg.SmOsipsConfig.Enabled { // Register SessionManagerV1 service
 		smRpc = new(v1.SessionManagerV1)
 		server.RpcRegister(smRpc)
 	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if cfg.RaterCdrStats != "" && cfg.RaterCdrStats != utils.INTERNAL {
+			if cdrStats, err = engine.NewProxyStats(cfg.RaterCdrStats, cfg.ConnectAttempts, -1); err != nil {
+				engine.Logger.Crit(fmt.Sprintf("<CdrStats> Could not connect to the server, error: %s", err.Error()))
+				exitChan <- true
+				return
+			}
+		}
+	}()
 
-	responder := &engine.Responder{ExitChan: exitChan}
-	apierRpcV1 := &v1.ApierV1{StorDb: loadDb, RatingDb: ratingDb, AccountDb: accountDb, CdrDb: cdrDb, LogDb: logDb, Config: cfg, Responder: responder, CdrStatsSrv: cdrStats}
-	apierRpcV2 := &v2.ApierV2{ApierV1: v1.ApierV1{StorDb: loadDb, RatingDb: ratingDb, AccountDb: accountDb, CdrDb: cdrDb, LogDb: logDb, Config: cfg, Responder: responder, CdrStatsSrv: cdrStats}}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if cfg.RaterHistoryServer != "" && cfg.RaterHistoryServer != utils.INTERNAL {
+			if scribeServer, err = history.NewProxyScribe(cfg.RaterHistoryServer, cfg.ConnectAttempts, -1); err != nil {
+				engine.Logger.Crit(fmt.Sprintf("<HistoryServer> Could not connect to the server, error: %s", err.Error()))
+				exitChan <- true
+				return
+			}
+		}
+		engine.SetHistoryScribe(scribeServer)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if cfg.RaterPubSubServer != "" && cfg.RaterPubSubServer != utils.INTERNAL {
+			if pubSubServer, err = engine.NewProxyPubSub(cfg.RaterPubSubServer, cfg.ConnectAttempts, -1); err != nil {
+				engine.Logger.Crit(fmt.Sprintf("<PubSubServer> Could not connect to the server, error: %s", err.Error()))
+				exitChan <- true
+				return
+			}
+		}
+		engine.SetPubSub(pubSubServer)
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if cfg.RaterUserServer != "" && cfg.RaterUserServer != utils.INTERNAL {
+			if userServer, err = engine.NewProxyUserService(cfg.RaterUserServer, cfg.ConnectAttempts, -1); err != nil {
+				engine.Logger.Crit(fmt.Sprintf("<UserServer> Could not connect to the server, error: %s", err.Error()))
+				exitChan <- true
+				return
+			}
+		}
+		engine.SetUserService(userServer)
+	}()
+	wg.Wait()
+
+	responder := &engine.Responder{ExitChan: exitChan, Stats: cdrStats}
+	apierRpcV1 := &v1.ApierV1{StorDb: loadDb, RatingDb: ratingDb, AccountDb: accountDb, CdrDb: cdrDb, LogDb: logDb, Config: cfg, Responder: responder, CdrStatsSrv: cdrStats, Users: userServer}
+	apierRpcV2 := &v2.ApierV2{
+		ApierV1: v1.ApierV1{StorDb: loadDb, RatingDb: ratingDb, AccountDb: accountDb, CdrDb: cdrDb, LogDb: logDb, Config: cfg, Responder: responder, CdrStatsSrv: cdrStats, Users: userServer}}
 
 	if cfg.RaterEnabled && !cfg.BalancerEnabled && cfg.RaterBalancer != utils.INTERNAL {
 		engine.Logger.Info("Registering Rater service")
@@ -567,30 +574,6 @@ func main() {
 		}
 	}
 
-	if cfg.RaterCdrStats != "" {
-		var statsConn engine.StatsInterface
-		if cfg.CDRSStats == utils.INTERNAL {
-			statsConn = cdrStats
-		} else {
-			delay := utils.Fib()
-			var client *rpcclient.RpcClient
-			for i := 0; i < cfg.CDRSReconnects; i++ {
-				client, err = rpcclient.NewRpcClient("tcp", cfg.CDRSStats, cfg.CDRSReconnects, utils.GOB)
-				if err == nil { //Connected so no need to reiterate
-					break
-				}
-				time.Sleep(delay())
-			}
-			if err != nil {
-				engine.Logger.Crit(fmt.Sprintf("<CDRS> Could not connect to stats server: %s", err.Error()))
-				exitChan <- true
-				return
-			}
-			statsConn = &engine.ProxyStats{Client: client}
-		}
-		responder.Stats = statsConn
-	}
-
 	if !stopHandled {
 		go generalSignalHandler()
 	}
@@ -605,30 +588,6 @@ func main() {
 			sched.LoadActionPlans(ratingDb)
 			sched.Loop()
 		}()
-	}
-
-	var histServChan chan struct{} // Will be initialized only if the server starts
-	if cfg.HistoryServerEnabled {
-		histServChan = make(chan struct{})
-		rpcWait = append(rpcWait, histServChan)
-		go startHistoryServer(histServChan)
-	}
-
-	if cfg.HistoryAgentEnabled {
-		engine.Logger.Info("Starting CGRateS History Agent.")
-		go startHistoryAgent(histServChan)
-	}
-
-	var pubsubServChan chan struct{} // Will be initialized only if the server starts
-	if cfg.PubSubServerEnabled {
-		pubsubServChan = make(chan struct{})
-		rpcWait = append(rpcWait, pubsubServChan)
-		go startPubSubServer(pubsubServChan, accountDb)
-	}
-
-	if cfg.PubSubAgentEnabled {
-		engine.Logger.Info("Starting CGRateS PubSub Agent.")
-		go startPubSubAgent(pubsubServChan, accountDb)
 	}
 
 	var cdrsChan chan struct{}
@@ -664,7 +623,7 @@ func main() {
 		} else if !cdrcEnabled {
 			cdrcEnabled = true // Mark that at least one cdrc service is active
 		}
-		go startCdrc(cdrsChan, cdrcCfgs, cfg.HttpSkipTlsVerify, cfg.ConfigReloads[utils.CDRC])
+		go startCdrc(responder, cdrsChan, cdrcCfgs, cfg.HttpSkipTlsVerify, cfg.ConfigReloads[utils.CDRC])
 	}
 	if cdrcEnabled {
 		engine.Logger.Info("Starting CGRateS CDR client.")

@@ -20,14 +20,16 @@ package config
 
 // General config section
 type GeneralJsonCfg struct {
-	Http_skip_tls_veify *bool
-	Rounding_decimals   *int
-	Dbdata_encoding     *string
-	Tpexport_dir        *string
-	Default_reqtype     *string
-	Default_category    *string
-	Default_tenant      *string
-	Default_subject     *string
+	Http_skip_tls_verify *bool
+	Rounding_decimals    *int
+	Dbdata_encoding      *string
+	Tpexport_dir         *string
+	Default_reqtype      *string
+	Default_category     *string
+	Default_tenant       *string
+	Default_subject      *string
+	Reconnects           *int
+	Connect_attempts     *int
 }
 
 // Listen config section
@@ -59,6 +61,9 @@ type RaterJsonCfg struct {
 	Enabled  *bool
 	Balancer *string
 	Cdrstats *string
+	Historys *string
+	Pubsubs  *string
+	Users    *string
 }
 
 // Scheduler config section
@@ -95,6 +100,7 @@ type CdrFieldJsonCfg struct {
 	Tag          *string
 	Type         *string
 	Cdr_field_id *string
+	Metatag_id   *string
 	Value        *string
 	Width        *int
 	Strip        *string
@@ -125,6 +131,7 @@ type CdreJsonCfg struct {
 // Cdrc config section
 type CdrcJsonCfg struct {
 	Enabled                    *bool
+	Dry_run                    *bool
 	Cdrs                       *string
 	Cdr_format                 *string
 	Field_separator            *string
@@ -132,9 +139,14 @@ type CdrcJsonCfg struct {
 	Data_usage_multiply_factor *float64
 	Cdr_in_dir                 *string
 	Cdr_out_dir                *string
+	Failed_calls_prefix        *string
 	Cdr_source_id              *string
 	Cdr_filter                 *string
-	Cdr_fields                 *[]*CdrFieldJsonCfg
+	Max_open_files             *int
+	Partial_record_cache       *string
+	Header_fields              *[]*CdrFieldJsonCfg
+	Content_fields             *[]*CdrFieldJsonCfg
+	Trailer_fields             *[]*CdrFieldJsonCfg
 }
 
 // SM-FreeSWITCH config section
@@ -211,21 +223,15 @@ type HistServJsonCfg struct {
 	Save_interval *string
 }
 
-// History agent config section
-type HistAgentJsonCfg struct {
-	Enabled *bool
-	Server  *string
-}
-
 // PubSub server config section
 type PubSubServJsonCfg struct {
 	Enabled *bool
 }
 
-// PubSub agent config section
-type PubSubAgentJsonCfg struct {
+// PubSub server config section
+type UserServJsonCfg struct {
 	Enabled *bool
-	Server  *string
+	Indexes *[]string
 }
 
 // Mailer config section

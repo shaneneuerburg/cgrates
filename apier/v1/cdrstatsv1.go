@@ -27,7 +27,7 @@ import (
 
 // Interact with Stats server
 type CDRStatsV1 struct {
-	CdrStats *engine.Stats
+	CdrStats engine.StatsInterface
 }
 
 type AttrGetMetrics struct {
@@ -43,6 +43,14 @@ func (sts *CDRStatsV1) GetMetrics(attr AttrGetMetrics, reply *map[string]float64
 
 func (sts *CDRStatsV1) GetQueueIds(empty string, reply *[]string) error {
 	return sts.CdrStats.GetQueueIds(0, reply)
+}
+
+func (sts *CDRStatsV1) GetQueue(id string, sq *engine.StatsQueue) error {
+	return sts.CdrStats.GetQueue(id, sq)
+}
+
+func (sts *CDRStatsV1) GetQueueTriggers(id string, ats *engine.ActionTriggerPriotityList) error {
+	return sts.CdrStats.GetQueueTriggers(id, ats)
 }
 
 func (sts *CDRStatsV1) ReloadQueues(attr utils.AttrCDRStatsReloadQueues, reply *string) error {

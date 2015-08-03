@@ -94,6 +94,13 @@ func populateDB() {
 				&Balance{Value: 11, Weight: 20},
 			}},
 	}
+	money := &Account{
+		Id: "*out:cgrates.org:money",
+		BalanceMap: map[string]BalanceChain{
+			utils.MONETARY + OUTBOUND: BalanceChain{
+				&Balance{Value: 10000, Weight: 10},
+			}},
+	}
 	if accountingStorage != nil && ratingStorage != nil {
 		ratingStorage.SetActions("TEST_ACTIONS", ats)
 		ratingStorage.SetActions("TEST_ACTIONS_ORDER", ats1)
@@ -102,6 +109,7 @@ func populateDB() {
 		accountingStorage.SetAccount(minitsboy)
 		accountingStorage.SetAccount(luna)
 		accountingStorage.SetAccount(max)
+		accountingStorage.SetAccount(money)
 	} else {
 		log.Fatal("Could not connect to db!")
 	}
@@ -187,7 +195,6 @@ func TestSplitSpansWeekend(t *testing.T) {
 		},
 	}
 
-	//log.Print("=============================")
 	timespans := cd.splitInTimeSpans()
 	if len(timespans) != 2 {
 		t.Log(cd.RatingInfos)
@@ -396,9 +403,10 @@ func TestSpansMultipleRatingPlans(t *testing.T) {
 	t1 := time.Date(2012, time.February, 7, 23, 50, 0, 0, time.UTC)
 	t2 := time.Date(2012, time.February, 8, 0, 30, 0, 0, time.UTC)
 	cd := &CallDescriptor{Direction: "*out", Category: "0", Tenant: "vdf", Subject: "rif", Destination: "0257308200", TimeStart: t1, TimeEnd: t2}
-	result, _ := cd.GetCost()
-	if result.Cost != 1200 || result.GetConnectFee() != 0 {
-		t.Errorf("Expected %v was %v", 1200, result)
+	cc, _ := cd.GetCost()
+	if cc.Cost != 2100 || cc.GetConnectFee() != 0 {
+		utils.LogFull(cc)
+		t.Errorf("Expected %v was %v (%v)", 2100, cc, cc.GetConnectFee())
 	}
 }
 
@@ -691,11 +699,11 @@ func TestMaxDebitWithAccountShared(t *testing.T) {
 	}
 	acc, _ := cd.getAccount()
 	balanceMap := acc.BalanceMap[utils.MONETARY+OUTBOUND]
-	if len(balanceMap) != 1 || balanceMap[0].Value != 0 {
+	if len(balanceMap) != 1 || balanceMap[0].GetValue() != 0 {
 		t.Errorf("Wrong shared balance debited: %+v", balanceMap[0])
 	}
 	other, err := accountingStorage.GetAccount("*out:vdf:empty10")
-	if err != nil || other.BalanceMap[utils.MONETARY+OUTBOUND][0].Value != 7.5 {
+	if err != nil || other.BalanceMap[utils.MONETARY+OUTBOUND][0].GetValue() != 7.5 {
 		t.Errorf("Error debiting shared balance: %+v", other.BalanceMap[utils.MONETARY+OUTBOUND][0])
 	}
 }
@@ -850,6 +858,41 @@ func TestMaxSesionTimeEmptyBalanceAndNoCost(t *testing.T) {
 	}
 }
 
+func TestMaxSesionTimeLong(t *testing.T) {
+	cd := &CallDescriptor{
+		TimeStart:   time.Date(2015, 07, 24, 13, 37, 0, 0, time.UTC),
+		TimeEnd:     time.Date(2015, 07, 24, 15, 37, 0, 0, time.UTC),
+		Direction:   "*out",
+		Category:    "call",
+		Tenant:      "cgrates.org",
+		Subject:     "money",
+		Destination: "0723",
+	}
+	acc, _ := accountingStorage.GetAccount("*out:cgrates.org:money")
+	allowedTime, err := cd.getMaxSessionDuration(acc)
+	if err != nil || allowedTime != cd.TimeEnd.Sub(cd.TimeStart) {
+		t.Error("Error get max session for acount:", allowedTime, err)
+	}
+}
+
+func TestMaxSesionTimeLongerThanMoney(t *testing.T) {
+	cd := &CallDescriptor{
+		TimeStart:   time.Date(2015, 07, 24, 13, 37, 0, 0, time.UTC),
+		TimeEnd:     time.Date(2015, 07, 24, 16, 37, 0, 0, time.UTC),
+		Direction:   "*out",
+		Category:    "call",
+		Tenant:      "cgrates.org",
+		Subject:     "money",
+		Destination: "0723",
+	}
+	acc, _ := accountingStorage.GetAccount("*out:cgrates.org:money")
+	allowedTime, err := cd.getMaxSessionDuration(acc)
+	expected, err := time.ParseDuration("2h46m40s")
+	if err != nil || allowedTime != expected {
+		t.Errorf("Expected: %v got %v", expected, allowedTime)
+	}
+}
+
 func TestDebitFromShareAndNormal(t *testing.T) {
 	ap, _ := ratingStorage.GetActionPlans("TOPUP_SHARED10_AT")
 	for _, at := range ap {
@@ -873,8 +916,8 @@ func TestDebitFromShareAndNormal(t *testing.T) {
 		t.Errorf("Debit from share and normal error: %+v, %v", cc, err)
 	}
 
-	if balanceMap[0].Value != 10 || balanceMap[1].Value != 27.5 {
-		t.Errorf("Error debiting from right balance: %v %v", balanceMap[0].Value, balanceMap[1].Value)
+	if balanceMap[0].GetValue() != 10 || balanceMap[1].GetValue() != 27.5 {
+		t.Errorf("Error debiting from right balance: %v %v", balanceMap[0].GetValue(), balanceMap[1].GetValue())
 	}
 }
 
@@ -901,8 +944,8 @@ func TestDebitFromEmptyShare(t *testing.T) {
 	}
 	acc, _ := cd.getAccount()
 	balanceMap := acc.BalanceMap[utils.MONETARY+OUTBOUND]
-	if len(balanceMap) != 2 || balanceMap[0].Value != 0 || balanceMap[1].Value != -2.5 {
-		t.Errorf("Error debiting from empty share: %+v", balanceMap[1].Value)
+	if len(balanceMap) != 2 || balanceMap[0].GetValue() != 0 || balanceMap[1].GetValue() != -2.5 {
+		t.Errorf("Error debiting from empty share: %+v", balanceMap[1].GetValue())
 	}
 }
 
@@ -930,16 +973,18 @@ func TestDebitNegatve(t *testing.T) {
 	acc, _ := cd.getAccount()
 	//utils.PrintFull(acc)
 	balanceMap := acc.BalanceMap[utils.MONETARY+OUTBOUND]
-	if len(balanceMap) != 1 || balanceMap[0].Value != -2.5 {
-		t.Errorf("Error debiting from empty share: %+v", balanceMap[0].Value)
+	if len(balanceMap) != 1 || balanceMap[0].GetValue() != -2.5 {
+		t.Errorf("Error debiting from empty share: %+v", balanceMap[0].GetValue())
 	}
 	cc, err = cd.MaxDebit()
-	//utils.PrintFull(cc)
+	acc, _ = cd.getAccount()
+	balanceMap = acc.BalanceMap[utils.MONETARY+OUTBOUND]
+	//utils.LogFull(balanceMap)
 	if err != nil || cc.Cost != 2.5 {
 		t.Errorf("Debit from empty share error: %+v, %v", cc, err)
 	}
-	if len(balanceMap) != 1 || balanceMap[0].Value != -5 {
-		t.Errorf("Error debiting from empty share: %+v", balanceMap[0].Value)
+	if len(balanceMap) != 1 || balanceMap[0].GetValue() != -5 {
+		t.Errorf("Error debiting from empty share: %+v", balanceMap[0].GetValue())
 	}
 }
 
@@ -1016,8 +1061,8 @@ func TestMaxDebitConsumesMinutes(t *testing.T) {
 		LoopIndex:     0,
 		DurationIndex: 0}
 	cd1.MaxDebit()
-	if cd1.account.BalanceMap[utils.VOICE+OUTBOUND][0].Value != 20 {
-		t.Error("Error using minutes: ", cd1.account.BalanceMap[utils.VOICE+OUTBOUND][0].Value)
+	if cd1.account.BalanceMap[utils.VOICE+OUTBOUND][0].GetValue() != 20 {
+		t.Error("Error using minutes: ", cd1.account.BalanceMap[utils.VOICE+OUTBOUND][0].GetValue())
 	}
 }
 

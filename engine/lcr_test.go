@@ -94,46 +94,49 @@ func TestLcrQOSSorterOACD(t *testing.T) {
 
 func TestLcrGetQosLimitsAll(t *testing.T) {
 	le := &LCREntry{
-		StrategyParams: "1.2;2.3;4;7;45s;67m;16s;17m;8.9;10.11;12.13;14.15",
+		StrategyParams: "1.2;2.3;4;7;45s;67m;16s;17m;8.9;10.11;12.13;14.15;2;3",
 	}
-	minAsr, maxAsr, minPdd, maxPdd, minAcd, maxAcd, minTcd, maxTcd, minAcc, maxAcc, minTcc, maxTcc := le.GetQOSLimits()
+	minAsr, maxAsr, minPdd, maxPdd, minAcd, maxAcd, minTcd, maxTcd, minAcc, maxAcc, minTcc, maxTcc, minDdc, maxDdc := le.GetQOSLimits()
 	if minAsr != 1.2 || maxAsr != 2.3 ||
 		minPdd != 4*time.Second || maxPdd != 7*time.Second ||
 		minAcd != 45*time.Second || maxAcd != 67*time.Minute ||
 		minTcd != 16*time.Second || maxTcd != 17*time.Minute ||
 		minAcc != 8.9 || maxAcc != 10.11 ||
-		minTcc != 12.13 || maxTcc != 14.15 {
-		t.Error("Wrong qos limits parsed: ", minAsr, maxAsr, minPdd, maxPdd, minAcd, maxAcd, minTcd, maxTcd, minAcc, maxAcc, minTcc, maxTcc)
+		minTcc != 12.13 || maxTcc != 14.15 ||
+		minDdc != 2 || maxDdc != 3 {
+		t.Error("Wrong qos limits parsed: ", minAsr, maxAsr, minPdd, maxPdd, minAcd, maxAcd, minTcd, maxTcd, minAcc, maxAcc, minTcc, maxTcc, minDdc, maxDdc)
 	}
 }
 
 func TestLcrGetQosLimitsSome(t *testing.T) {
 	le := &LCREntry{
-		StrategyParams: "1.2;;3;;;67m;;30m;1;;3;",
+		StrategyParams: "1.2;;3;;;67m;;30m;1;;3;;;2",
 	}
-	minAsr, maxAsr, minPdd, maxPdd, minAcd, maxAcd, minTcd, maxTcd, minAcc, maxAcc, minTcc, maxTcc := le.GetQOSLimits()
+	minAsr, maxAsr, minPdd, maxPdd, minAcd, maxAcd, minTcd, maxTcd, minAcc, maxAcc, minTcc, maxTcc, minDdc, maxDdc := le.GetQOSLimits()
 	if minAsr != 1.2 || maxAsr != -1 ||
 		minPdd != 3*time.Second || maxPdd != -1 ||
 		minAcd != -1 || maxAcd != 67*time.Minute ||
 		minTcd != -1 || maxTcd != 30*time.Minute ||
 		minAcc != 1 || maxAcc != -1 ||
-		minTcc != 3 || maxTcc != -1 {
-		t.Error("Wrong qos limits parsed: ", minAsr, maxAsr, minAcd, maxAcd, minTcd, maxTcd)
+		minTcc != 3 || maxTcc != -1 ||
+		minDdc != -1 || maxDdc != 2 {
+		t.Error("Wrong qos limits parsed: ", minAsr, maxAsr, minAcd, maxAcd, minTcd, maxTcd, minTcc, maxTcc, minDdc, maxDdc)
 	}
 }
 
 func TestLcrGetQosLimitsNone(t *testing.T) {
 	le := &LCREntry{
-		StrategyParams: ";;;;;;;;;",
+		StrategyParams: ";;;;;;;;;;;",
 	}
-	minAsr, maxAsr, minPdd, maxPdd, minAcd, maxAcd, minTcd, maxTcd, minAcc, maxAcc, minTcc, maxTcc := le.GetQOSLimits()
+	minAsr, maxAsr, minPdd, maxPdd, minAcd, maxAcd, minTcd, maxTcd, minAcc, maxAcc, minTcc, maxTcc, minDdc, maxDdc := le.GetQOSLimits()
 	if minAsr != -1 || maxAsr != -1 ||
 		minPdd != -1 || maxPdd != -1 ||
 		minAcd != -1 || maxAcd != -1 ||
 		minTcd != -1 || maxTcd != -1 ||
 		minAcc != -1 || maxAcc != -1 ||
-		minTcc != -1 || maxTcc != -1 {
-		t.Error("Wrong qos limits parsed: ", minAsr, maxAsr, minAcd, maxAcd)
+		minTcc != -1 || maxTcc != -1 ||
+		minDdc != -1 || maxDdc != -1 {
+		t.Error("Wrong qos limits parsed: ", minAsr, maxAsr, minAcd, maxAcd, minDdc, maxDdc)
 	}
 }
 
@@ -212,11 +215,11 @@ func TestLcrGet(t *testing.T) {
 func TestLcrRequestAsCallDescriptor(t *testing.T) {
 	sTime := time.Date(2015, 04, 06, 17, 40, 0, 0, time.UTC)
 	callDur := time.Duration(1) * time.Minute
-	lcrReq := &LcrRequest{Account: "1001", StartTime: sTime.String()}
+	lcrReq := &LcrRequest{Account: "2001", StartTime: sTime.String()}
 	if _, err := lcrReq.AsCallDescriptor(); err == nil || err != utils.ErrMandatoryIeMissing {
 		t.Error("Unexpected error received: %v", err)
 	}
-	lcrReq = &LcrRequest{Account: "1001", Destination: "1002", StartTime: sTime.String()}
+	lcrReq = &LcrRequest{Account: "2001", Destination: "2002", StartTime: sTime.String()}
 	eCd := &CallDescriptor{
 		Direction:   utils.OUT,
 		Tenant:      config.CgrConfig().DefaultTenant,
@@ -273,5 +276,501 @@ func TestLCRCostSuppliersString(t *testing.T) {
 		t.Error(err)
 	} else if supplStr != eSupplStr {
 		t.Errorf("Expecting: %s, received: %s", eSupplStr, supplStr)
+	}
+}
+
+func TestLCRCostSuppliersLoad(t *testing.T) {
+	setupTime := time.Date(2015, 7, 31, 6, 43, 0, 0, time.UTC)
+	lcrCost := &LCRCost{
+		Entry: &LCREntry{DestinationId: utils.ANY, RPCategory: "call", Strategy: LCR_STRATEGY_LOAD, StrategyParams: "ivo12:10;dan12:3;*default:7", Weight: 10.0},
+		SupplierCosts: []*LCRSupplierCost{
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:ivo12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  3 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:dan12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:rif12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+				},
+			},
+		},
+	}
+	lcrCost.Sort()
+	if lcrCost.SupplierCosts[0].Supplier != "*out:tenant12:call:dan12" {
+		t.Error("Error soring on load distribution: ", utils.ToIJSON(lcrCost))
+	}
+}
+
+func TestLCRCostSuppliersLoadAllRounded(t *testing.T) {
+	setupTime := time.Date(2015, 7, 31, 6, 43, 0, 0, time.UTC)
+	lcrCost := &LCRCost{
+		Entry: &LCREntry{DestinationId: utils.ANY, RPCategory: "call", Strategy: LCR_STRATEGY_LOAD, StrategyParams: "ivo12:3;dan12:5;*default:2", Weight: 10.0},
+		SupplierCosts: []*LCRSupplierCost{
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:ivo12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  3 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:dan12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime.Add(200 * time.Minute)}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:rif12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime.Add(400 * time.Minute)}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+				},
+			},
+		},
+	}
+	lcrCost.Sort()
+	if lcrCost.SupplierCosts[0].Supplier != "*out:tenant12:call:ivo12" ||
+		lcrCost.SupplierCosts[1].Supplier != "*out:tenant12:call:dan12" ||
+		lcrCost.SupplierCosts[2].Supplier != "*out:tenant12:call:rif12" {
+		t.Error("Error soring on load distribution: ", utils.ToIJSON(lcrCost))
+	}
+}
+
+func TestLCRCostSuppliersLoadAllOver(t *testing.T) {
+	setupTime := time.Date(2015, 7, 31, 6, 43, 0, 0, time.UTC)
+	lcrCost := &LCRCost{
+		Entry: &LCREntry{DestinationId: utils.ANY, RPCategory: "call", Strategy: LCR_STRATEGY_LOAD, StrategyParams: "ivo12:2;dan12:4;*default:2", Weight: 10.0},
+		SupplierCosts: []*LCRSupplierCost{
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:ivo12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  3 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:dan12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime.Add(200 * time.Minute)}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:rif12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime.Add(400 * time.Minute)}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+				},
+			},
+		},
+	}
+	lcrCost.Sort()
+	if lcrCost.SupplierCosts[0].Supplier != "*out:tenant12:call:ivo12" ||
+		lcrCost.SupplierCosts[1].Supplier != "*out:tenant12:call:dan12" ||
+		lcrCost.SupplierCosts[2].Supplier != "*out:tenant12:call:rif12" {
+		t.Error("Error soring on load distribution: ", utils.ToIJSON(lcrCost))
+	}
+}
+
+func TestLCRCostSuppliersLoadAllOverMisingDefault(t *testing.T) {
+	setupTime := time.Date(2015, 7, 31, 6, 43, 0, 0, time.UTC)
+	lcrCost := &LCRCost{
+		Entry: &LCREntry{DestinationId: utils.ANY, RPCategory: "call", Strategy: LCR_STRATEGY_LOAD, StrategyParams: "ivo12:2;dan12:4", Weight: 10.0},
+		SupplierCosts: []*LCRSupplierCost{
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:ivo12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  3 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:dan12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime.Add(200 * time.Minute)}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:rif12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime.Add(400 * time.Minute)}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+				},
+			},
+		},
+	}
+	lcrCost.Sort()
+	if len(lcrCost.SupplierCosts) != 2 ||
+		lcrCost.SupplierCosts[0].Supplier != "*out:tenant12:call:ivo12" ||
+		lcrCost.SupplierCosts[1].Supplier != "*out:tenant12:call:dan12" {
+		t.Error("Error soring on load distribution: ", utils.ToIJSON(lcrCost))
+	}
+}
+
+func TestLCRCostSuppliersLoadAllOverMisingParams(t *testing.T) {
+	setupTime := time.Date(2015, 7, 31, 6, 43, 0, 0, time.UTC)
+	lcrCost := &LCRCost{
+		Entry: &LCREntry{DestinationId: utils.ANY, RPCategory: "call", Strategy: LCR_STRATEGY_LOAD, StrategyParams: "", Weight: 10.0},
+		SupplierCosts: []*LCRSupplierCost{
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:ivo12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  3 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:dan12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime.Add(60 * time.Minute)}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+				},
+			},
+			&LCRSupplierCost{
+				Supplier: "*out:tenant12:call:rif12",
+				supplierQueues: []*StatsQueue{
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  7 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{}, &QCdr{SetupTime: setupTime.Add(200 * time.Minute)}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  10 * time.Minute,
+						},
+					},
+					&StatsQueue{
+						Cdrs: []*QCdr{&QCdr{}, &QCdr{SetupTime: setupTime}},
+						conf: &CdrStats{
+							QueueLength: 0,
+							TimeWindow:  1 * time.Minute,
+						},
+					},
+				},
+			},
+		},
+	}
+	lcrCost.Sort()
+	if len(lcrCost.SupplierCosts) != 3 {
+		t.Error("Error soring on load distribution: ", utils.ToIJSON(lcrCost))
 	}
 }

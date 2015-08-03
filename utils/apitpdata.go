@@ -252,6 +252,12 @@ func FallbackSubjKeys(direction, tenant, tor, fallbackSubjects string) []string 
 	return sslice
 }
 
+type AttrSetDestination struct { //ToDo
+	Id        string
+	Prefixes  []string
+	Overwrite bool
+}
+
 type AttrTPRatingProfileIds struct {
 	TPid      string // Tariff plan id
 	Tenant    string // Tenant's Id
@@ -505,6 +511,14 @@ type AttrGetAccount struct {
 	Direction string
 }
 
+type AttrGetAccounts struct {
+	Tenant     string
+	Direction  string
+	AccountIds []string
+	Offset     int // Set the item offset
+	Limit      int // Limit number of items retrieved
+}
+
 // Data used to do remote cache reloads via api
 type ApiReloadCache struct {
 	DestinationIds   []string
@@ -532,6 +546,8 @@ type CacheStats struct {
 	AccountAliases  int
 	DerivedChargers int
 	LcrProfiles     int
+	CdrStats        int
+	Users           int
 }
 
 type AttrCachedItemAge struct {
@@ -742,6 +758,13 @@ type AttrLoadTpFromFolder struct {
 	DryRun     bool   // Do not write to database but parse only
 	FlushDb    bool   // Flush previous data before loading new one
 	Validate   bool   // Run structural checks on data
+}
+
+type AttrImportTPFromFolder struct {
+	TPid         string
+	FolderPath   string
+	RunId        string
+	CsvSeparator string
 }
 
 type AttrGetDestination struct {
@@ -1058,6 +1081,12 @@ type AttrSetAccount struct {
 	Account       string
 	ActionPlanId  string
 	AllowNegative bool
+}
+
+type AttrRemoveAccount struct {
+	Tenant    string
+	Direction string
+	Account   string
 }
 
 type AttrGetSMASessions struct {

@@ -55,6 +55,7 @@ const (
 	ALLOW_NEGATIVE  = "*allow_negative"
 	DENY_NEGATIVE   = "*deny_negative"
 	RESET_ACCOUNT   = "*reset_account"
+	REMOVE_ACCOUNT  = "*remove_account"
 	TOPUP_RESET     = "*topup_reset"
 	TOPUP           = "*topup"
 	DEBIT_RESET     = "*debit_reset"
@@ -169,7 +170,7 @@ func parseTemplateValue(rsrFlds utils.RSRFields, acnt *Account, action *Action) 
 		case "balance_id":
 			parsedValue += rsrFld.ParseValue(action.Balance.Id)
 		case "balance_value":
-			parsedValue += rsrFld.ParseValue(strconv.FormatFloat(action.Balance.Value, 'f', -1, 64))
+			parsedValue += rsrFld.ParseValue(strconv.FormatFloat(action.Balance.GetValue(), 'f', -1, 64))
 		case "destination_id":
 			parsedValue += rsrFld.ParseValue(action.Balance.DestinationIds)
 		case "extra_params":
@@ -374,8 +375,8 @@ func resetCountersAction(ub *Account, sq *StatsQueueTriggered, a *Action, acs Ac
 }
 
 func genericMakeNegative(a *Action) {
-	if a.Balance != nil && a.Balance.Value >= 0 { // only apply if not allready negative
-		a.Balance.Value = -a.Balance.Value
+	if a.Balance != nil && a.Balance.GetValue() >= 0 { // only apply if not allready negative
+		a.Balance.SetValue(-a.Balance.GetValue())
 	}
 }
 
@@ -423,12 +424,12 @@ func callUrl(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actions) (err 
 	if sq != nil {
 		o = sq
 	}
-	jsn, err := json.Marshal(o)
-	if err != nil {
-		return err
-	}
+	//jsn, err := json.Marshal(o)
+	//if err != nil {
+	//	return err
+	//}
 	cfg := config.CgrConfig()
-	_, err = utils.HttpJsonPost(a.ExtraParameters, cfg.HttpSkipTlsVerify, jsn)
+	_, err = utils.HttpJsonPost(a.ExtraParameters, cfg.HttpSkipTlsVerify, o)
 	return err
 }
 
@@ -441,17 +442,17 @@ func callUrlAsync(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actions) 
 	if sq != nil {
 		o = sq
 	}
-	jsn, err := json.Marshal(o)
-	if err != nil {
-		return err
-	}
+	//jsn, err := json.Marshal(o)
+	//if err != nil {
+	//	return err
+	//}
 	cfg := config.CgrConfig()
 	go func() {
 		for i := 0; i < 5; i++ { // Loop so we can increase the success rate on best effort
-			if _, err = utils.HttpJsonPost(a.ExtraParameters, cfg.HttpSkipTlsVerify, o); err == nil {
+			if _, err := utils.HttpJsonPost(a.ExtraParameters, cfg.HttpSkipTlsVerify, o); err == nil {
 				break // Success, no need to reinterate
 			} else if i == 4 { // Last iteration, syslog the warning
-				Logger.Warning(fmt.Sprintf("<Triggers> WARNING: Failed calling url: [%s], error: [%s], triggered: %s", a.ExtraParameters, err.Error(), jsn))
+				Logger.Warning(fmt.Sprintf("<Triggers> WARNING: Failed calling url: [%s], error: [%s], triggered: %s", a.ExtraParameters, err.Error(), o))
 				break
 			}
 			time.Sleep(time.Duration(i) * time.Minute)

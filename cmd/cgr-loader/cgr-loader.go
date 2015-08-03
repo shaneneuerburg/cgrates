@@ -34,19 +34,19 @@ import (
 var (
 	//separator = flag.String("separator", ",", "Default field separator")
 	cgrConfig, _  = config.NewDefaultCGRConfig()
-	ratingdb_type = flag.String("ratingdb_type", cgrConfig.RatingDBType, "The type of the RatingDb database <redis>")
-	ratingdb_host = flag.String("ratingdb_host", cgrConfig.RatingDBHost, "The RatingDb host to connect to.")
-	ratingdb_port = flag.String("ratingdb_port", cgrConfig.RatingDBPort, "The RatingDb port to bind to.")
-	ratingdb_name = flag.String("ratingdb_name", cgrConfig.RatingDBName, "The name/number of the RatingDb to connect to.")
-	ratingdb_user = flag.String("ratingdb_user", cgrConfig.RatingDBUser, "The RatingDb user to sign in as.")
-	ratingdb_pass = flag.String("ratingdb_passwd", cgrConfig.RatingDBPass, "The RatingDb user's password.")
+	ratingdb_type = flag.String("ratingdb_type", cgrConfig.TpDbType, "The type of the RatingDb database <redis>")
+	ratingdb_host = flag.String("ratingdb_host", cgrConfig.TpDbHost, "The RatingDb host to connect to.")
+	ratingdb_port = flag.String("ratingdb_port", cgrConfig.TpDbPort, "The RatingDb port to bind to.")
+	ratingdb_name = flag.String("ratingdb_name", cgrConfig.TpDbName, "The name/number of the RatingDb to connect to.")
+	ratingdb_user = flag.String("ratingdb_user", cgrConfig.TpDbUser, "The RatingDb user to sign in as.")
+	ratingdb_pass = flag.String("ratingdb_passwd", cgrConfig.TpDbPass, "The RatingDb user's password.")
 
-	accountdb_type = flag.String("accountdb_type", cgrConfig.AccountDBType, "The type of the AccountingDb database <redis>")
-	accountdb_host = flag.String("accountdb_host", cgrConfig.AccountDBHost, "The AccountingDb host to connect to.")
-	accountdb_port = flag.String("accountdb_port", cgrConfig.AccountDBPort, "The AccountingDb port to bind to.")
-	accountdb_name = flag.String("accountdb_name", cgrConfig.AccountDBName, "The name/number of the AccountingDb to connect to.")
-	accountdb_user = flag.String("accountdb_user", cgrConfig.AccountDBUser, "The AccountingDb user to sign in as.")
-	accountdb_pass = flag.String("accountdb_passwd", cgrConfig.AccountDBPass, "The AccountingDb user's password.")
+	accountdb_type = flag.String("accountdb_type", cgrConfig.DataDbType, "The type of the AccountingDb database <redis>")
+	accountdb_host = flag.String("accountdb_host", cgrConfig.DataDbHost, "The AccountingDb host to connect to.")
+	accountdb_port = flag.String("accountdb_port", cgrConfig.DataDbPort, "The AccountingDb port to bind to.")
+	accountdb_name = flag.String("accountdb_name", cgrConfig.DataDbName, "The name/number of the AccountingDb to connect to.")
+	accountdb_user = flag.String("accountdb_user", cgrConfig.DataDbUser, "The AccountingDb user to sign in as.")
+	accountdb_pass = flag.String("accountdb_passwd", cgrConfig.DataDbPass, "The AccountingDb user's password.")
 
 	stor_db_type = flag.String("stordb_type", cgrConfig.StorDBType, "The type of the storDb database <mysql>")
 	stor_db_host = flag.String("stordb_host", cgrConfig.StorDBHost, "The storDb host to connect to.")
@@ -70,6 +70,7 @@ var (
 	historyServer   = flag.String("history_server", cgrConfig.RPCGOBListen, "The history server address:port, empty to disable automaticautomatic  history archiving")
 	raterAddress    = flag.String("rater_address", cgrConfig.RPCGOBListen, "Rater service to contact for cache reloads, empty to disable automatic cache reloads")
 	cdrstatsAddress = flag.String("cdrstats_address", cgrConfig.RPCGOBListen, "CDRStats service to contact for data reloads, empty to disable automatic data reloads")
+	usersAddress    = flag.String("users_address", cgrConfig.RPCGOBListen, "Users service to contact for data reloads, empty to disable automatic data reloads")
 	runId           = flag.String("runid", "", "Uniquely identify an import/load, postpended to some automatic fields")
 )
 
@@ -83,7 +84,7 @@ func main() {
 	var ratingDb engine.RatingStorage
 	var accountDb engine.AccountingStorage
 	var storDb engine.LoadStorage
-	var rater, cdrstats *rpc.Client
+	var rater, cdrstats, users *rpc.Client
 	var loader engine.LoadReader
 	// Init necessary db connections, only if not already
 	if !*dryRun { // make sure we do not need db connections on dry run, also not importing into any stordb
@@ -154,7 +155,8 @@ func main() {
 			path.Join(*dataPath, utils.ACTION_TRIGGERS_CSV),
 			path.Join(*dataPath, utils.ACCOUNT_ACTIONS_CSV),
 			path.Join(*dataPath, utils.DERIVED_CHARGERS_CSV),
-			path.Join(*dataPath, utils.CDR_STATS_CSV))
+			path.Join(*dataPath, utils.CDR_STATS_CSV),
+			path.Join(*dataPath, utils.USERS_CSV))
 	}
 	tpReader := engine.NewTpReader(ratingDb, accountDb, loader, *tpid)
 	err = tpReader.LoadAll()
@@ -173,12 +175,12 @@ func main() {
 		return
 	}
 	if *historyServer != "" { // Init scribeAgent so we can store the differences
-		if scribeAgent, err := history.NewProxyScribe(*historyServer); err != nil {
+		if scribeAgent, err := history.NewProxyScribe(*historyServer, 3, 3); err != nil {
 			log.Fatalf("Could not connect to history server, error: %s. Make sure you have properly configured it via -history_server flag.", err.Error())
 			return
 		} else {
 			engine.SetHistoryScribe(scribeAgent)
-			defer scribeAgent.Client.Close()
+			//defer scribeAgent.Client.Close()
 		}
 	} else {
 		log.Print("WARNING: Rates history archiving is disabled!")
@@ -204,6 +206,19 @@ func main() {
 		}
 	} else {
 		log.Print("WARNING: CDRStats automatic data reload is disabled!")
+	}
+	if *usersAddress != "" { // Init connection to rater so we can reload it's data
+		if *usersAddress == *raterAddress {
+			users = rater
+		} else {
+			users, err = rpc.Dial("tcp", *usersAddress)
+			if err != nil {
+				log.Fatalf("Could not connect to Users API: %s", err.Error())
+				return
+			}
+		}
+	} else {
+		log.Print("WARNING: Users automatic data reload is disabled!")
 	}
 
 	// write maps to database
@@ -269,6 +284,20 @@ func main() {
 			if err := cdrstats.Call("CDRStatsV1.ReloadQueues", utils.AttrCDRStatsReloadQueues{StatsQueueIds: statsQueueIds}, &reply); err != nil {
 				log.Printf("WARNING: Failed reloading stat queues, error: %s\n", err.Error())
 			}
+		}
+	}
+
+	if users != nil {
+		userIds, _ := tpReader.GetLoadedIds(utils.USERS_PREFIX)
+		if len(userIds) > 0 {
+			if *verbose {
+				log.Print("Reloading Users data")
+			}
+			var reply string
+			if err := cdrstats.Call("UsersV1.ReloadUsers", "", &reply); err != nil {
+				log.Printf("WARNING: Failed reloading users data, error: %s\n", err.Error())
+			}
+
 		}
 	}
 }

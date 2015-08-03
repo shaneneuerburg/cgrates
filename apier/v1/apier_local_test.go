@@ -1376,7 +1376,7 @@ func TestApierCdrServer(t *testing.T) {
 		"answer_time": []string{"2013-11-07T08:42:26Z"}, "duration": []string{"10"}, "field_extr1": []string{"val_extr1"}, "fieldextr2": []string{"valextr2"}}
 	for _, cdrForm := range []url.Values{cdrForm1, cdrForm2} {
 		cdrForm.Set(utils.CDRSOURCE, utils.TEST_SQL)
-		if _, err := httpClient.PostForm(fmt.Sprintf("http://%s/cdr_post", "127.0.0.1:2080"), cdrForm); err != nil {
+		if _, err := httpClient.PostForm(fmt.Sprintf("http://%s/cdr_http", "127.0.0.1:2080"), cdrForm); err != nil {
 			t.Error(err.Error())
 		}
 	}
@@ -1506,6 +1506,35 @@ func TestApierLocalRemDC(t *testing.T) {
 		t.Error("Unexpected error", err.Error())
 	} else if reply != utils.OK {
 		t.Error("Unexpected reply returned", reply)
+	}
+}
+
+func TestApierLocalSetDestination(t *testing.T) {
+	if !*testLocal {
+		return
+	}
+	attrs := utils.AttrSetDestination{Id: "TEST_SET_DESTINATION", Prefixes: []string{"+4986517174963", "+4986517174960"}}
+	var reply string
+	if err := rater.Call("ApierV1.SetDestination", attrs, &reply); err != nil {
+		t.Error("Unexpected error", err.Error())
+	} else if reply != utils.OK {
+		t.Error("Unexpected reply returned", reply)
+	}
+	if err := rater.Call("ApierV1.SetDestination", attrs, &reply); err == nil || err.Error() != "EXISTS" { // Second time without overwrite should generate error
+		t.Error("Unexpected error", err.Error())
+	}
+	attrs = utils.AttrSetDestination{Id: "TEST_SET_DESTINATION", Prefixes: []string{"+4986517174963", "+4986517174964"}, Overwrite: true}
+	if err := rater.Call("ApierV1.SetDestination", attrs, &reply); err != nil {
+		t.Error("Unexpected error", err.Error())
+	} else if reply != utils.OK {
+		t.Error("Unexpected reply returned", reply)
+	}
+	eDestination := engine.Destination{Id: attrs.Id, Prefixes: attrs.Prefixes}
+	var rcvDestination engine.Destination
+	if err := rater.Call("ApierV1.GetDestination", attrs.Id, &rcvDestination); err != nil {
+		t.Error("Unexpected error", err.Error())
+	} else if !reflect.DeepEqual(eDestination, rcvDestination) {
+		t.Error("Expecting: %+v, received: %+v", eDestination, rcvDestination)
 	}
 }
 
@@ -1696,7 +1725,7 @@ func TestApierImportTPFromFolderPath(t *testing.T) {
 		return
 	}
 	var reply string
-	if err := rater.Call("ApierV1.ImportTariffPlanFromFolder", AttrImportTPFromFolder{TPid: "TEST_TPID2", FolderPath: "/usr/share/cgrates/tariffplans/tutorial"}, &reply); err != nil {
+	if err := rater.Call("ApierV1.ImportTariffPlanFromFolder", utils.AttrImportTPFromFolder{TPid: "TEST_TPID2", FolderPath: "/usr/share/cgrates/tariffplans/tutorial"}, &reply); err != nil {
 		t.Error("Got error on ApierV1.ImportTarrifPlanFromFolder: ", err.Error())
 	} else if reply != utils.OK {
 		t.Error("Calling ApierV1.ImportTarrifPlanFromFolder got reply: ", reply)

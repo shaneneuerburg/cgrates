@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -79,7 +80,7 @@ func (self *ApierV1) RemActionTiming(attrs AttrRemActionTiming, reply *string) e
 			return utils.NewErrMandatoryIeMissing(missing...)
 		}
 	}
-	_, err := engine.AccLock.Guard(func() (interface{}, error) {
+	_, err := engine.Guardian.Guard(func() (interface{}, error) {
 		ats, err := self.RatingDb.GetActionPlans(attrs.ActionPlanId)
 		if err != nil {
 			return 0, err
@@ -129,7 +130,7 @@ func (self *ApierV1) RemAccountActionTriggers(attrs AttrRemAcntActionTriggers, r
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	balanceId := utils.AccountKey(attrs.Tenant, attrs.Account, attrs.Direction)
-	_, err := engine.AccLock.Guard(func() (interface{}, error) {
+	_, err := engine.Guardian.Guard(func() (interface{}, error) {
 		ub, err := self.AccountDb.GetAccount(balanceId)
 		if err != nil {
 			return 0, err
@@ -162,7 +163,7 @@ func (self *ApierV1) SetAccount(attr utils.AttrSetAccount, reply *string) error 
 	balanceId := utils.AccountKey(attr.Tenant, attr.Account, attr.Direction)
 	var ub *engine.Account
 	var ats engine.ActionPlans
-	_, err := engine.AccLock.Guard(func() (interface{}, error) {
+	_, err := engine.Guardian.Guard(func() (interface{}, error) {
 		if bal, _ := self.AccountDb.GetAccount(balanceId); bal != nil {
 			ub = bal
 		} else { // Not found in db, create it here
@@ -192,7 +193,7 @@ func (self *ApierV1) SetAccount(attr utils.AttrSetAccount, reply *string) error 
 		return utils.NewErrServerError(err)
 	}
 	if len(ats) != 0 {
-		_, err := engine.AccLock.Guard(func() (interface{}, error) { // ToDo: Try locking it above on read somehow
+		_, err := engine.Guardian.Guard(func() (interface{}, error) { // ToDo: Try locking it above on read somehow
 			if err := self.RatingDb.SetActionPlans(attr.ActionPlanId, ats); err != nil {
 				return 0, err
 			}
@@ -210,15 +211,26 @@ func (self *ApierV1) SetAccount(attr utils.AttrSetAccount, reply *string) error 
 	return nil
 }
 
-type AttrGetAccounts struct {
-	Tenant     string
-	Direction  string
-	AccountIds []string
-	Offset     int // Set the item offset
-	Limit      int // Limit number of items retrieved
+func (self *ApierV1) RemoveAccount(attr utils.AttrRemoveAccount, reply *string) error {
+	if missing := utils.MissingStructFields(&attr, []string{"Tenant", "Direction", "Account"}); len(missing) != 0 {
+		return utils.NewErrMandatoryIeMissing(missing...)
+	}
+	accountId := utils.AccountKey(attr.Tenant, attr.Account, attr.Direction)
+	_, err := engine.Guardian.Guard(func() (interface{}, error) {
+		if err := self.AccountDb.RemoveAccount(accountId); err != nil {
+			return 0, err
+		}
+		return 0, nil
+	}, accountId)
+	if err != nil {
+		return utils.NewErrServerError(err)
+	}
+
+	*reply = OK
+	return nil
 }
 
-func (self *ApierV1) GetAccounts(attr AttrGetAccounts, reply *[]*engine.Account) error {
+func (self *ApierV1) GetAccounts(attr utils.AttrGetAccounts, reply *[]*engine.Account) error {
 	if len(attr.Tenant) == 0 {
 		return utils.NewErrMandatoryIeMissing("Tenanat")
 	}
@@ -244,7 +256,8 @@ func (self *ApierV1) GetAccounts(attr AttrGetAccounts, reply *[]*engine.Account)
 	}
 	var limitedAccounts []string
 	if attr.Limit != 0 {
-		limitedAccounts = accountKeys[attr.Offset : attr.Offset+attr.Limit]
+		max := math.Min(float64(attr.Offset+attr.Limit), float64(len(accountKeys)))
+		limitedAccounts = accountKeys[attr.Offset:int(max)]
 	} else {
 		limitedAccounts = accountKeys[attr.Offset:]
 	}

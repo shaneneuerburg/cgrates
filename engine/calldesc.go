@@ -68,7 +68,7 @@ var (
 	globalRoundingDecimals = 10
 	historyScribe          history.Scribe
 	pubSubServer           PublisherSubscriber
-	//historyScribe, _ = history.NewMockScribe()
+	userService            UserService
 )
 
 // Exported method to set the storage getter.
@@ -108,6 +108,17 @@ func SetPubSub(ps PublisherSubscriber) {
 	pubSubServer = ps
 }
 
+func SetUserService(us UserService) {
+	userService = us
+}
+
+func Publish(event CgrEvent) {
+	if pubSubServer != nil {
+		var s string
+		pubSubServer.Publish(event, &s)
+	}
+}
+
 /*
 The input stucture that contains call information.
 */
@@ -121,7 +132,8 @@ type CallDescriptor struct {
 	FallbackSubject                       string        // the subject to check for destination if not found on primary subject
 	RatingInfos                           RatingInfos
 	Increments                            Increments
-	TOR                                   string // used unit balances selector
+	TOR                                   string            // used unit balances selector
+	ExtraFields                           map[string]string // Extra fields, mostly used for user profile matching
 	// session limits
 	MaxRate      float64
 	MaxRateUnit  time.Duration
@@ -326,6 +338,7 @@ func (cd *CallDescriptor) splitInTimeSpans() (timespans []*TimeSpan) {
 				for i := 0; i < len(timespans); i++ {
 					newTs := timespans[i].SplitByRatingPlan(rp)
 					if newTs != nil {
+						//log.Print("NEW TS", newTs.TimeStart)
 						timespans = append(timespans, newTs)
 					} else {
 						afterEnd = true
@@ -334,8 +347,23 @@ func (cd *CallDescriptor) splitInTimeSpans() (timespans []*TimeSpan) {
 				}
 			}
 		}
-
 	}
+	// split on days
+	/*for i := 0; i < len(timespans); i++ {
+		if timespans[i].TimeStart.Day() != timespans[i].TimeEnd.Day() {
+			//log.Print("TS: ", timespans[i].TimeStart, timespans[i].TimeEnd)
+			start := timespans[i].TimeStart
+			newTs := timespans[i].SplitByTime(time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location()).Add(24 * time.Hour))
+			if newTs != nil {
+				//log.Print("NEW TS: ", newTs.TimeStart, newTs.TimeEnd)
+				// insert the new timespan
+				index := i + 1
+				timespans = append(timespans, nil)
+				copy(timespans[index+1:], timespans[index:])
+				timespans[index] = newTs
+			}
+		}
+	}*/
 	// Logger.Debug(fmt.Sprintf("After SplitByRatingPlan: %+v", timespans))
 	// split on rate intervals
 	for i := 0; i < len(timespans); i++ {
@@ -345,16 +373,20 @@ func (cd *CallDescriptor) splitInTimeSpans() (timespans []*TimeSpan) {
 		// Logger.Debug(fmt.Sprintf("rp: %+v", rp))
 		//timespans[i].RatingPlan = nil
 		rp.RateIntervals.Sort()
+		/*for _, interval := range rp.RateIntervals {
+			if !timespans[i].hasBetterRateIntervalThan(interval) {
+				timespans[i].SetRateInterval(interval)
+			}
+		}*/
+		//log.Print("ORIG TS: ", timespans[i].TimeStart, timespans[i].TimeEnd)
+		//log.Print(timespans[i].RateInterval)
 		for _, interval := range rp.RateIntervals {
 			//log.Printf("\tINTERVAL: %+v", interval.Timing)
-			if timespans[i].hasBetterRateIntervalThan(interval) {
-				//log.Print("continue")
-				continue // if the timespan has an interval than it already has a heigher weight
-			}
 			newTs := timespans[i].SplitByRateInterval(interval, cd.TOR != utils.VOICE)
 			//utils.PrintFull(timespans[i])
 			//utils.PrintFull(newTs)
 			if newTs != nil {
+				//log.Print("NEW TS: ", newTs.TimeStart, newTs.TimeEnd)
 				newTs.setRatingInfo(rp)
 				// insert the new timespan
 				index := i + 1
@@ -366,6 +398,8 @@ func (cd *CallDescriptor) splitInTimeSpans() (timespans []*TimeSpan) {
 				}
 			}
 		}
+		//log.Print("TS: ", timespans[i].TimeStart, timespans[i].TimeEnd)
+		//log.Print(timespans[i].RateInterval.Timing)
 	}
 
 	//Logger.Debug(fmt.Sprintf("After SplitByRateInterval: %+v", timespans))
@@ -409,6 +443,7 @@ func (cd *CallDescriptor) GetDuration() time.Duration {
 Creates a CallCost structure with the cost information calculated for the received CallDescriptor.
 */
 func (cd *CallDescriptor) GetCost() (*CallCost, error) {
+	cd.account = nil // make sure it's not cached
 	cc, err := cd.getCost()
 	if err != nil {
 		return nil, err
@@ -505,9 +540,23 @@ func (origCD *CallDescriptor) getMaxSessionDuration(origAcc *Account) (time.Dura
 	if origCD.TOR == "" {
 		origCD.TOR = utils.VOICE
 	}
+	//Logger.Debug("ORIG: " + utils.ToJSON(origCD))
 	cd := origCD.Clone()
 	initialDuration := cd.TimeEnd.Sub(cd.TimeStart)
+	//Logger.Debug(fmt.Sprintf("INITIAL_DURATION: %v", initialDuration))
+	defaultBalance := account.GetDefaultMoneyBalance(cd.Direction)
+
+	//use this to check what increment was payed with debt
+	initialDefaultBalanceValue := defaultBalance.GetValue()
+
+	//Logger.Debug("ACCOUNT: " + utils.ToJSON(account))
+	//Logger.Debug("DEFAULT_BALANCE: " + utils.ToJSON(defaultBalance))
+
+	//
 	cc, err := cd.debit(account, true, false)
+	//Logger.Debug("CC: " + utils.ToJSON(cc))
+	//log.Print("CC: ", utils.ToIJSON(cc))
+	//Logger.Debug(fmt.Sprintf("ERR: %v", err))
 	if err != nil {
 		return 0, err
 	}
@@ -516,16 +565,17 @@ func (origCD *CallDescriptor) getMaxSessionDuration(origAcc *Account) (time.Dura
 
 	var totalCost float64
 	var totalDuration time.Duration
-	defaultBalance := account.GetDefaultMoneyBalance(cd.Direction)
 	cc.Timespans.Decompress()
 	//log.Printf("ACC: %+v", account)
 	for _, ts := range cc.Timespans {
 		//if ts.RateInterval != nil {
 		//log.Printf("TS: %+v", ts)
+		//Logger.Debug("TS: " + utils.ToJSON(ts))
 		//}
 		if cd.MaxRate > 0 && cd.MaxRateUnit > 0 {
 			rate, _, rateUnit := ts.RateInterval.GetRateParameters(ts.GetGroupStart())
 			if rate/rateUnit.Seconds() > cd.MaxRate/cd.MaxRateUnit.Seconds() {
+				//Logger.Debug(fmt.Sprintf("0_INIT DUR %v, TOTAL DUR: %v", initialDuration, totalDuration))
 				return utils.MinDuration(initialDuration, totalDuration), nil
 			}
 		}
@@ -533,30 +583,38 @@ func (origCD *CallDescriptor) getMaxSessionDuration(origAcc *Account) (time.Dura
 			ts.createIncrementsSlice()
 		}
 		for _, incr := range ts.Increments {
+			//Logger.Debug("INCR: " + utils.ToJSON(incr))
 			totalCost += incr.Cost
-			if defaultBalance.Value < 0 && incr.BalanceInfo.MoneyBalanceUuid == defaultBalance.Uuid {
-				// this increment was payed with debt
-				// TODO: improve this check
-				return utils.MinDuration(initialDuration, totalDuration), nil
+			if incr.BalanceInfo.MoneyBalanceUuid == defaultBalance.Uuid {
+				initialDefaultBalanceValue -= incr.Cost
+				if initialDefaultBalanceValue < 0 {
+					// this increment was payed with debt
+					// TODO: improve this check
+					//Logger.Debug(fmt.Sprintf("1_INIT DUR %v, TOTAL DUR: %v", initialDuration, totalDuration))
+					return utils.MinDuration(initialDuration, totalDuration), nil
 
+				}
 			}
 			totalDuration += incr.Duration
 			if totalDuration >= initialDuration {
 				// we have enough, return
+				//Logger.Debug(fmt.Sprintf("2_INIT DUR %v, TOTAL DUR: %v", initialDuration, totalDuration))
 				return initialDuration, nil
 			}
 		}
 	}
+	//Logger.Debug(fmt.Sprintf("3_INIT DUR %v, TOTAL DUR: %v", initialDuration, totalDuration))
 	return utils.MinDuration(initialDuration, totalDuration), nil
 }
 
 func (cd *CallDescriptor) GetMaxSessionDuration() (duration time.Duration, err error) {
+	cd.account = nil // make sure it's not cached
 	if account, err := cd.getAccount(); err != nil || account == nil {
 		Logger.Err(fmt.Sprintf("Could not get user balance for <%s>: %s.", cd.GetAccountKey(), err.Error()))
 		return 0, err
 	} else {
 		if memberIds, err := account.GetUniqueSharedGroupMembers(cd); err == nil {
-			if _, err := AccLock.Guard(func() (interface{}, error) {
+			if _, err := Guardian.Guard(func() (interface{}, error) {
 				duration, err = cd.getMaxSessionDuration(account)
 				return 0, err
 			}, memberIds...); err != nil {
@@ -604,13 +662,14 @@ func (cd *CallDescriptor) debit(account *Account, dryRun bool, goNegative bool) 
 }
 
 func (cd *CallDescriptor) Debit() (cc *CallCost, err error) {
+	cd.account = nil // make sure it's not cached
 	// lock all group members
 	if account, err := cd.getAccount(); err != nil || account == nil {
 		Logger.Err(fmt.Sprintf("Could not get user balance for <%s>: %s.", cd.GetAccountKey(), err.Error()))
 		return nil, err
 	} else {
 		if memberIds, err := account.GetUniqueSharedGroupMembers(cd); err == nil {
-			AccLock.Guard(func() (interface{}, error) {
+			Guardian.Guard(func() (interface{}, error) {
 				cc, err = cd.debit(account, false, true)
 				return 0, err
 			}, memberIds...)
@@ -626,13 +685,14 @@ func (cd *CallDescriptor) Debit() (cc *CallCost, err error) {
 // This methods combines the Debit and GetMaxSessionDuration and will debit the max available time as returned
 // by the GetMaxSessionDuration method. The amount filed has to be filled in call descriptor.
 func (cd *CallDescriptor) MaxDebit() (cc *CallCost, err error) {
+	cd.account = nil // make sure it's not cached
 	if account, err := cd.getAccount(); err != nil || account == nil {
 		Logger.Err(fmt.Sprintf("Could not get user balance for <%s>: %s.", cd.GetAccountKey(), err.Error()))
 		return nil, err
 	} else {
 		//log.Printf("ACC: %+v", account)
 		if memberIds, err := account.GetUniqueSharedGroupMembers(cd); err == nil {
-			AccLock.Guard(func() (interface{}, error) {
+			Guardian.Guard(func() (interface{}, error) {
 				remainingDuration, err := cd.getMaxSessionDuration(account)
 				//log.Print("AFTER MAX SESSION: ", cd)
 				if err != nil || remainingDuration == 0 {
@@ -657,6 +717,7 @@ func (cd *CallDescriptor) MaxDebit() (cc *CallCost, err error) {
 }
 
 func (cd *CallDescriptor) RefundIncrements() (left float64, err error) {
+	cd.account = nil // make sure it's not cached
 	accountsCache := make(map[string]*Account)
 	for _, increment := range cd.Increments {
 		account, found := accountsCache[increment.BalanceInfo.AccountId]
@@ -735,6 +796,7 @@ func (cd *CallDescriptor) GetLCRFromStorage() (*LCR, error) {
 }
 
 func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
+	cd.account = nil // make sure it's not cached
 	lcr, err := cd.GetLCRFromStorage()
 	if err != nil {
 		return nil, err
@@ -761,6 +823,7 @@ func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
 	if lcrCost.Entry == nil {
 		return lcrCost, nil
 	}
+
 	//log.Printf("Entry: %+v", lcrCost.Entry)
 	if lcrCost.Entry.Strategy == LCR_STRATEGY_STATIC {
 		for _, supplier := range lcrCost.Entry.GetParams() {
@@ -822,6 +885,7 @@ func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
 			var tcdValues sort.Float64Slice
 			var accValues sort.Float64Slice
 			var tccValues sort.Float64Slice
+			var ddcValues sort.Float64Slice
 			// track if one value is never calculated
 			asrNeverConsidered := true
 			pddNeverConsidered := true
@@ -829,7 +893,8 @@ func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
 			tcdNeverConsidered := true
 			accNeverConsidered := true
 			tccNeverConsidered := true
-			if utils.IsSliceMember([]string{LCR_STRATEGY_QOS, LCR_STRATEGY_QOS_THRESHOLD}, lcrCost.Entry.Strategy) {
+			ddcNeverConsidered := true
+			if utils.IsSliceMember([]string{LCR_STRATEGY_QOS, LCR_STRATEGY_QOS_THRESHOLD, LCR_STRATEGY_LOAD}, lcrCost.Entry.Strategy) {
 				if stats == nil {
 					lcrCost.SupplierCosts = append(lcrCost.SupplierCosts, &LCRSupplierCost{
 						Supplier: supplier,
@@ -855,54 +920,84 @@ func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
 							}
 						}
 					}
+
 					statsErr := false
+					var supplierQueues []*StatsQueue
 					for _, qId := range cdrStatsQueueIds {
-						statValues := make(map[string]float64)
-						if err := stats.GetValues(qId, &statValues); err != nil {
-							lcrCost.SupplierCosts = append(lcrCost.SupplierCosts, &LCRSupplierCost{
-								Supplier: supplier,
-								Error:    fmt.Sprintf("Get stats values for queue id %s, error %s", qId, err.Error()),
-							})
-							statsErr = true
-							break
-						}
-						if asr, exists := statValues[ASR]; exists {
-							if asr > STATS_NA {
-								asrValues = append(asrValues, asr)
+						if lcrCost.Entry.Strategy == LCR_STRATEGY_LOAD {
+							for _, qId := range cdrStatsQueueIds {
+								sq := &StatsQueue{}
+								if err := stats.GetQueue(qId, sq); err == nil {
+									if sq.conf.QueueLength == 0 { //only add qeues that don't have fixed length
+										supplierQueues = append(supplierQueues, sq)
+									}
+								}
 							}
-							asrNeverConsidered = false
-						}
-						if pdd, exists := statValues[PDD]; exists {
-							if pdd > STATS_NA {
-								pddValues = append(pddValues, pdd)
+						} else {
+							statValues := make(map[string]float64)
+							if err := stats.GetValues(qId, &statValues); err != nil {
+								lcrCost.SupplierCosts = append(lcrCost.SupplierCosts, &LCRSupplierCost{
+									Supplier: supplier,
+									Error:    fmt.Sprintf("Get stats values for queue id %s, error %s", qId, err.Error()),
+								})
+								statsErr = true
+								break
 							}
-							pddNeverConsidered = false
-						}
-						if acd, exists := statValues[ACD]; exists {
-							if acd > STATS_NA {
-								acdValues = append(acdValues, acd)
+							if asr, exists := statValues[ASR]; exists {
+								if asr > STATS_NA {
+									asrValues = append(asrValues, asr)
+								}
+								asrNeverConsidered = false
 							}
-							acdNeverConsidered = false
-						}
-						if tcd, exists := statValues[TCD]; exists {
-							if tcd > STATS_NA {
-								tcdValues = append(tcdValues, tcd)
+							if pdd, exists := statValues[PDD]; exists {
+								if pdd > STATS_NA {
+									pddValues = append(pddValues, pdd)
+								}
+								pddNeverConsidered = false
 							}
-							tcdNeverConsidered = false
-						}
-						if acc, exists := statValues[ACC]; exists {
-							if acc > STATS_NA {
-								accValues = append(accValues, acc)
+							if acd, exists := statValues[ACD]; exists {
+								if acd > STATS_NA {
+									acdValues = append(acdValues, acd)
+								}
+								acdNeverConsidered = false
 							}
-							accNeverConsidered = false
-						}
-						if tcc, exists := statValues[TCC]; exists {
-							if tcc > STATS_NA {
-								tccValues = append(tccValues, tcc)
+							if tcd, exists := statValues[TCD]; exists {
+								if tcd > STATS_NA {
+									tcdValues = append(tcdValues, tcd)
+								}
+								tcdNeverConsidered = false
 							}
-							tccNeverConsidered = false
+							if acc, exists := statValues[ACC]; exists {
+								if acc > STATS_NA {
+									accValues = append(accValues, acc)
+								}
+								accNeverConsidered = false
+							}
+							if tcc, exists := statValues[TCC]; exists {
+								if tcc > STATS_NA {
+									tccValues = append(tccValues, tcc)
+								}
+								tccNeverConsidered = false
+							}
+							if ddc, exists := statValues[TCC]; exists {
+								if ddc > STATS_NA {
+									ddcValues = append(ddcValues, ddc)
+								}
+								ddcNeverConsidered = false
+							}
+
 						}
 					}
+					if lcrCost.Entry.Strategy == LCR_STRATEGY_LOAD {
+						if len(supplierQueues) > 0 {
+							lcrCost.SupplierCosts = append(lcrCost.SupplierCosts, &LCRSupplierCost{
+								Supplier:       supplier,
+								supplierQueues: supplierQueues,
+							})
+						}
+						continue // next supplier
+					}
+
 					if statsErr { // Stats error in loop, to go next supplier
 						continue
 					}
@@ -912,6 +1007,7 @@ func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
 					tcdValues.Sort()
 					accValues.Sort()
 					tccValues.Sort()
+					ddcValues.Sort()
 
 					//log.Print(asrValues, acdValues)
 					if utils.IsSliceMember([]string{LCR_STRATEGY_QOS_THRESHOLD, LCR_STRATEGY_QOS}, lcrCost.Entry.Strategy) {
@@ -919,7 +1015,7 @@ func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
 					}
 					if lcrCost.Entry.Strategy == LCR_STRATEGY_QOS_THRESHOLD {
 						// filter suppliers by qos thresholds
-						asrMin, asrMax, pddMin, pddMax, acdMin, acdMax, tcdMin, tcdMax, accMin, accMax, tccMin, tccMax := lcrCost.Entry.GetQOSLimits()
+						asrMin, asrMax, pddMin, pddMax, acdMin, acdMax, tcdMin, tcdMax, accMin, accMax, tccMin, tccMax, ddcMin, ddcMax := lcrCost.Entry.GetQOSLimits()
 						//log.Print(asrMin, asrMax, acdMin, acdMax)
 						// skip current supplier if off limits
 						if asrMin > 0 && len(asrValues) != 0 && asrValues[0] < asrMin {
@@ -956,6 +1052,12 @@ func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
 							continue
 						}
 						if tccMax > 0 && len(tccValues) != 0 && tccValues[len(tccValues)-1] > tccMax {
+							continue
+						}
+						if ddcMin > 0 && len(ddcValues) != 0 && ddcValues[0] < ddcMin {
+							continue
+						}
+						if ddcMax > 0 && len(ddcValues) != 0 && ddcValues[len(ddcValues)-1] > ddcMax {
 							continue
 						}
 					}
@@ -1011,6 +1113,9 @@ func (cd *CallDescriptor) GetLCR(stats StatsInterface) (*LCRCost, error) {
 				}
 				if !tccNeverConsidered {
 					qos[TCC] = utils.AvgNegative(tccValues)
+				}
+				if !ddcNeverConsidered {
+					qos[DDC] = utils.AvgNegative(ddcValues)
 				}
 				if utils.IsSliceMember([]string{LCR_STRATEGY_QOS, LCR_STRATEGY_QOS_THRESHOLD}, lcrCost.Entry.Strategy) {
 					supplCost.QOS = qos

@@ -33,6 +33,7 @@ type TpReader struct {
 	lcrs              map[string]*LCR
 	derivedChargers   map[string]utils.DerivedChargers
 	cdrStats          map[string]*CdrStats
+	users             map[string]*UserProfile
 }
 
 func NewTpReader(rs RatingStorage, as AccountingStorage, lr LoadReader, tpid string) *TpReader {
@@ -56,6 +57,7 @@ func NewTpReader(rs RatingStorage, as AccountingStorage, lr LoadReader, tpid str
 		accAliases:        make(map[string]string),
 		accountActions:    make(map[string]*Account),
 		cdrStats:          make(map[string]*CdrStats),
+		users:             make(map[string]*UserProfile),
 		derivedChargers:   make(map[string]utils.DerivedChargers),
 	}
 	//add *any and *asap timing tag (in case of no timings file)
@@ -1050,6 +1052,30 @@ func (tpr *TpReader) LoadCdrStats() error {
 	return tpr.LoadCdrStatsFiltered("", false)
 }
 
+func (tpr *TpReader) LoadUsersFiltered(filter *TpUser) (bool, error) {
+	tpUsers, err := tpr.lr.GetTpUsers(filter)
+
+	user := &UserProfile{
+		Tenant:   filter.Tenant,
+		UserName: filter.UserName,
+		Profile:  make(map[string]string),
+	}
+	for _, tpUser := range tpUsers {
+		user.Profile[tpUser.AttributeName] = tpUser.AttributeValue
+	}
+	tpr.accountingStorage.SetUser(user)
+	return len(tpUsers) > 0, err
+}
+
+func (tpr *TpReader) LoadUsers() error {
+	tps, err := tpr.lr.GetTpUsers(&TpUser{Tpid: tpr.tpid})
+	if err != nil {
+		return err
+	}
+	tpr.users, err = TpUsers(tps).GetUsers()
+	return err
+}
+
 func (tpr *TpReader) LoadAll() error {
 	var err error
 	if err = tpr.LoadDestinations(); err != nil {
@@ -1092,6 +1118,9 @@ func (tpr *TpReader) LoadAll() error {
 		return err
 	}
 	if err = tpr.LoadCdrStats(); err != nil {
+		return err
+	}
+	if err = tpr.LoadUsers(); err != nil {
 		return err
 	}
 	return nil
@@ -1222,7 +1251,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose bool) (err error) {
 	if verbose {
 		log.Print("Rating Profile Aliases:")
 	}
-	if err := tpr.ratingStorage.RemoveRpAliases(tpr.dirtyRpAliases); err != nil {
+	if err := tpr.ratingStorage.RemoveRpAliases(tpr.dirtyRpAliases, true); err != nil {
 		return err
 	}
 	for key, alias := range tpr.rpAliases {
@@ -1237,7 +1266,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose bool) (err error) {
 	if verbose {
 		log.Print("Account Aliases:")
 	}
-	if err := tpr.ratingStorage.RemoveAccAliases(tpr.dirtyAccAliases); err != nil {
+	if err := tpr.ratingStorage.RemoveAccAliases(tpr.dirtyAccAliases, true); err != nil {
 		return err
 	}
 	for key, alias := range tpr.accAliases {
@@ -1271,6 +1300,18 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose bool) (err error) {
 		}
 		if verbose {
 			log.Print("\t", sq.Id)
+		}
+	}
+	if verbose {
+		log.Print("Users:")
+	}
+	for _, u := range tpr.users {
+		err = tpr.accountingStorage.SetUser(u)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", u.GetId())
 		}
 	}
 	return
@@ -1414,6 +1455,14 @@ func (tpr *TpReader) GetLoadedIds(categ string) ([]string, error) {
 		keys := make([]string, len(tpr.sharedGroups))
 		i := 0
 		for k := range tpr.sharedGroups {
+			keys[i] = k
+			i++
+		}
+		return keys, nil
+	case utils.USERS_PREFIX:
+		keys := make([]string, len(tpr.users))
+		i := 0
+		for k := range tpr.users {
 			keys[i] = k
 			i++
 		}

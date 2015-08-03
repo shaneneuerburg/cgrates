@@ -48,7 +48,7 @@ type RatingStorage interface {
 	SetRatingProfile(*RatingProfile) error
 	GetRpAlias(string, bool) (string, error)
 	SetRpAlias(string, string) error
-	RemoveRpAliases([]*TenantRatingSubject) error
+	RemoveRpAliases([]*TenantRatingSubject, bool) error
 	GetRPAliases(string, string, bool) ([]string, error)
 	GetDestination(string) (*Destination, error)
 	SetDestination(*Destination) error
@@ -68,7 +68,7 @@ type RatingStorage interface {
 	GetAllActionPlans() (map[string]ActionPlans, error)
 	GetAccAlias(string, bool) (string, error)
 	SetAccAlias(string, string) error
-	RemoveAccAliases([]*TenantAccount) error
+	RemoveAccAliases([]*TenantAccount, bool) error
 	GetAccountAliases(string, string, bool) ([]string, error)
 }
 
@@ -76,11 +76,16 @@ type AccountingStorage interface {
 	Storage
 	GetAccount(string) (*Account, error)
 	SetAccount(*Account) error
+	RemoveAccount(string) error
 	GetCdrStatsQueue(string) (*StatsQueue, error)
 	SetCdrStatsQueue(*StatsQueue) error
 	GetSubscribers() (map[string]*SubscriberData, error)
 	SetSubscriber(string, *SubscriberData) error
 	RemoveSubscriber(string) error
+	SetUser(*UserProfile) error
+	GetUser(string) (*UserProfile, error)
+	GetUsers() ([]*UserProfile, error)
+	RemoveUser(string) error
 }
 
 type CdrStorage interface {
@@ -118,6 +123,7 @@ type LoadReader interface {
 	GetTpRatingProfiles(*TpRatingProfile) ([]TpRatingProfile, error)
 	GetTpSharedGroups(string, string) ([]TpSharedGroup, error)
 	GetTpCdrStats(string, string) ([]TpCdrstat, error)
+	GetTpUsers(*TpUser) ([]TpUser, error)
 	GetTpDerivedChargers(*TpDerivedCharger) ([]TpDerivedCharger, error)
 	GetTpLCRs(string, string) ([]TpLcrRule, error)
 	GetTpActions(string, string) ([]TpAction, error)
@@ -136,6 +142,7 @@ type LoadWriter interface {
 	SetTpRatingProfiles([]TpRatingProfile) error
 	SetTpSharedGroups([]TpSharedGroup) error
 	SetTpCdrStats([]TpCdrstat) error
+	SetTpUsers([]TpUser) error
 	SetTpDerivedChargers([]TpDerivedCharger) error
 	SetTpLCRs([]TpLcrRule) error
 	SetTpActions([]TpAction) error

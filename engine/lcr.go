@@ -20,6 +20,7 @@ package engine
 
 import (
 	"fmt"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,13 @@ const (
 	LCR_STRATEGY_HIGHEST       = "*highest_cost"
 	LCR_STRATEGY_QOS_THRESHOLD = "*qos_threshold"
 	LCR_STRATEGY_QOS           = "*qos"
+	LCR_STRATEGY_LOAD          = "*load_distribution"
+
+	// used for load distribution sorting
+	RAND_LIMIT          = 99
+	LOW_PRIORITY_LIMIT  = 100
+	MED_PRIORITY_LIMIT  = 200
+	HIGH_PRIORITY_LIMIT = 300
 )
 
 // A request for LCR, used in APIer and SM where we need to expose it
@@ -134,12 +142,13 @@ type LCRCost struct {
 }
 
 type LCRSupplierCost struct {
-	Supplier      string
-	Cost          float64
-	Duration      time.Duration
-	Error         string // Not error due to JSON automatic serialization into struct
-	QOS           map[string]float64
-	qosSortParams []string
+	Supplier       string
+	Cost           float64
+	Duration       time.Duration
+	Error          string // Not error due to JSON automatic serialization into struct
+	QOS            map[string]float64
+	qosSortParams  []string
+	supplierQueues []*StatsQueue // used for load distribution
 }
 
 func (lcr *LCR) GetId() string {
@@ -162,11 +171,11 @@ func (lcr *LCR) Sort() {
 	sort.Sort(lcr)
 }
 
-func (le *LCREntry) GetQOSLimits() (minASR, maxASR float64, minPDD, maxPDD, minACD, maxACD, minTCD, maxTCD time.Duration, minACC, maxACC, minTCC, maxTCC float64) {
-	// MIN_ASR;MAX_ASR;MIN_PDD;MAX_PDD;MIN_ACD;MAX_ACD;MIN_TCD;MAX_TCD;MIN_ACC;MAX_ACC;MIN_TCC;MAX_TCC
-	minASR, maxASR, minPDD, maxPDD, minACD, maxACD, minTCD, maxTCD, minACC, maxACC, minTCC, maxTCC = -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+func (le *LCREntry) GetQOSLimits() (minASR, maxASR float64, minPDD, maxPDD, minACD, maxACD, minTCD, maxTCD time.Duration, minACC, maxACC, minTCC, maxTCC, minDDC, maxDDC float64) {
+	// MIN_ASR;MAX_ASR;MIN_PDD;MAX_PDD;MIN_ACD;MAX_ACD;MIN_TCD;MAX_TCD;MIN_ACC;MAX_ACC;MIN_TCC;MAX_TCC;MIN_DDC;MAX_DDC
+	minASR, maxASR, minPDD, maxPDD, minACD, maxACD, minTCD, maxTCD, minACC, maxACC, minTCC, maxTCC, minDDC, maxDDC = -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
 	params := strings.Split(le.StrategyParams, utils.INFIELD_SEP)
-	if len(params) == 12 {
+	if len(params) == 14 {
 		var err error
 		if minASR, err = strconv.ParseFloat(params[0], 64); err != nil {
 			minASR = -1
@@ -204,6 +213,12 @@ func (le *LCREntry) GetQOSLimits() (minASR, maxASR float64, minPDD, maxPDD, minA
 		if maxTCC, err = strconv.ParseFloat(params[11], 64); err != nil {
 			maxTCC = -1
 		}
+		if minDDC, err = strconv.ParseFloat(params[12], 64); err != nil {
+			minDDC = -1
+		}
+		if maxDDC, err = strconv.ParseFloat(params[13], 64); err != nil {
+			maxDDC = -1
+		}
 	}
 	return
 }
@@ -220,7 +235,7 @@ func (le *LCREntry) GetParams() []string {
 		}
 	}
 	if len(cleanParams) == 0 && le.Strategy == LCR_STRATEGY_QOS {
-		return []string{ASR, PDD, ACD, TCD, ACC, TCC} // Default QoS stats if none configured
+		return []string{ASR, PDD, ACD, TCD, ACC, TCC, DDC} // Default QoS stats if none configured
 	}
 	return cleanParams
 }
@@ -285,11 +300,118 @@ func (lc *LCRCost) Sort() {
 		sort.Sort(HighestSupplierCostSorter(lc.SupplierCosts))
 	case LCR_STRATEGY_QOS:
 		sort.Sort(QOSSorter(lc.SupplierCosts))
+	case LCR_STRATEGY_LOAD:
+		lc.SortLoadDistribution()
+		sort.Sort(HighestSupplierCostSorter(lc.SupplierCosts))
 	}
+}
+
+func (lc *LCRCost) SortLoadDistribution() {
+	// find the time window that is common to all qeues
+	scoreBoard := make(map[time.Duration]int) // register TimeWindow across suppliers
+
+	var winnerTimeWindow time.Duration
+	maxScore := 0
+	for _, supCost := range lc.SupplierCosts {
+		timeWindowFlag := make(map[time.Duration]bool) // flags appearance in same supplier
+		for _, sq := range supCost.supplierQueues {
+			if !timeWindowFlag[sq.conf.TimeWindow] {
+				timeWindowFlag[sq.conf.TimeWindow] = true
+				scoreBoard[sq.conf.TimeWindow]++
+			}
+			if scoreBoard[sq.conf.TimeWindow] > maxScore {
+				maxScore = scoreBoard[sq.conf.TimeWindow]
+				winnerTimeWindow = sq.conf.TimeWindow
+			}
+		}
+	}
+	supplierQueues := make(map[*LCRSupplierCost]*StatsQueue)
+	for _, supCost := range lc.SupplierCosts {
+		for _, sq := range supCost.supplierQueues {
+			if sq.conf.TimeWindow == winnerTimeWindow {
+				supplierQueues[supCost] = sq
+				break
+			}
+		}
+	}
+	/*for supplier, sq := range supplierQueues {
+		log.Printf("Useful supplier qeues: %s %v", supplier, sq.conf.TimeWindow)
+	}*/
+	// if all have less than ratio return random order
+	// if some have a cdr count not divisible by ratio return them first and all ordered by cdr times, oldest first
+	// if all have a multiple of ratio return in the order of cdr times, oldest first
+
+	// first put them in one of the above categories
+	haveRatiolessSuppliers := false
+	for supCost, sq := range supplierQueues {
+		ratio := lc.GetSupplierRatio(supCost.Supplier)
+		if ratio == -1 {
+			supCost.Cost = -1
+			haveRatiolessSuppliers = true
+			continue
+		}
+		cdrCount := len(sq.Cdrs)
+		if cdrCount < ratio {
+			supCost.Cost = float64(LOW_PRIORITY_LIMIT + rand.Intn(RAND_LIMIT))
+			continue
+		}
+		if cdrCount%ratio == 0 {
+			supCost.Cost = float64(MED_PRIORITY_LIMIT+rand.Intn(RAND_LIMIT)) + (time.Now().Sub(sq.Cdrs[len(sq.Cdrs)-1].SetupTime).Seconds() / RAND_LIMIT)
+			continue
+		} else {
+			supCost.Cost = float64(HIGH_PRIORITY_LIMIT+rand.Intn(RAND_LIMIT)) + (time.Now().Sub(sq.Cdrs[len(sq.Cdrs)-1].SetupTime).Seconds() / RAND_LIMIT)
+			continue
+		}
+	}
+	if haveRatiolessSuppliers {
+		var filteredSupplierCost []*LCRSupplierCost
+		for _, supCost := range lc.SupplierCosts {
+			if supCost.Cost != -1 {
+				filteredSupplierCost = append(filteredSupplierCost, supCost)
+			}
+		}
+		lc.SupplierCosts = filteredSupplierCost
+	}
+}
+
+// used in load distribution strategy only
+// receives a long supplier id and will return the ratio found in strategy params
+func (lc *LCRCost) GetSupplierRatio(supplier string) int {
+	// parse strategy params
+	ratios := make(map[string]int)
+	params := strings.Split(lc.Entry.StrategyParams, utils.INFIELD_SEP)
+	for _, param := range params {
+		ratioSlice := strings.Split(param, utils.CONCATENATED_KEY_SEP)
+		if len(ratioSlice) != 2 {
+			Logger.Warning(fmt.Sprintf("bad format in load distribution strategy param: %s", lc.Entry.StrategyParams))
+			continue
+		}
+		p, err := strconv.Atoi(ratioSlice[1])
+		if err != nil {
+			Logger.Warning(fmt.Sprintf("bad format in load distribution strategy param: %s", lc.Entry.StrategyParams))
+			continue
+		}
+		ratios[ratioSlice[0]] = p
+	}
+	parts := strings.Split(supplier, utils.CONCATENATED_KEY_SEP)
+	if len(parts) > 0 {
+		supplierSubject := parts[len(parts)-1]
+		if ratio, found := ratios[supplierSubject]; found {
+			return ratio
+		}
+		if ratio, found := ratios[utils.META_DEFAULT]; found {
+			return ratio
+		}
+	}
+	if len(ratios) == 0 {
+		return 1 // use random/last cdr date sorting
+	}
+	return -1 // exclude missing suppliers
 }
 
 func (lc *LCRCost) HasErrors() bool {
 	for _, supplCost := range lc.SupplierCosts {
+
 		if len(supplCost.Error) != 0 {
 			return true
 		}

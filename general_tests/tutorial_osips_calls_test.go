@@ -43,7 +43,7 @@ func TestTutOsipsCallsInitCfg(t *testing.T) {
 	}
 	// Init config first
 	var err error
-	tutOsipsCallsCfg, err = config.NewCGRConfigFromFolder(path.Join(*dataDir, "tutorials", "kamevapi", "cgrates", "etc", "cgrates"))
+	tutOsipsCallsCfg, err = config.NewCGRConfigFromFolder(path.Join(*dataDir, "tutorials", "osips_async", "cgrates", "etc", "cgrates"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -185,7 +185,7 @@ func TestTutOsipsCallsStartPjsuaListener(t *testing.T) {
 		&engine.PjsuaAccount{Id: "sip:1004@127.0.0.1", Username: "1004", Password: "CGRateS.org", Realm: "*", Registrar: "sip:127.0.0.1:5060"},
 		&engine.PjsuaAccount{Id: "sip:1006@127.0.0.1", Username: "1006", Password: "CGRateS.org", Realm: "*", Registrar: "sip:127.0.0.1:5060"},
 		&engine.PjsuaAccount{Id: "sip:1007@127.0.0.1", Username: "1007", Password: "CGRateS.org", Realm: "*", Registrar: "sip:127.0.0.1:5060"}}
-	if tutOsipsCallsPjSuaListener, err = engine.StartPjsuaListener(acnts, *waitRater); err != nil {
+	if tutOsipsCallsPjSuaListener, err = engine.StartPjsuaListener(acnts, 5070, *waitRater); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -356,7 +356,7 @@ func TestTutOsipsCallsCdrs(t *testing.T) {
 		if reply[0].Destination != "1001" {
 			t.Errorf("Unexpected Destination for CDR: %+v", reply[0])
 		}
-		if reply[0].Usage != "62" { // Usage as seconds
+		if reply[0].Usage != "62" && reply[0].Usage != "63" { // Usage as seconds
 			t.Errorf("Unexpected Usage for CDR: %+v", reply[0])
 		}
 	}

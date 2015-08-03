@@ -55,6 +55,7 @@ func TestMultipleResultMerge(t *testing.T) {
 	cd := &CallDescriptor{Direction: OUTBOUND, Category: "0", Tenant: "vdf", Subject: "rif", Destination: "0256", TimeStart: t1, TimeEnd: t2}
 	cc1, _ := cd.getCost()
 	if cc1.Cost != 61 {
+		//ils.LogFull(cc1)
 		t.Errorf("expected 61 was %v", cc1.Cost)
 		for _, ts := range cc1.Timespans {
 			t.Log(ts.RateInterval)
@@ -121,8 +122,8 @@ func TestMultipleInputRightMerge(t *testing.T) {
 		t.Errorf("expected 91 was %v", cc2.Cost)
 	}
 	cc1.Merge(cc2)
-	if len(cc1.Timespans) != 2 || cc1.Timespans[0].GetDuration().Seconds() != 120 {
-		t.Error("wrong resulted timespan: ", len(cc1.Timespans))
+	if len(cc1.Timespans) != 3 || cc1.Timespans[0].GetDuration().Seconds() != 60 {
+		t.Error("wrong resulted timespan: ", len(cc1.Timespans), cc1.Timespans[0].GetDuration().Seconds())
 	}
 	if cc1.Cost != 152 {
 		t.Errorf("Exdpected 152 was %v", cc1.Cost)

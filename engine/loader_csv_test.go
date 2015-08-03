@@ -137,6 +137,7 @@ ANY_PLAN,DATA_RATE,*any,10
 *out,cgrates.org,data,rif,2013-01-06T00:00:00Z,RP_DATA,,
 *out,cgrates.org,call,max,2013-03-23T00:00:00Z,RP_MX,,
 *in,cgrates.org,LCR_STANDARD,max,2013-03-23T00:00:00Z,RP_MX,,
+*out,cgrates.org,call,money,2015-02-28T00:00:00Z,EVENING,,
 `
 	sharedGroups = `
 SG1,*any,*lowest,
@@ -188,6 +189,7 @@ CDRST2_WARN_ACD,,*min_acd,3,true,0,,,,,,,,,,,5,CDRST_WARN_HTTP,10
 	accountActions = `
 vdf,minitsboy;a1;a2,*out,MORE_MINUTES,STANDARD_TRIGGER
 cgrates.org,12345,*out,TOPUP10_AT,STANDARD_TRIGGERS
+cgrates.org,remo,*out,TOPUP10_AT,
 vdf,empty0,*out,TOPUP_SHARED0_AT,
 vdf,empty10,*out,TOPUP_SHARED10_AT,
 vdf,emptyX,*out,TOPUP_EMPTY_AT,
@@ -209,13 +211,19 @@ CDRST1,,,,ACC,,,,,,,,,,,,,,,,,,,,
 CDRST2,10,10m,,ASR,,,,,,,cgrates.org,call,,,,,,,,,,,,
 CDRST2,,,,ACD,,,,,,,,,,,,,,,,,,,,
 `
+	users = `
+#Tenant[0],UserName[1],AttributeName[2],AttributeValue[3]
+cgrates.org,rif,test0,val0
+cgrates.org,rif,test1,val1
+cgrates.org,dan,another,value
+`
 )
 
 var csvr *TpReader
 
 func init() {
 	csvr = NewTpReader(ratingStorage, accountingStorage, NewStringCSVStorage(',', destinations, timings, rates, destinationRates, ratingPlans, ratingProfiles,
-		sharedGroups, lcrs, actions, actionTimings, actionTriggers, accountActions, derivedCharges, cdrStats), "")
+		sharedGroups, lcrs, actions, actionTimings, actionTriggers, accountActions, derivedCharges, cdrStats, users), "")
 	if err := csvr.LoadDestinations(); err != nil {
 		log.Print("error in LoadDestinations:", err)
 	}
@@ -257,6 +265,9 @@ func init() {
 	}
 	if err := csvr.LoadCdrStats(); err != nil {
 		log.Print("error in LoadCdrStats:", err)
+	}
+	if err := csvr.LoadUsers(); err != nil {
+		log.Print("error in LoadUsers:", err)
 	}
 	csvr.WriteToDatabase(false, false)
 	ratingStorage.CacheAll()
@@ -749,7 +760,7 @@ func TestLoadRatingPlans(t *testing.T) {
 }
 
 func TestLoadRatingProfiles(t *testing.T) {
-	if len(csvr.ratingProfiles) != 19 {
+	if len(csvr.ratingProfiles) != 20 {
 		t.Error("Failed to load rating profiles: ", len(csvr.ratingProfiles), csvr.ratingProfiles)
 	}
 	rp := csvr.ratingProfiles["*out:test:0:trp"]
@@ -993,7 +1004,7 @@ func TestLoadActionTriggers(t *testing.T) {
 }
 
 func TestLoadAccountActions(t *testing.T) {
-	if len(csvr.accountActions) != 7 {
+	if len(csvr.accountActions) != 8 {
 		t.Error("Failed to load account actions: ", len(csvr.accountActions))
 	}
 	aa := csvr.accountActions["*out:vdf:minitsboy"]
@@ -1102,5 +1113,23 @@ func TestLoadCdrStats(t *testing.T) {
 	cdrStats1.Triggers = nil
 	if !reflect.DeepEqual(csvr.cdrStats[cdrStats1.Id], cdrStats1) {
 		t.Errorf("Unexpected stats %+v", csvr.cdrStats[cdrStats1.Id])
+	}
+}
+
+func TestLoadUsers(t *testing.T) {
+	if len(csvr.users) != 2 {
+		t.Error("Failed to load users: ", csvr.users)
+	}
+	user1 := &UserProfile{
+		Tenant:   "cgrates.org",
+		UserName: "rif",
+		Profile: map[string]string{
+			"test0": "val0",
+			"test1": "val1",
+		},
+	}
+
+	if !reflect.DeepEqual(csvr.users[user1.GetId()], user1) {
+		t.Errorf("Unexpected user %+v", csvr.users[user1.GetId()])
 	}
 }

@@ -342,18 +342,30 @@ func (ms *MapStorage) SetRpAlias(key, alias string) (err error) {
 	return
 }
 
-func (ms *MapStorage) RemoveRpAliases(tenantRtSubjects []*TenantRatingSubject) (err error) {
-	for key, _ := range ms.dict {
-		for _, tntRtSubj := range tenantRtSubjects {
-			tenantPrfx := utils.RP_ALIAS_PREFIX + tntRtSubj.Tenant + utils.CONCATENATED_KEY_SEP
-			if strings.HasPrefix(key, utils.RP_ALIAS_PREFIX) {
-				alsSubj, err := ms.GetRpAlias(key[len(utils.RP_ALIAS_PREFIX):], true)
-				if err != nil {
-					return err
-				}
-				if len(key) >= len(tenantPrfx) && key[:len(tenantPrfx)] == tenantPrfx && tntRtSubj.Subject == alsSubj {
-					cache2go.RemKey(key)
+func (ms *MapStorage) RemoveRpAliases(tenantRtSubjects []*TenantRatingSubject, skipCache bool) (err error) {
+	if skipCache {
+		for key, value := range ms.dict {
+			for _, tenantRtSubj := range tenantRtSubjects {
+				tenantPrfx := utils.RP_ALIAS_PREFIX + tenantRtSubj.Tenant + utils.CONCATENATED_KEY_SEP
+				if strings.HasPrefix(key, utils.RP_ALIAS_PREFIX) && len(key) >= len(tenantPrfx) && key[:len(tenantPrfx)] == tenantPrfx && tenantRtSubj.Subject == string(value) {
 					delete(ms.dict, key)
+					cache2go.RemKey(key)
+				}
+			}
+		}
+	} else {
+		alsMap, err := cache2go.GetAllEntries(utils.RP_ALIAS_PREFIX)
+		if err != nil {
+			return err
+		}
+
+		for key, aliasInterface := range alsMap {
+			alias := aliasInterface.Value().(string)
+			for _, tenantRtSubj := range tenantRtSubjects {
+				tenantPrfx := tenantRtSubj.Tenant + utils.CONCATENATED_KEY_SEP
+				if len(key) >= len(tenantPrfx) && key[:len(tenantPrfx)] == tenantPrfx && tenantRtSubj.Subject == alias {
+					delete(ms.dict, utils.RP_ALIAS_PREFIX+key)
+					cache2go.RemKey(utils.RP_ALIAS_PREFIX + key)
 				}
 			}
 		}
@@ -408,12 +420,31 @@ func (ms *MapStorage) SetAccAlias(key, alias string) (err error) {
 	return
 }
 
-func (ms *MapStorage) RemoveAccAliases(tenantAccounts []*TenantAccount) (err error) {
-	for key, value := range ms.dict {
-		for _, tntAcnt := range tenantAccounts {
-			tenantPrfx := utils.ACC_ALIAS_PREFIX + tntAcnt.Tenant + utils.CONCATENATED_KEY_SEP
-			if strings.HasPrefix(key, utils.ACC_ALIAS_PREFIX) && len(key) >= len(tenantPrfx) && key[:len(tenantPrfx)] == tenantPrfx && tntAcnt.Account == string(value) {
-				delete(ms.dict, key)
+func (ms *MapStorage) RemoveAccAliases(tenantAccounts []*TenantAccount, skipCache bool) (err error) {
+	if skipCache {
+		for key, value := range ms.dict {
+			for _, tntAcnt := range tenantAccounts {
+				tenantPrfx := utils.ACC_ALIAS_PREFIX + tntAcnt.Tenant + utils.CONCATENATED_KEY_SEP
+				if strings.HasPrefix(key, utils.ACC_ALIAS_PREFIX) && len(key) >= len(tenantPrfx) && key[:len(tenantPrfx)] == tenantPrfx && tntAcnt.Account == string(value) {
+					delete(ms.dict, key)
+					cache2go.RemKey(key)
+				}
+			}
+		}
+	} else {
+		alsMap, err := cache2go.GetAllEntries(utils.ACC_ALIAS_PREFIX)
+		if err != nil {
+			return err
+		}
+
+		for key, aliasInterface := range alsMap {
+			alias := aliasInterface.Value().(string)
+			for _, tntAcnt := range tenantAccounts {
+				tenantPrfx := tntAcnt.Tenant + utils.CONCATENATED_KEY_SEP
+				if len(key) >= len(tenantPrfx) && key[:len(tenantPrfx)] == tenantPrfx && tntAcnt.Account == alias {
+					delete(ms.dict, utils.ACC_ALIAS_PREFIX+key)
+					cache2go.RemKey(utils.ACC_ALIAS_PREFIX + key)
+				}
 			}
 		}
 	}
@@ -545,6 +576,11 @@ func (ms *MapStorage) SetAccount(ub *Account) (err error) {
 	return
 }
 
+func (ms *MapStorage) RemoveAccount(key string) (err error) {
+	delete(ms.dict, utils.ACCOUNT_PREFIX+key)
+	return
+}
+
 func (ms *MapStorage) GetCdrStatsQueue(key string) (sq *StatsQueue, err error) {
 	if values, ok := ms.dict[utils.CDR_STATS_QUEUE_PREFIX+key]; ok {
 		sq = &StatsQueue{}
@@ -582,6 +618,41 @@ func (ms *MapStorage) SetSubscriber(key string, sub *SubscriberData) (err error)
 func (ms *MapStorage) RemoveSubscriber(key string) (err error) {
 	delete(ms.dict, utils.PUBSUB_SUBSCRIBERS_PREFIX+key)
 	return
+}
+
+func (ms *MapStorage) SetUser(up *UserProfile) error {
+	result, err := ms.ms.Marshal(up)
+	if err != nil {
+		return err
+	}
+	ms.dict[utils.USERS_PREFIX+up.GetId()] = result
+	return nil
+}
+func (ms *MapStorage) GetUser(key string) (up *UserProfile, err error) {
+	up = &UserProfile{}
+	if values, ok := ms.dict[utils.USERS_PREFIX+key]; ok {
+		err = ms.ms.Unmarshal(values, &up)
+	} else {
+		return nil, utils.ErrNotFound
+	}
+	return
+}
+
+func (ms *MapStorage) GetUsers() (result []*UserProfile, err error) {
+	for key, value := range ms.dict {
+		if strings.HasPrefix(key, utils.USERS_PREFIX) {
+			up := &UserProfile{}
+			if err = ms.ms.Unmarshal(value, up); err == nil {
+				result = append(result, up)
+			}
+		}
+	}
+	return
+}
+
+func (ms *MapStorage) RemoveUser(key string) error {
+	delete(ms.dict, utils.USERS_PREFIX+key)
+	return nil
 }
 
 func (ms *MapStorage) GetActionPlans(key string) (ats ActionPlans, err error) {

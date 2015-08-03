@@ -157,18 +157,18 @@ func NewCGRConfigFromFolder(cfgDir string) (*CGRConfig, error) {
 
 // Holds system configuration, defaults are overwritten with values from config file if found
 type CGRConfig struct {
-	RatingDBType         string
-	RatingDBHost         string // The host to connect to. Values that start with / are for UNIX domain sockets.
-	RatingDBPort         string // The port to bind to.
-	RatingDBName         string // The name of the database to connect to.
-	RatingDBUser         string // The user to sign in as.
-	RatingDBPass         string // The user's password.
-	AccountDBType        string
-	AccountDBHost        string        // The host to connect to. Values that start with / are for UNIX domain sockets.
-	AccountDBPort        string        // The port to bind to.
-	AccountDBName        string        // The name of the database to connect to.
-	AccountDBUser        string        // The user to sign in as.
-	AccountDBPass        string        // The user's password.
+	TpDbType             string
+	TpDbHost             string // The host to connect to. Values that start with / are for UNIX domain sockets.
+	TpDbPort             string // The port to bind to.
+	TpDbName             string // The name of the database to connect to.
+	TpDbUser             string // The user to sign in as.
+	TpDbPass             string // The user's password.
+	DataDbType           string
+	DataDbHost           string        // The host to connect to. Values that start with / are for UNIX domain sockets.
+	DataDbPort           string        // The port to bind to.
+	DataDbName           string        // The name of the database to connect to.
+	DataDbUser           string        // The user to sign in as.
+	DataDbPass           string        // The user's password.
 	StorDBType           string        // Should reflect the database type used to store logs
 	StorDBHost           string        // The host to connect to. Values that start with / are for UNIX domain sockets.
 	StorDBPort           string        // Th e port to bind to.
@@ -185,6 +185,8 @@ type CGRConfig struct {
 	DefaultCategory      string        // set default type of record
 	DefaultTenant        string        // set default tenant
 	DefaultSubject       string        // set default rating subject, useful in case of fallback
+	Reconnects           int           // number of recconect attempts in case of connection lost <-1 for infinite | nb>
+	ConnectAttempts      int           // number of initial connection attempts before giving up
 	RoundingDecimals     int           // Number of decimals to round end prices at
 	HttpSkipTlsVerify    bool          // If enabled Http Client will accept any TLS certificate
 	TpExportPath         string        // Path towards export folder for offline Tariff Plans
@@ -192,6 +194,9 @@ type CGRConfig struct {
 	RaterEnabled         bool          // start standalone server (no balancer)
 	RaterBalancer        string        // balancer address host:port
 	RaterCdrStats        string        // address where to reach the cdrstats service. Empty to disable stats gathering  <""|internal|x.y.z.y:1234>
+	RaterHistoryServer   string
+	RaterPubSubServer    string
+	RaterUserServer      string
 	BalancerEnabled      bool
 	SchedulerEnabled     bool
 	CDRSEnabled          bool                 // Enable CDR Server service
@@ -203,20 +208,20 @@ type CGRConfig struct {
 	CDRSCdrReplication   []*CdrReplicationCfg // Replicate raw CDRs to a number of servers
 	CDRStatsEnabled      bool                 // Enable CDR Stats service
 	CDRStatsSaveInterval time.Duration        // Save interval duration
-	CDRStatConfig        *CdrStatsConfig      // Active cdr stats configuration instances, platform level
+	//CDRStatConfig        *CdrStatsConfig // Active cdr stats configuration instances, platform level
 	CdreProfiles         map[string]*CdreConfig
 	CdrcProfiles         map[string]map[string]*CdrcConfig // Number of CDRC instances running imports, format map[dirPath]map[instanceName]{Configs}
 	SmFsConfig           *SmFsConfig                       // SM-FreeSWITCH configuration
 	SmKamConfig          *SmKamConfig                      // SM-Kamailio Configuration
 	SmOsipsConfig        *SmOsipsConfig                    // SM-OpenSIPS Configuration
-	HistoryAgentEnabled  bool                              // Starts History as an agent: <true|false>.
 	HistoryServer        string                            // Address where to reach the master history server: <internal|x.y.z.y:1234>
 	HistoryServerEnabled bool                              // Starts History as server: <true|false>.
 	HistoryDir           string                            // Location on disk where to store history files.
 	HistorySaveInterval  time.Duration                     // The timout duration between pubsub writes
-	PubSubAgentEnabled   bool                              // Starts PubSub as an agent: <true|false>.
 	PubSubServer         string                            // Address where to reach the master pubsub server: <internal|x.y.z.y:1234>
 	PubSubServerEnabled  bool                              // Starts PubSub as server: <true|false>.
+	UserServerEnabled    bool                              // Starts User as server: <true|false>
+	UserServerIndexes    []string                          // List of user profile field indexes
 	MailerServer         string                            // The server to use when sending emails out
 	MailerAuthUser       string                            // Authenticate to email server using this user
 	MailerAuthPass       string                            // Authenticate to email server with this password
@@ -237,6 +242,15 @@ func (self *CGRConfig) checkConfigSanity() error {
 		}
 		if self.RaterCdrStats == utils.INTERNAL && !self.CDRStatsEnabled {
 			return errors.New("CDRStats not enabled but requested by Rater component.")
+		}
+		if self.RaterHistoryServer == utils.INTERNAL && !self.HistoryServerEnabled {
+			return errors.New("History server not enabled but requested by Rater component.")
+		}
+		if self.RaterPubSubServer == utils.INTERNAL && !self.PubSubServerEnabled {
+			return errors.New("PubSub server not enabled but requested by Rater component.")
+		}
+		if self.RaterUserServer == utils.INTERNAL && !self.UserServerEnabled {
+			return errors.New("Users service not enabled but requested by Rater component.")
 		}
 	}
 	// CDRServer checks
@@ -259,11 +273,11 @@ func (self *CGRConfig) checkConfigSanity() error {
 			} else if cdrcInst.Cdrs == utils.INTERNAL && !self.CDRSEnabled {
 				return errors.New("CDRS not enabled but referenced from CDRC")
 			}
-			if len(cdrcInst.CdrFields) == 0 {
+			if len(cdrcInst.ContentFields) == 0 {
 				return errors.New("CdrC enabled but no fields to be processed defined!")
 			}
 			if cdrcInst.CdrFormat == utils.CSV {
-				for _, cdrFld := range cdrcInst.CdrFields {
+				for _, cdrFld := range cdrcInst.ContentFields {
 					for _, rsrFld := range cdrFld.Value {
 						if _, errConv := strconv.Atoi(rsrFld.Id); errConv != nil && !rsrFld.IsStatic() {
 							return fmt.Errorf("CDR fields must be indices in case of .csv files, have instead: %s", rsrFld.Id)
@@ -318,14 +332,6 @@ func (self *CGRConfig) checkConfigSanity() error {
 			return errors.New("CDRS not enabled but referenced by SM-OpenSIPS component")
 		}
 	}
-	// HistoryAgent
-	if self.HistoryAgentEnabled && !self.HistoryServerEnabled {
-		return errors.New("HistoryServer not enabled but referenced by HistoryAgent component")
-	}
-	// PubSubAgent
-	if self.PubSubAgentEnabled && !self.PubSubServerEnabled {
-		return errors.New("PubSubServer not enabled but referenced by PubSubAgent component")
-	}
 	return nil
 }
 
@@ -343,12 +349,12 @@ func (self *CGRConfig) loadFromJsonCfg(jsnCfg *CgrJsonCfg) error {
 		return err
 	}
 
-	jsnRatingDbCfg, err := jsnCfg.DbJsonCfg(RATINGDB_JSN)
+	jsnTpDbCfg, err := jsnCfg.DbJsonCfg(TPDB_JSN)
 	if err != nil {
 		return err
 	}
 
-	jsnAccountingDbCfg, err := jsnCfg.DbJsonCfg(ACCOUNTINGDB_JSN)
+	jsnDataDbCfg, err := jsnCfg.DbJsonCfg(DATADB_JSN)
 	if err != nil {
 		return err
 	}
@@ -413,17 +419,12 @@ func (self *CGRConfig) loadFromJsonCfg(jsnCfg *CgrJsonCfg) error {
 		return err
 	}
 
-	jsnHistAgentCfg, err := jsnCfg.HistAgentJsonCfg()
-	if err != nil {
-		return err
-	}
-
 	jsnPubSubServCfg, err := jsnCfg.PubSubServJsonCfg()
 	if err != nil {
 		return err
 	}
 
-	jsnPubSubAgentCfg, err := jsnCfg.PubSubAgentJsonCfg()
+	jsnUserServCfg, err := jsnCfg.UserServJsonCfg()
 	if err != nil {
 		return err
 	}
@@ -434,45 +435,45 @@ func (self *CGRConfig) loadFromJsonCfg(jsnCfg *CgrJsonCfg) error {
 	}
 
 	// All good, start populating config variables
-	if jsnRatingDbCfg != nil {
-		if jsnRatingDbCfg.Db_type != nil {
-			self.RatingDBType = *jsnRatingDbCfg.Db_type
+	if jsnTpDbCfg != nil {
+		if jsnTpDbCfg.Db_type != nil {
+			self.TpDbType = *jsnTpDbCfg.Db_type
 		}
-		if jsnRatingDbCfg.Db_host != nil {
-			self.RatingDBHost = *jsnRatingDbCfg.Db_host
+		if jsnTpDbCfg.Db_host != nil {
+			self.TpDbHost = *jsnTpDbCfg.Db_host
 		}
-		if jsnRatingDbCfg.Db_port != nil {
-			self.RatingDBPort = strconv.Itoa(*jsnRatingDbCfg.Db_port)
+		if jsnTpDbCfg.Db_port != nil {
+			self.TpDbPort = strconv.Itoa(*jsnTpDbCfg.Db_port)
 		}
-		if jsnRatingDbCfg.Db_name != nil {
-			self.RatingDBName = *jsnRatingDbCfg.Db_name
+		if jsnTpDbCfg.Db_name != nil {
+			self.TpDbName = *jsnTpDbCfg.Db_name
 		}
-		if jsnRatingDbCfg.Db_user != nil {
-			self.RatingDBUser = *jsnRatingDbCfg.Db_user
+		if jsnTpDbCfg.Db_user != nil {
+			self.TpDbUser = *jsnTpDbCfg.Db_user
 		}
-		if jsnRatingDbCfg.Db_passwd != nil {
-			self.RatingDBPass = *jsnRatingDbCfg.Db_passwd
+		if jsnTpDbCfg.Db_passwd != nil {
+			self.TpDbPass = *jsnTpDbCfg.Db_passwd
 		}
 	}
 
-	if jsnAccountingDbCfg != nil {
-		if jsnAccountingDbCfg.Db_type != nil {
-			self.AccountDBType = *jsnAccountingDbCfg.Db_type
+	if jsnDataDbCfg != nil {
+		if jsnDataDbCfg.Db_type != nil {
+			self.DataDbType = *jsnDataDbCfg.Db_type
 		}
-		if jsnAccountingDbCfg.Db_host != nil {
-			self.AccountDBHost = *jsnAccountingDbCfg.Db_host
+		if jsnDataDbCfg.Db_host != nil {
+			self.DataDbHost = *jsnDataDbCfg.Db_host
 		}
-		if jsnAccountingDbCfg.Db_port != nil {
-			self.AccountDBPort = strconv.Itoa(*jsnAccountingDbCfg.Db_port)
+		if jsnDataDbCfg.Db_port != nil {
+			self.DataDbPort = strconv.Itoa(*jsnDataDbCfg.Db_port)
 		}
-		if jsnAccountingDbCfg.Db_name != nil {
-			self.AccountDBName = *jsnAccountingDbCfg.Db_name
+		if jsnDataDbCfg.Db_name != nil {
+			self.DataDbName = *jsnDataDbCfg.Db_name
 		}
-		if jsnAccountingDbCfg.Db_user != nil {
-			self.AccountDBUser = *jsnAccountingDbCfg.Db_user
+		if jsnDataDbCfg.Db_user != nil {
+			self.DataDbUser = *jsnDataDbCfg.Db_user
 		}
-		if jsnAccountingDbCfg.Db_passwd != nil {
-			self.AccountDBPass = *jsnAccountingDbCfg.Db_passwd
+		if jsnDataDbCfg.Db_passwd != nil {
+			self.DataDbPass = *jsnDataDbCfg.Db_passwd
 		}
 	}
 
@@ -519,11 +520,17 @@ func (self *CGRConfig) loadFromJsonCfg(jsnCfg *CgrJsonCfg) error {
 		if jsnGeneralCfg.Default_subject != nil {
 			self.DefaultSubject = *jsnGeneralCfg.Default_subject
 		}
+		if jsnGeneralCfg.Connect_attempts != nil {
+			self.ConnectAttempts = *jsnGeneralCfg.Connect_attempts
+		}
+		if jsnGeneralCfg.Reconnects != nil {
+			self.Reconnects = *jsnGeneralCfg.Reconnects
+		}
 		if jsnGeneralCfg.Rounding_decimals != nil {
 			self.RoundingDecimals = *jsnGeneralCfg.Rounding_decimals
 		}
-		if jsnGeneralCfg.Http_skip_tls_veify != nil {
-			self.HttpSkipTlsVerify = *jsnGeneralCfg.Http_skip_tls_veify
+		if jsnGeneralCfg.Http_skip_tls_verify != nil {
+			self.HttpSkipTlsVerify = *jsnGeneralCfg.Http_skip_tls_verify
 		}
 		if jsnGeneralCfg.Tpexport_dir != nil {
 			self.TpExportPath = *jsnGeneralCfg.Tpexport_dir
@@ -551,6 +558,15 @@ func (self *CGRConfig) loadFromJsonCfg(jsnCfg *CgrJsonCfg) error {
 		}
 		if jsnRaterCfg.Cdrstats != nil {
 			self.RaterCdrStats = *jsnRaterCfg.Cdrstats
+		}
+		if jsnRaterCfg.Historys != nil {
+			self.RaterHistoryServer = *jsnRaterCfg.Historys
+		}
+		if jsnRaterCfg.Pubsubs != nil {
+			self.RaterPubSubServer = *jsnRaterCfg.Pubsubs
+		}
+		if jsnRaterCfg.Users != nil {
+			self.RaterUserServer = *jsnRaterCfg.Users
 		}
 	}
 
@@ -672,15 +688,6 @@ func (self *CGRConfig) loadFromJsonCfg(jsnCfg *CgrJsonCfg) error {
 		}
 	}
 
-	if jsnHistAgentCfg != nil {
-		if jsnHistAgentCfg.Enabled != nil {
-			self.HistoryAgentEnabled = *jsnHistAgentCfg.Enabled
-		}
-		if jsnHistAgentCfg.Server != nil {
-			self.HistoryServer = *jsnHistAgentCfg.Server
-		}
-	}
-
 	if jsnHistServCfg != nil {
 		if jsnHistServCfg.Enabled != nil {
 			self.HistoryServerEnabled = *jsnHistServCfg.Enabled
@@ -695,18 +702,18 @@ func (self *CGRConfig) loadFromJsonCfg(jsnCfg *CgrJsonCfg) error {
 		}
 	}
 
-	if jsnPubSubAgentCfg != nil {
-		if jsnPubSubAgentCfg.Enabled != nil {
-			self.PubSubAgentEnabled = *jsnPubSubAgentCfg.Enabled
-		}
-		if jsnPubSubAgentCfg.Server != nil {
-			self.PubSubServer = *jsnPubSubAgentCfg.Server
-		}
-	}
-
 	if jsnPubSubServCfg != nil {
 		if jsnPubSubServCfg.Enabled != nil {
 			self.PubSubServerEnabled = *jsnPubSubServCfg.Enabled
+		}
+	}
+
+	if jsnUserServCfg != nil {
+		if jsnUserServCfg.Enabled != nil {
+			self.UserServerEnabled = *jsnUserServCfg.Enabled
+		}
+		if jsnUserServCfg.Indexes != nil {
+			self.UserServerIndexes = *jsnUserServCfg.Indexes
 		}
 	}
 

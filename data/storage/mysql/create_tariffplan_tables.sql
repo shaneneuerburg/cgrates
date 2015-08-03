@@ -299,11 +299,11 @@ CREATE TABLE tp_derived_chargers (
 
 
 --
--- Table structure for table `tp_cdrstats`
+-- Table structure for table `tp_cdr_stats`
 --
 
-DROP TABLE IF EXISTS tp_cdrstats;
-CREATE TABLE tp_cdrstats (
+DROP TABLE IF EXISTS tp_cdr_stats;
+CREATE TABLE tp_cdr_stats (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `tpid` varchar(64) NOT NULL,
   `tag` varchar(64) NOT NULL,
@@ -331,6 +331,23 @@ CREATE TABLE tp_cdrstats (
   `rated_subjects` varchar(64) NOT NULL,
   `cost_interval` varchar(24) NOT NULL,
   `action_triggers` varchar(64) NOT NULL,
+  `created_at` TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `tpid` (`tpid`)
+);
+
+    --
+-- Table structure for table `tp_users`
+--
+
+DROP TABLE IF EXISTS tp_users;
+CREATE TABLE tp_users (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tpid` varchar(64) NOT NULL,
+  `tenant` varchar(64) NOT NULL,
+  `user_name` varchar(64) NOT NULL,
+  `attribute_name` varchar(64) NOT NULL,
+  `attribute_value` varchar(64) NOT NULL,
   `created_at` TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `tpid` (`tpid`)

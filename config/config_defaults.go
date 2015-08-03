@@ -28,7 +28,7 @@ const CGRATES_CFG_JSON = `
 // This is what you get when you load CGRateS with an empty configuration file.
 
 "general": {
-	"http_skip_tls_veify": false,			// if enabled Http Client will accept any TLS certificate
+	"http_skip_tls_verify": false,			// if enabled Http Client will accept any TLS certificate
 	"rounding_decimals": 10,				// system level precision for floats
 	"dbdata_encoding": "msgpack",			// encoding used to store object data in strings: <msgpack|json>
 	"tpexport_dir": "/var/log/cgrates/tpe",	// path towards export folder for offline Tariff Plans
@@ -36,6 +36,8 @@ const CGRATES_CFG_JSON = `
 	"default_category": "call",				// default Type of Record to consider when missing from requests
 	"default_tenant": "cgrates.org",		// default Tenant to consider when missing from requests
 	"default_subject": "cgrates",			// default rating Subject to consider when missing from requests
+	"connect_attempts": 3,                  // initial server connect attempts
+	"reconnects": -1,                       // number of retries in case of connection lost
 },
 
 
@@ -46,35 +48,35 @@ const CGRATES_CFG_JSON = `
 },
 
 
-"rating_db": {
-	"db_type": "redis",						// rating subsystem database type: <redis>
-	"db_host": "127.0.0.1",					// rating subsystem database host address
-	"db_port": 6379, 						// rating subsystem port to reach the database
-	"db_name": "10", 						// rating subsystem database name to connect to
-	"db_user": "", 							// rating subsystem username to use when connecting to database
-	"db_passwd": "", 						// rating subsystem password to use when connecting to database
+"tariffplan_db": {							// database used to store active tariff plan configuration
+	"db_type": "redis",						// tariffplan_db type: <redis>
+	"db_host": "127.0.0.1",					// tariffplan_db host address
+	"db_port": 6379, 						// port to reach the tariffplan_db
+	"db_name": "10", 						// tariffplan_db name to connect to
+	"db_user": "", 							// sername to use when connecting to tariffplan_db
+	"db_passwd": "", 						// password to use when connecting to tariffplan_db
 },
 
 
-"accounting_db": {
-	"db_type": "redis",						// accounting subsystem database: <redis>
-	"db_host": "127.0.0.1",					// accounting subsystem database host address
-	"db_port": 6379, 						// accounting subsystem port to reach the database
-	"db_name": "11", 						// accounting subsystem database name to connect to
-	"db_user": "", 							// accounting subsystem username to use when connecting to database
-	"db_passwd": "", 						// accounting subsystem password to use when connecting to database
+"data_db": {								// database used to store runtime data (eg: accounts, cdr stats)
+	"db_type": "redis",						// data_db type: <redis>
+	"db_host": "127.0.0.1",					// data_db host address
+	"db_port": 6379, 						// data_db port to reach the database
+	"db_name": "11", 						// data_db database name to connect to
+	"db_user": "", 							// username to use when connecting to data_db
+	"db_passwd": "", 						// password to use when connecting to data_db
 },
 
 
-"stor_db": {
+"stor_db": {								// database used to store offline tariff plans and CDRs
 	"db_type": "mysql",						// stor database type to use: <mysql|postgres>
 	"db_host": "127.0.0.1",					// the host to connect to
 	"db_port": 3306, 						// the port to reach the stordb
 	"db_name": "cgrates", 					// stor database name
 	"db_user": "cgrates", 					// username to use when connecting to stordb
 	"db_passwd": "CGRateS.org", 			// password to use when connecting to stordb
-	"max_open_conns": 0,					// maximum database connections opened
-	"max_idle_conns": -1,					// maximum database connections idle
+	"max_open_conns": 100,					// maximum database connections opened
+	"max_idle_conns": 10,					// maximum database connections idle
 },
 
 
@@ -86,7 +88,10 @@ const CGRATES_CFG_JSON = `
 "rater": {
 	"enabled": false,						// enable Rater service: <true|false>
 	"balancer": "",							// register to balancer as worker: <""|internal|x.y.z.y:1234>
-	"cdrstats": "",							// address where to reach the cdrstats service, empty to disable stats functionality<""|internal|x.y.z.y:1234>
+	"cdrstats": "",							// address where to reach the cdrstats service, empty to disable stats functionality: <""|internal|x.y.z.y:1234>
+	"historys": "",							// address where to reach the history service, empty to disable history functionality: <""|internal|x.y.z.y:1234>
+	"pubsubs": "",							// address where to reach the pubusb service, empty to disable pubsub functionality: <""|internal|x.y.z.y:1234>
+	"users": "",							// address where to reach the user service, empty to disable user profile functionality: <""|internal|x.y.z.y:1234>
 },
 
 
@@ -108,7 +113,7 @@ const CGRATES_CFG_JSON = `
 
 "cdrstats": {
 	"enabled": false,						// starts the cdrstats service: <true|false>
-    "save_interval": "1m",					// interval to save changed stats into dataDb storage
+	"save_interval": "1m",					// interval to save changed stats into dataDb storage
 },
 
 
@@ -151,16 +156,21 @@ const CGRATES_CFG_JSON = `
 "cdrc": {
 	"*default": {
 		"enabled": false,							// enable CDR client functionality
+		"dry_run": false,							// do not send the CDRs to CDRS, just parse them
 		"cdrs": "internal",							// address where to reach CDR server. <internal|x.y.z.y:1234>
-		"cdr_format": "csv",						// CDR file format <csv|freeswitch_csv|fwv>
+		"cdr_format": "csv",						// CDR file format <csv|freeswitch_csv|fwv|opensips_flatstore>
 		"field_separator": ",",						// separator used in case of csv files
 		"run_delay": 0,								// sleep interval in seconds between consecutive runs, 0 to use automation via inotify
+		"max_open_files": 1024,						// maximum simultaneous files to process, 0 for unlimited
 		"data_usage_multiply_factor": 1024,			// conversion factor for data usage
 		"cdr_in_dir": "/var/log/cgrates/cdrc/in",	// absolute path towards the directory where the CDRs are stored
 		"cdr_out_dir": "/var/log/cgrates/cdrc/out",	// absolute path towards the directory where processed CDRs will be moved
+		"failed_calls_prefix": "missed_calls",		// used in case of flatstore CDRs to avoid searching for BYE records
 		"cdr_source_id": "freeswitch_csv",			// free form field, tag identifying the source of the CDRs within CDRS database
-		"cdr_filter": "",							// Filter CDR records to import
-		"cdr_fields":[								// import template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value
+		"cdr_filter": "",							// filter CDR records to import
+		"partial_record_cache": "10s",				// duration to cache partial records when not pairing
+		"header_fields": [],						// template of the import header fields
+		"content_fields":[							// import content_fields template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value
 			{"tag": "tor", "cdr_field_id": "tor", "type": "cdrfield", "value": "2", "mandatory": true},
 			{"tag": "accid", "cdr_field_id": "accid", "type": "cdrfield", "value": "3", "mandatory": true},
 			{"tag": "reqtype", "cdr_field_id": "reqtype", "type": "cdrfield", "value": "4", "mandatory": true},
@@ -174,6 +184,7 @@ const CGRATES_CFG_JSON = `
 			{"tag": "answer_time", "cdr_field_id": "answer_time", "type": "cdrfield", "value": "12", "mandatory": true},
 			{"tag": "usage", "cdr_field_id": "usage", "type": "cdrfield", "value": "13", "mandatory": true},
 		],
+		"trailer_fields": [],							// template of the import trailer fields
 	}
 },
 
@@ -227,31 +238,24 @@ const CGRATES_CFG_JSON = `
 	"max_call_duration": "3h",			// maximum call duration a prepaid call can last
 	"events_subscribe_interval": "60s",	// automatic events subscription to OpenSIPS, 0 to disable it
 	"mi_addr": "127.0.0.1:8020",		// address where to reach OpenSIPS MI to send session disconnects
-
 },
 
 
-"history_server": {
+"historys": {
 	"enabled": false,							// starts History service: <true|false>.
 	"history_dir": "/var/log/cgrates/history",	// location on disk where to store history files.
 	"save_interval": "1s",						// interval to save changed cache into .git archive
 },
 
 
-"history_agent": {
-	"enabled": false,			// starts History as a client: <true|false>.
-	"server": "internal",		// address where to reach the master history server: <internal|x.y.z.y:1234>
-},
-
-"pubsub_server": {
-	"enabled": false,							// starts History service: <true|false>.
-	"save_interval": "1s",						// interval to save changed cache into .git archive
+"pubsubs": {
+	"enabled": false,							// starts PubSub service: <true|false>.
 },
 
 
-"pubsub_agent": {
-	"enabled": false,			// starts PubSub as a client: <true|false>.
-	"server": "internal",		// address where to reach the master pubsub server: <internal|x.y.z.y:1234>
+"users": {
+	"enabled": false,							// starts User service: <true|false>.
+	"indexes": [],                  			// user profile field indexes
 },
 
 

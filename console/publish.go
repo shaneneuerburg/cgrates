@@ -18,8 +18,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 package console
 
-import "github.com/cgrates/cgrates/engine"
-
 func init() {
 	c := &CmdPublish{
 		name:      "publish",
@@ -32,7 +30,7 @@ func init() {
 type CmdPublish struct {
 	name      string
 	rpcMethod string
-	rpcParams *engine.PublishInfo
+	rpcParams *StringMapWrapper
 	*CommandExecuter
 }
 
@@ -44,14 +42,11 @@ func (self *CmdPublish) RpcMethod() string {
 	return self.rpcMethod
 }
 
-func (self *CmdPublish) RpcParams(ptr bool) interface{} {
-	if self.rpcParams == nil {
-		self.rpcParams = &engine.PublishInfo{}
+func (self *CmdPublish) RpcParams(reset bool) interface{} {
+	if reset || self.rpcParams == nil {
+		self.rpcParams = &StringMapWrapper{}
 	}
-	if ptr {
-		return self.rpcParams
-	}
-	return *self.rpcParams
+	return self.rpcParams
 }
 
 func (self *CmdPublish) PostprocessRpcParams() error {

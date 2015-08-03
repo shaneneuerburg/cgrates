@@ -22,10 +22,11 @@ var (
 	ErrBrokenReference    = errors.New("BROKEN_REFERENCE")
 	ErrParserError        = errors.New("PARSER_ERROR")
 	ErrInvalidPath        = errors.New("INVALID_PATH")
+	ErrInvalidKey         = errors.New("INVALID_KEY")
 )
 
 const (
-	VERSION                    = "0.9.1rc6"
+	VERSION                    = "0.9.1~rc6"
 	POSTGRES                   = "postgres"
 	MYSQL                      = "mysql"
 	MONGO                      = "mongo"
@@ -51,7 +52,7 @@ const (
 	TBL_TP_RATING_PLANS        = "tp_rating_plans"
 	TBL_TP_RATE_PROFILES       = "tp_rating_profiles"
 	TBL_TP_SHARED_GROUPS       = "tp_shared_groups"
-	TBL_TP_CDR_STATS           = "tp_cdrstats"
+	TBL_TP_CDR_STATS           = "tp_cdr_stats"
 	TBL_TP_LCRS                = "tp_lcr_rules"
 	TBL_TP_ACTIONS             = "tp_actions"
 	TBL_TP_ACTION_PLANS        = "tp_action_plans"
@@ -76,11 +77,13 @@ const (
 	ACCOUNT_ACTIONS_CSV        = "AccountActions.csv"
 	DERIVED_CHARGERS_CSV       = "DerivedChargers.csv"
 	CDR_STATS_CSV              = "CdrStats.csv"
+	USERS_CSV                  = "Users.csv"
 	ROUNDING_UP                = "*up"
 	ROUNDING_MIDDLE            = "*middle"
 	ROUNDING_DOWN              = "*down"
 	ANY                        = "*any"
 	ASAP                       = "*asap"
+	USERS                      = "*users"
 	COMMENT_CHAR               = '#'
 	CSV_SEP                    = ','
 	FALLBACK_SEP               = ';'
@@ -120,6 +123,7 @@ const (
 	META_DEFAULT               = "*default"
 	STATIC_VALUE_PREFIX        = "^"
 	CSV                        = "csv"
+	FWV                        = "fwv"
 	DRYRUN                     = "dry_run"
 	COMBIMED                   = "combimed"
 	INTERNAL                   = "internal"
@@ -166,6 +170,7 @@ const (
 	DERIVEDCHARGERS_PREFIX     = "dcs_"
 	CDR_STATS_QUEUE_PREFIX     = "csq_"
 	PUBSUB_SUBSCRIBERS_PREFIX  = "pss_"
+	USERS_PREFIX               = "usr_"
 	CDR_STATS_PREFIX           = "cst_"
 	TEMP_DESTINATION_PREFIX    = "tmp_"
 	LOG_CALL_COST_PREFIX       = "cco_"
@@ -193,14 +198,27 @@ const (
 	NANO_MULTIPLIER              = 1000000000
 	CGR_AUTHORIZE                = "CGR_AUTHORIZE"
 	CONFIG_DIR                   = "/etc/cgrates/"
+	CGR_ACCOUNT                  = "cgr_account"
 	CGR_SUPPLIER                 = "cgr_supplier"
-	CGR_SUPPLIERS                = "cgr_suppliers"
+	CGR_DESTINATION              = "cgr_destination"
+	CGR_SUBJECT                  = "cgr_subject"
+	CGR_CATEGORY                 = "cgr_category"
+	CGR_REQTYPE                  = "cgr_reqtype"
+	CGR_TENANT                   = "cgr_tenant"
+	CGR_TOR                      = "cgr_tor"
+	CGR_ACCID                    = "cgr_accid"
+	CGR_HOST                     = "cgr_host"
+	CGR_PDD                      = "cgr_pdd"
 	DISCONNECT_CAUSE             = "disconnect_cause"
 	CGR_DISCONNECT_CAUSE         = "cgr_disconnectcause"
 	CGR_COMPUTELCR               = "cgr_computelcr"
+	CGR_SUPPLIERS                = "cgr_suppliers"
+	KAM_FLATSTORE                = "kamailio_flatstore"
+	OSIPS_FLATSTORE              = "opensips_flatstore"
 )
 
 var (
 	CdreCdrFormats   = []string{CSV, DRYRUN, CDRE_FIXED_WIDTH}
-	PrimaryCdrFields = []string{TOR, ACCID, CDRHOST, CDRSOURCE, REQTYPE, DIRECTION, TENANT, CATEGORY, ACCOUNT, SUBJECT, DESTINATION, SETUP_TIME, ANSWER_TIME, USAGE, SUPPLIER}
+	PrimaryCdrFields = []string{CGRID, TOR, ACCID, CDRHOST, CDRSOURCE, REQTYPE, DIRECTION, TENANT, CATEGORY, ACCOUNT, SUBJECT, DESTINATION, SETUP_TIME, PDD, ANSWER_TIME, USAGE,
+		SUPPLIER, DISCONNECT_CAUSE, COST, RATED}
 )

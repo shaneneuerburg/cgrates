@@ -117,7 +117,7 @@ func TestTutLocalCacheStats(t *testing.T) {
 	}
 	var rcvStats *utils.CacheStats
 	expectedStats := &utils.CacheStats{Destinations: 4, RatingPlans: 3, RatingProfiles: 8, Actions: 7, SharedGroups: 1, RatingAliases: 1, AccountAliases: 1,
-		DerivedChargers: 1, LcrProfiles: 4}
+		DerivedChargers: 1, LcrProfiles: 4, CdrStats: 6, Users: 2}
 	var args utils.AttrCacheStats
 	if err := tutLocalRpc.Call("ApierV1.GetCacheStats", args, &rcvStats); err != nil {
 		t.Error("Got error on ApierV1.GetCacheStats: ", err.Error())
@@ -182,6 +182,18 @@ func TestTutLocalGetCachedItemAge(t *testing.T) {
 	*/
 }
 
+func TestTutLocalGetUsers(t *testing.T) {
+	if !*testLocal {
+		return
+	}
+	var users engine.UserProfiles
+	if err := tutLocalRpc.Call("UsersV1.GetUsers", engine.UserProfile{}, &users); err != nil {
+		t.Error("Got error on UsersV1.GetUsers: ", err.Error())
+	} else if len(users) != 2 {
+		t.Error("Calling UsersV1.GetUsers got users:", len(users))
+	}
+}
+
 // Check call costs
 func TestTutLocalGetCosts(t *testing.T) {
 	if !*testLocal {
@@ -201,6 +213,24 @@ func TestTutLocalGetCosts(t *testing.T) {
 		TimeEnd:       tEnd,
 	}
 	var cc engine.CallCost
+	if err := tutLocalRpc.Call("Responder.GetCost", cd, &cc); err != nil {
+		t.Error("Got error on Responder.GetCost: ", err.Error())
+	} else if cc.Cost != 0.6 {
+		t.Errorf("Calling Responder.GetCost got callcost: %v", cc.Cost)
+	}
+	// Make sure that the same cost is returned via users aliasing
+	cd = engine.CallDescriptor{
+		Direction:     "*out",
+		Category:      "call",
+		Tenant:        utils.USERS,
+		Subject:       utils.USERS,
+		Account:       utils.USERS,
+		Destination:   "1002",
+		DurationIndex: 0,
+		TimeStart:     tStart,
+		TimeEnd:       tEnd,
+		ExtraFields:   map[string]string{"Uuid": "388539dfd4f5cefee8f488b78c6c244b9e19138e"},
+	}
 	if err := tutLocalRpc.Call("Responder.GetCost", cd, &cc); err != nil {
 		t.Error("Got error on Responder.GetCost: ", err.Error())
 	} else if cc.Cost != 0.6 {
@@ -480,10 +510,46 @@ func TestTutLocalMaxUsage(t *testing.T) {
 		SetupTime: "2014-08-04T13:00:00Z", Usage: "1",
 	}
 	var maxTime float64
-	if err := tutLocalRpc.Call("ApierV1.GetMaxUsage", setupReq, &maxTime); err != nil {
+	if err := tutLocalRpc.Call("ApierV2.GetMaxUsage", setupReq, &maxTime); err != nil {
 		t.Error(err)
 	} else if maxTime != 1 {
-		t.Errorf("Calling ApierV1.MaxUsage got maxTime: %f", maxTime)
+		t.Errorf("Calling ApierV2.MaxUsage got maxTime: %f", maxTime)
+	}
+}
+
+// Check MaxUsage
+func TestTutLocalDebitUsage(t *testing.T) {
+	if !*testLocal {
+		return
+	}
+	setupReq := &engine.UsageRecord{TOR: utils.VOICE, ReqType: utils.META_PREPAID, Direction: utils.OUT, Tenant: "cgrates.org", Category: "call",
+		Account: "1003", Subject: "1003", Destination: "1001",
+		AnswerTime: "2014-08-04T13:00:00Z", Usage: "1",
+	}
+	var reply string
+	if err := tutLocalRpc.Call("ApierV2.DebitUsage", setupReq, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Error("Calling ApierV2.DebitUsage reply: ", reply)
+	}
+}
+
+// Test CDR from external sources
+func TestTutLocalProcessExternalCdr(t *testing.T) {
+	if !*testLocal {
+		return
+	}
+	cdr := &engine.ExternalCdr{TOR: utils.VOICE,
+		AccId: "testextcdr1", CdrHost: "192.168.1.1", CdrSource: utils.UNIT_TEST, ReqType: utils.META_RATED, Direction: utils.OUT,
+		Tenant: "cgrates.org", Category: "call", Account: "1003", Subject: "1003", Destination: "1001", Supplier: "SUPPL1",
+		SetupTime: "2014-08-04T13:00:00Z", AnswerTime: "2014-08-04T13:00:07Z",
+		Usage: "1", Pdd: "7.0", ExtraFields: map[string]string{"field_extr1": "val_extr1", "fieldextr2": "valextr2"},
+	}
+	var reply string
+	if err := tutLocalRpc.Call("CdrsV2.ProcessExternalCdr", cdr, &reply); err != nil {
+		t.Error("Unexpected error: ", err.Error())
+	} else if reply != utils.OK {
+		t.Error("Unexpected reply received: ", reply)
 	}
 }
 
@@ -612,18 +678,18 @@ func TestTutLocalLcrQos(t *testing.T) {
 		Entry: &engine.LCREntry{DestinationId: utils.ANY, RPCategory: "lcr_profile1", Strategy: engine.LCR_STRATEGY_QOS, StrategyParams: "", Weight: 10.0},
 		SupplierCosts: []*engine.LCRSupplierCost{
 			&engine.LCRSupplierCost{Supplier: "*out:cgrates.org:lcr_profile1:suppl1", Cost: 1.2, Duration: 60 * time.Second,
-				QOS: map[string]float64{engine.TCD: -1, engine.ACC: -1, engine.TCC: -1, engine.ASR: -1, engine.ACD: -1}},
+				QOS: map[string]float64{engine.TCD: -1, engine.ACC: -1, engine.TCC: -1, engine.ASR: -1, engine.ACD: -1, engine.DDC: -1}},
 			&engine.LCRSupplierCost{Supplier: "*out:cgrates.org:lcr_profile1:suppl2", Cost: 1.2, Duration: 60 * time.Second,
-				QOS: map[string]float64{engine.TCD: -1, engine.ACC: -1, engine.TCC: -1, engine.ASR: -1, engine.ACD: -1}},
+				QOS: map[string]float64{engine.TCD: -1, engine.ACC: -1, engine.TCC: -1, engine.ASR: -1, engine.ACD: -1, engine.DDC: -1}},
 		},
 	}
 	eStLcr2 := &engine.LCRCost{
 		Entry: &engine.LCREntry{DestinationId: utils.ANY, RPCategory: "lcr_profile1", Strategy: engine.LCR_STRATEGY_QOS, StrategyParams: "", Weight: 10.0},
 		SupplierCosts: []*engine.LCRSupplierCost{
 			&engine.LCRSupplierCost{Supplier: "*out:cgrates.org:lcr_profile1:suppl2", Cost: 1.2, Duration: 60 * time.Second,
-				QOS: map[string]float64{engine.TCD: -1, engine.ACC: -1, engine.TCC: -1, engine.ASR: -1, engine.ACD: -1}},
+				QOS: map[string]float64{engine.TCD: -1, engine.ACC: -1, engine.TCC: -1, engine.ASR: -1, engine.ACD: -1, engine.DDC: -1}},
 			&engine.LCRSupplierCost{Supplier: "*out:cgrates.org:lcr_profile1:suppl1", Cost: 1.2, Duration: 60 * time.Second,
-				QOS: map[string]float64{engine.TCD: -1, engine.ACC: -1, engine.TCC: -1, engine.ASR: -1, engine.ACD: -1}},
+				QOS: map[string]float64{engine.TCD: -1, engine.ACC: -1, engine.TCC: -1, engine.ASR: -1, engine.ACD: -1, engine.DDC: -1}},
 		},
 	}
 	var lcr engine.LCRCost

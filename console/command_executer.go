@@ -46,11 +46,12 @@ func (ce *CommandExecuter) Usage() string {
 
 // Parses command line args and builds CmdBalance value
 func (ce *CommandExecuter) FromArgs(args string, verbose bool) error {
-	if err := json.Unmarshal(ToJSON(args), ce.command.RpcParams(true)); err != nil {
+	params := ce.command.RpcParams(true)
+	if err := json.Unmarshal(ToJSON(args), params); err != nil {
 		return err
 	}
 	if verbose {
-		jsn, _ := json.Marshal(ce.command.RpcParams(true))
+		jsn, _ := json.Marshal(params)
 		fmt.Println(ce.command.Name(), FromJSON(jsn, ce.command.ClientArgs()))
 	}
 	return nil
@@ -58,6 +59,10 @@ func (ce *CommandExecuter) FromArgs(args string, verbose bool) error {
 
 func (ce *CommandExecuter) clientArgs(iface interface{}) (args []string) {
 	val := reflect.ValueOf(iface)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+		iface = val.Interface()
+	}
 	typ := reflect.TypeOf(iface)
 	for i := 0; i < typ.NumField(); i++ {
 		valField := val.Field(i)
@@ -73,7 +78,7 @@ func (ce *CommandExecuter) clientArgs(iface interface{}) (args []string) {
 }
 
 func (ce *CommandExecuter) ClientArgs() (args []string) {
-	return ce.clientArgs(ce.command.RpcParams(false))
+	return ce.clientArgs(ce.command.RpcParams(true))
 }
 
 // To be overwritten by commands that do not need a rpc call

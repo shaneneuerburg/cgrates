@@ -33,10 +33,13 @@ func NewStoredCdrFromExternalCdr(extCdr *ExternalCdr) (*StoredCdr, error) {
 	var err error
 	storedCdr := &StoredCdr{CgrId: extCdr.CgrId, OrderId: extCdr.OrderId, TOR: extCdr.TOR, AccId: extCdr.AccId, CdrHost: extCdr.CdrHost, CdrSource: extCdr.CdrSource,
 		ReqType: extCdr.ReqType, Direction: extCdr.Direction, Tenant: extCdr.Tenant, Category: extCdr.Category, Account: extCdr.Account, Subject: extCdr.Subject,
-		Destination: extCdr.Destination, Supplier: extCdr.Supplier, DisconnectCause: extCdr.DisconnectCause, ExtraFields: extCdr.ExtraFields,
+		Destination: extCdr.Destination, Supplier: extCdr.Supplier, DisconnectCause: extCdr.DisconnectCause,
 		MediationRunId: extCdr.MediationRunId, RatedAccount: extCdr.RatedAccount, RatedSubject: extCdr.RatedSubject, Cost: extCdr.Cost, Rated: extCdr.Rated}
 	if storedCdr.SetupTime, err = utils.ParseTimeDetectLayout(extCdr.SetupTime); err != nil {
 		return nil, err
+	}
+	if len(storedCdr.CgrId) == 0 { // Populate CgrId if not present
+		storedCdr.CgrId = utils.Sha1(storedCdr.AccId, storedCdr.SetupTime.String())
 	}
 	if storedCdr.AnswerTime, err = utils.ParseTimeDetectLayout(extCdr.AnswerTime); err != nil {
 		return nil, err
@@ -51,6 +54,12 @@ func NewStoredCdrFromExternalCdr(extCdr *ExternalCdr) (*StoredCdr, error) {
 		if err = json.Unmarshal([]byte(extCdr.CostDetails), storedCdr.CostDetails); err != nil {
 			return nil, err
 		}
+	}
+	if extCdr.ExtraFields != nil {
+		storedCdr.ExtraFields = make(map[string]string)
+	}
+	for k, v := range extCdr.ExtraFields {
+		storedCdr.ExtraFields[k] = v
 	}
 	return storedCdr, nil
 }
@@ -202,6 +211,20 @@ func (storedCdr *StoredCdr) PassesFieldFilter(fieldFilter *utils.RSRField) (bool
 
 func (storedCdr *StoredCdr) AsStoredCdr() *StoredCdr {
 	return storedCdr
+}
+
+func (storedCdr *StoredCdr) Clone() *StoredCdr {
+	clnCdr := *storedCdr
+	clnCdr.ExtraFields = make(map[string]string)
+	clnCdr.CostDetails = nil // Clean old reference
+	for k, v := range storedCdr.ExtraFields {
+		clnCdr.ExtraFields[k] = v
+	}
+	if storedCdr.CostDetails != nil {
+		cDetails := *storedCdr.CostDetails
+		clnCdr.CostDetails = &cDetails
+	}
+	return &clnCdr
 }
 
 // Ability to send the CgrCdr remotely to another CDR server, we do not include rating variables for now
@@ -634,6 +657,7 @@ type UsageRecord struct {
 	SetupTime   string
 	AnswerTime  string
 	Usage       string
+	ExtraFields map[string]string
 }
 
 func (self *UsageRecord) AsStoredCdr() (*StoredCdr, error) {
@@ -649,24 +673,18 @@ func (self *UsageRecord) AsStoredCdr() (*StoredCdr, error) {
 	if storedCdr.Usage, err = utils.ParseDurationWithSecs(self.Usage); err != nil {
 		return nil, err
 	}
+	if self.ExtraFields != nil {
+		storedCdr.ExtraFields = make(map[string]string)
+	}
+	for k, v := range self.ExtraFields {
+		storedCdr.ExtraFields[k] = v
+	}
 	return storedCdr, nil
 }
 
 func (self *UsageRecord) AsCallDescriptor() (*CallDescriptor, error) {
 	var err error
-	timeStr := self.AnswerTime
-	if len(timeStr) == 0 { // In case of auth, answer time will not be defined, so take it out of setup one
-		timeStr = self.SetupTime
-	}
-	startTime, err := utils.ParseTimeDetectLayout(timeStr)
-	if err != nil {
-		return nil, err
-	}
-	usage, err := utils.ParseDurationWithSecs(self.Usage)
-	if err != nil {
-		return nil, err
-	}
-	return &CallDescriptor{
+	cd := &CallDescriptor{
 		TOR:         self.TOR,
 		Direction:   self.Direction,
 		Tenant:      self.Tenant,
@@ -674,7 +692,24 @@ func (self *UsageRecord) AsCallDescriptor() (*CallDescriptor, error) {
 		Subject:     self.Subject,
 		Account:     self.Account,
 		Destination: self.Destination,
-		TimeStart:   startTime,
-		TimeEnd:     startTime.Add(usage),
-	}, nil
+	}
+	timeStr := self.AnswerTime
+	if len(timeStr) == 0 { // In case of auth, answer time will not be defined, so take it out of setup one
+		timeStr = self.SetupTime
+	}
+	if cd.TimeStart, err = utils.ParseTimeDetectLayout(timeStr); err != nil {
+		return nil, err
+	}
+	if usage, err := utils.ParseDurationWithSecs(self.Usage); err != nil {
+		return nil, err
+	} else {
+		cd.TimeEnd = cd.TimeStart.Add(usage)
+	}
+	if self.ExtraFields != nil {
+		cd.ExtraFields = make(map[string]string)
+	}
+	for k, v := range self.ExtraFields {
+		cd.ExtraFields[k] = v
+	}
+	return cd, nil
 }
