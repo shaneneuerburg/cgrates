@@ -21,6 +21,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -155,14 +156,16 @@ func (ris RatingInfos) String() string {
 
 func (rpf *RatingProfile) GetRatingPlansForPrefix(cd *CallDescriptor) (err error) {
 	var ris RatingInfos
+	log.Println("HERE")
 	for index, rpa := range rpf.RatingPlanActivations.GetActiveForCall(cd) {
 		rpl, err := ratingStorage.GetRatingPlan(rpa.RatingPlanId, false)
 		if err != nil || rpl == nil {
 			utils.Logger.Err(fmt.Sprintf("Error checking destination: %v", err))
 			continue
 		}
+		log.Print("RPL: ", utils.ToIJSON(rpl))
 		prefix := ""
-		destinationId := ""
+		destinationID := ""
 		var rps RateIntervalList
 		//log.Printf("RPA: %+v", rpa)
 		if cd.Destination == utils.ANY || cd.Destination == "" {
@@ -170,7 +173,7 @@ func (rpf *RatingProfile) GetRatingPlansForPrefix(cd *CallDescriptor) (err error
 			if _, ok := rpl.DestinationRates[utils.ANY]; ok {
 				rps = rpl.RateIntervalList(utils.ANY)
 				prefix = utils.ANY
-				destinationId = utils.ANY
+				destinationID = utils.ANY
 			}
 		} else {
 			for _, p := range utils.SplitPrefix(cd.Destination, MIN_PREFIX_MATCH) {
@@ -186,12 +189,13 @@ func (rpf *RatingProfile) GetRatingPlansForPrefix(cd *CallDescriptor) (err error
 								bestWeight = currentWeight
 								rps = ril
 								prefix = p
-								destinationId = dID
+								destinationID = dID
 							}
 						}
 					}
 				}
 				if rps != nil {
+					log.Print("DESTINATION: ", destinationID)
 					break
 				}
 			}
@@ -199,7 +203,7 @@ func (rpf *RatingProfile) GetRatingPlansForPrefix(cd *CallDescriptor) (err error
 				if _, ok := rpl.DestinationRates[utils.ANY]; ok {
 					rps = rpl.RateIntervalList(utils.ANY)
 					prefix = utils.ANY
-					destinationId = utils.ANY
+					destinationID = utils.ANY
 				}
 			}
 		}
@@ -218,7 +222,7 @@ func (rpf *RatingProfile) GetRatingPlansForPrefix(cd *CallDescriptor) (err error
 				MatchedSubject: rpf.Id,
 				RatingPlanId:   rpl.Id,
 				MatchedPrefix:  prefix,
-				MatchedDestId:  destinationId,
+				MatchedDestId:  destinationID,
 				ActivationTime: rpa.ActivationTime,
 				RateIntervals:  rps,
 				FallbackKeys:   rpa.FallbackKeys})

@@ -26,11 +26,13 @@ import (
 	"net/http"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"sync"
 
 	"github.com/cenkalti/rpc2"
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
+
+	_ "net/http/pprof"
 )
-import _ "net/http/pprof"
 
 type Server struct {
 	rpcEnabled  bool
@@ -113,6 +115,47 @@ func (s *Server) ServeGOB(addr string) {
 	}
 }
 
+type WebsocketReadWriteCloser struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (wrwc *WebsocketReadWriteCloser) Read(p []byte) (n int, err error) {
+	wrwc.mu.Lock()
+	defer wrwc.mu.Unlock()
+	_, r, err := wrwc.conn.NextReader()
+	if err != nil {
+		return 0, err
+	}
+	b := bytes.NewBuffer(p)
+	read, err := io.Copy(b, r)
+	log.Print("Read: ", string(b.Bytes()))
+	return int(read), err
+}
+
+func (wrwc *WebsocketReadWriteCloser) Write(p []byte) (n int, err error) {
+	wrwc.mu.Lock()
+	defer wrwc.mu.Unlock()
+	w, err := wrwc.conn.NextWriter(websocket.TextMessage)
+	if err != nil {
+		return 0, err
+	}
+	log.Print("Write: ", string(p))
+	b := bytes.NewBuffer(p)
+	written, err := io.Copy(w, b)
+	if err != nil {
+		return int(written), err
+	}
+	err = w.Close()
+	return int(written), err
+}
+
+func (wrwc *WebsocketReadWriteCloser) Close() error {
+	wrwc.mu.Lock()
+	defer wrwc.mu.Unlock()
+	return wrwc.conn.Close()
+}
+
 func (s *Server) ServeHTTP(addr string) {
 	if s.rpcEnabled {
 		http.HandleFunc("/jsonrpc", func(w http.ResponseWriter, req *http.Request) {
@@ -121,9 +164,26 @@ func (s *Server) ServeHTTP(addr string) {
 			res := NewRPCRequest(req.Body).Call()
 			io.Copy(w, res)
 		})
-		http.Handle("/ws", websocket.Handler(func(ws *websocket.Conn) {
-			jsonrpc.ServeConn(ws)
-		}))
+		upgrader := websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+		}
+
+		http.HandleFunc("/ws", func(w http.ResponseWriter, req *http.Request) {
+			ws, err := upgrader.Upgrade(w, req, nil)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			defer ws.Close()
+			jsonrpc.ServeConn(ws.UnderlyingConn())
+
+			//wrapper := &WebsocketReadWriteCloser{conn: ws}
+			//jsonrpc.ServeConn(wrapper)
+		})
 		s.httpEnabled = true
 	}
 	if !s.httpEnabled {
