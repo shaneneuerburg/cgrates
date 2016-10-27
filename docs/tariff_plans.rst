@@ -698,7 +698,7 @@ purposes, you can read more, see :ref:`cdrstats-main`
 
 4.2.13. Shared groups
 ~~~~~~~~~~~~~~~~~~~~~
-TBD
+Shared groups allow multiple accounts to share a single balance. One example is "family plans" where each individual in the family has their own account, but they share a single balance. Another example is per-company balances where there is a balance for each company, but the company has multiple employees who each have a balance.
 
 ::
 
@@ -710,13 +710,21 @@ TBD
     :header-rows: 1
 
 [0] - Id:
-    TBD
+    Id/tag string of the shared group
 
 [1] - Account:
-    TBD
+    The identifier for the user’s account
 
 [2] - Strategy:
-    TBD
+    The billing priority strategy. Can be one of the following:
+    
+    + **\*mine\_**: TBD
+    + **\*mine_lowest**: TBD
+    + **\*mine_highest**: TBD
+    + **\*mine_random**: TBD
+    + **\*lowest**: TBD
+    + **\*highest**: TBD
+    + **\*random**: TBD
 
 [3] - RatingSubject:
     TBD
