@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
 )
 
@@ -61,7 +62,7 @@ func (self *ApierV1) AddAccountActionTriggers(attr AttrAddAccountActionTriggers,
 	}
 	accID := utils.AccountKey(attr.Tenant, attr.Account)
 	var account *engine.Account
-	_, err = engine.Guardian.Guard(func() (interface{}, error) {
+	_, err = guardian.Guardian.Guard(func() (interface{}, error) {
 		if acc, err := self.AccountDb.GetAccount(accID); err == nil {
 			account = acc
 		} else {
@@ -118,7 +119,7 @@ func (self *ApierV1) RemoveAccountActionTriggers(attr AttrRemoveAccountActionTri
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	accID := utils.AccountKey(attr.Tenant, attr.Account)
-	_, err := engine.Guardian.Guard(func() (interface{}, error) {
+	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
 		var account *engine.Account
 		if acc, err := self.AccountDb.GetAccount(accID); err == nil {
 			account = acc
@@ -164,7 +165,7 @@ func (self *ApierV1) ResetAccountActionTriggers(attr AttrResetAccountActionTrigg
 	}
 	accID := utils.AccountKey(attr.Tenant, attr.Account)
 	var account *engine.Account
-	_, err := engine.Guardian.Guard(func() (interface{}, error) {
+	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
 		if acc, err := self.AccountDb.GetAccount(accID); err == nil {
 			account = acc
 		} else {
@@ -229,7 +230,7 @@ func (self *ApierV1) SetAccountActionTriggers(attr AttrSetAccountActionTriggers,
 	}
 	accID := utils.AccountKey(attr.Tenant, attr.Account)
 	var account *engine.Account
-	_, err := engine.Guardian.Guard(func() (interface{}, error) {
+	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
 		if acc, err := self.AccountDb.GetAccount(accID); err == nil {
 			account = acc
 		} else {
@@ -402,7 +403,7 @@ type AttrSetActionTrigger struct {
 	ActionsID             *string
 }
 
-func (self *ApierV1) SetActionTrigger(attr AttrSetActionTrigger, reply *string) error {
+func (self *ApierV1) SetActionTrigger(attr AttrSetActionTrigger, reply *string) (err error) {
 
 	if missing := utils.MissingStructFields(&attr, []string{"GroupID"}); len(missing) != 0 {
 		return utils.NewErrMandatoryIeMissing(missing...)
@@ -512,14 +513,15 @@ func (self *ApierV1) SetActionTrigger(attr AttrSetActionTrigger, reply *string) 
 	if attr.ActionsID != nil {
 		newAtr.ActionsID = *attr.ActionsID
 	}
-
-	if err := self.RatingDb.SetActionTriggers(attr.GroupID, atrs, utils.NonTransactional); err != nil {
-		*reply = err.Error()
-		return err
+	if err = self.RatingDb.SetActionTriggers(attr.GroupID, atrs, utils.NonTransactional); err != nil {
+		return
+	}
+	if err = self.RatingDb.CacheDataFromDB(utils.ACTION_TRIGGER_PREFIX, []string{attr.GroupID}, true); err != nil {
+		return
 	}
 	//no cache for action triggers
 	*reply = utils.OK
-	return nil
+	return
 }
 
 type AttrGetActionTriggers struct {
@@ -613,7 +615,7 @@ func (self *ApierV1) AddTriggeredAction(attr AttrAddActionTrigger, reply *string
 		at.Balance.SharedGroups = &utils.StringMap{attr.BalanceSharedGroup: true}
 	}
 	acntID := utils.AccountKey(attr.Tenant, attr.Account)
-	_, err := engine.Guardian.Guard(func() (interface{}, error) {
+	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
 		acnt, err := self.AccountDb.GetAccount(acntID)
 		if err != nil {
 			return 0, err

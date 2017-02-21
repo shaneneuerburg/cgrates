@@ -64,8 +64,8 @@ ENABLE_ACNT,*enable_account,,,,,,,,,,,,,,false,false,10`
 	csvr.WriteToDatabase(false, false, false)
 
 	cache.Flush()
-	ratingDbAcntActs.PreloadRatingCache()
-	acntDbAcntActs.PreloadAccountingCache()
+	ratingDbAcntActs.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	acntDbAcntActs.LoadAccountingCache(nil, nil, nil)
 
 	expectAcnt := &engine.Account{ID: "cgrates.org:1"}
 	if acnt, err := acntDbAcntActs.GetAccount("cgrates.org:1"); err != nil {
@@ -83,7 +83,7 @@ func TestAcntActsDisableAcnt(t *testing.T) {
 		ActionsID: "DISABLE_ACNT",
 	}
 	at.SetAccountIDs(utils.StringMap{acnt1Tag: true})
-	if err := at.Execute(); err != nil {
+	if err := at.Execute(nil, nil); err != nil {
 		t.Error(err)
 	}
 	expectAcnt := &engine.Account{ID: "cgrates.org:1", Disabled: true}
@@ -100,7 +100,7 @@ func TestAcntActsEnableAcnt(t *testing.T) {
 		ActionsID: "ENABLE_ACNT",
 	}
 	at.SetAccountIDs(utils.StringMap{acnt1Tag: true})
-	if err := at.Execute(); err != nil {
+	if err := at.Execute(nil, nil); err != nil {
 		t.Error(err)
 	}
 	expectAcnt := &engine.Account{ID: "cgrates.org:1", Disabled: false}

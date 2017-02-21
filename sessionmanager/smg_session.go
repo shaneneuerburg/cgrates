@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/cgrates/cgrates/engine"
@@ -81,7 +82,6 @@ func (self *SMGSession) debitLoop(debitInterval time.Duration) {
 
 // Attempts to debit a duration, returns maximum duration which can be debitted or error
 func (self *SMGSession) debit(dur time.Duration, lastUsed *time.Duration) (time.Duration, error) {
-	//utils.Logger.Debug(fmt.Sprintf("### SMGSession.debit, dur: %+v, lastUsed: %+v, session: %+v", dur, lastUsed, self))
 	requestedDuration := dur
 	if lastUsed != nil {
 		self.ExtraDuration = self.LastDebit - *lastUsed
@@ -142,6 +142,7 @@ func (self *SMGSession) debit(dur time.Duration, lastUsed *time.Duration) (time.
 
 // Attempts to refund a duration, error on failure
 func (self *SMGSession) refund(refundDuration time.Duration) error {
+
 	if refundDuration == 0 { // Nothing to refund
 		return nil
 	}
@@ -155,12 +156,16 @@ func (self *SMGSession) refund(refundDuration time.Duration) error {
 		if refundDuration <= tsDuration {
 
 			lastRefundedIncrementIndex := -1
+
 			for j := len(ts.Increments) - 1; j >= 0; j-- {
 				increment := ts.Increments[j]
+
 				if increment.Duration <= refundDuration {
+
 					refundIncrements = append(refundIncrements, increment)
 					refundDuration -= increment.Duration
 					lastRefundedIncrementIndex = j
+
 				} else {
 					break //increment duration is larger, cannot refund increment
 				}
@@ -217,6 +222,7 @@ func (self *SMGSession) close(endTime time.Time) error {
 
 // Send disconnect order to remote connection
 func (self *SMGSession) disconnectSession(reason string) error {
+	self.EventStart[utils.USAGE] = strconv.FormatFloat(self.TotalUsage.Seconds(), 'f', -1, 64) // Set the usage to total one debitted
 	if self.clntConn == nil || reflect.ValueOf(self.clntConn).IsNil() {
 		return errors.New("Calling SMGClientV1.DisconnectSession requires bidirectional JSON connection")
 	}

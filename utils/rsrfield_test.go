@@ -25,30 +25,34 @@ import (
 
 func TestNewRSRField1(t *testing.T) {
 	// Normal case
-	expRSRField1 := &RSRField{Id: "sip_redirected_to",
+	rulesStr := `~sip_redirected_to:s/sip:\+49(\d+)@/0$1/`
+	expRSRField1 := &RSRField{Id: "sip_redirected_to", Rules: rulesStr,
 		RSRules: []*ReSearchReplace{&ReSearchReplace{SearchRegexp: regexp.MustCompile(`sip:\+49(\d+)@`), ReplaceTemplate: "0$1"}}}
-	if rsrField, err := NewRSRField(`~sip_redirected_to:s/sip:\+49(\d+)@/0$1/`); err != nil {
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
 		t.Error("Unexpected error: ", err.Error())
 	} else if !reflect.DeepEqual(expRSRField1, rsrField) {
 		t.Errorf("Expecting: %v, received: %v", expRSRField1, rsrField)
 	}
 	// With filter
+	rulesStr = `~sip_redirected_to:s/sip:\+49(\d+)@/0$1/(086517174963)`
 	filter, _ := NewRSRFilter("086517174963")
-	expRSRField2 := &RSRField{Id: "sip_redirected_to", filters: []*RSRFilter{filter},
+	expRSRField2 := &RSRField{Id: "sip_redirected_to", Rules: rulesStr, filters: []*RSRFilter{filter},
 		RSRules: []*ReSearchReplace{&ReSearchReplace{SearchRegexp: regexp.MustCompile(`sip:\+49(\d+)@`), ReplaceTemplate: "0$1"}}}
-	if rsrField, err := NewRSRField(`~sip_redirected_to:s/sip:\+49(\d+)@/0$1/(086517174963)`); err != nil {
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
 		t.Error("Unexpected error: ", err.Error())
 	} else if !reflect.DeepEqual(expRSRField2, rsrField) {
 		t.Errorf("Expecting: %v, received: %v", expRSRField2, rsrField)
 	}
 	// Separator escaped
-	if rsrField, err := NewRSRField(`~sip_redirected_to:s\/sip:\+49(\d+)@/0$1/`); err == nil {
+	rulesStr = `~sip_redirected_to:s\/sip:\+49(\d+)@/0$1/`
+	if rsrField, err := NewRSRField(rulesStr); err == nil {
 		t.Errorf("Parse error, field rule does not contain correct number of separators, received: %v", rsrField)
 	}
 	// One extra separator but escaped
-	expRSRField3 := &RSRField{Id: "sip_redirected_to",
+	rulesStr = `~sip_redirected_to:s/sip:\+49(\d+)\/@/0$1/`
+	expRSRField3 := &RSRField{Id: "sip_redirected_to", Rules: rulesStr,
 		RSRules: []*ReSearchReplace{&ReSearchReplace{SearchRegexp: regexp.MustCompile(`sip:\+49(\d+)\/@`), ReplaceTemplate: "0$1"}}}
-	if rsrField, err := NewRSRField(`~sip_redirected_to:s/sip:\+49(\d+)\/@/0$1/`); err != nil {
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
 		t.Error("Unexpected error: ", err.Error())
 	} else if !reflect.DeepEqual(expRSRField3, rsrField) {
 		t.Errorf("Expecting: %v, received: %v", expRSRField3, rsrField)
@@ -56,9 +60,10 @@ func TestNewRSRField1(t *testing.T) {
 }
 
 func TestNewRSRFieldDDz(t *testing.T) {
-	expectRSRField := &RSRField{Id: "effective_caller_id_number",
+	rulesStr := `~effective_caller_id_number:s/(\d+)/+$1/`
+	expectRSRField := &RSRField{Id: "effective_caller_id_number", Rules: rulesStr,
 		RSRules: []*ReSearchReplace{&ReSearchReplace{SearchRegexp: regexp.MustCompile(`(\d+)`), ReplaceTemplate: "+$1"}}}
-	if rsrField, err := NewRSRField(`~effective_caller_id_number:s/(\d+)/+$1/`); err != nil {
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(rsrField, expectRSRField) {
 		t.Errorf("Unexpected RSRField received: %v", rsrField)
@@ -66,9 +71,10 @@ func TestNewRSRFieldDDz(t *testing.T) {
 }
 
 func TestNewRSRFieldIvo(t *testing.T) {
-	expectRSRField := &RSRField{Id: "cost_details",
+	rulesStr := `~cost_details:s/MatchedDestId":".+_(\s\s\s\s\s)"/$1/`
+	expectRSRField := &RSRField{Id: "cost_details", Rules: rulesStr,
 		RSRules: []*ReSearchReplace{&ReSearchReplace{SearchRegexp: regexp.MustCompile(`MatchedDestId":".+_(\s\s\s\s\s)"`), ReplaceTemplate: "$1"}}}
-	if rsrField, err := NewRSRField(`~cost_details:s/MatchedDestId":".+_(\s\s\s\s\s)"/$1/`); err != nil {
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(rsrField, expectRSRField) {
 		t.Errorf("Unexpected RSRField received: %v", rsrField)
@@ -79,10 +85,12 @@ func TestNewRSRFieldIvo(t *testing.T) {
 }
 
 func TestConvertPlusNationalAnd00(t *testing.T) {
-	expectRSRField := &RSRField{Id: "effective_caller_id_number", RSRules: []*ReSearchReplace{
-		&ReSearchReplace{SearchRegexp: regexp.MustCompile(`\+49(\d+)`), ReplaceTemplate: "0$1"},
-		&ReSearchReplace{SearchRegexp: regexp.MustCompile(`\+(\d+)`), ReplaceTemplate: "00$1"}}}
-	rsrField, err := NewRSRField(`~effective_caller_id_number:s/\+49(\d+)/0$1/:s/\+(\d+)/00$1/`)
+	rulesStr := `~effective_caller_id_number:s/\+49(\d+)/0$1/:s/\+(\d+)/00$1/`
+	expectRSRField := &RSRField{Id: "effective_caller_id_number", Rules: rulesStr,
+		RSRules: []*ReSearchReplace{
+			&ReSearchReplace{SearchRegexp: regexp.MustCompile(`\+49(\d+)`), ReplaceTemplate: "0$1"},
+			&ReSearchReplace{SearchRegexp: regexp.MustCompile(`\+(\d+)`), ReplaceTemplate: "00$1"}}}
+	rsrField, err := NewRSRField(rulesStr)
 	if err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(rsrField, expectRSRField) {
@@ -97,16 +105,20 @@ func TestConvertPlusNationalAnd00(t *testing.T) {
 }
 
 func TestRSRParseStatic(t *testing.T) {
-	if rsrField, err := NewRSRField("^static_header::static_value/"); err != nil {
+	rulesStr := "^static_header::static_value/"
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
 		t.Error(err)
-	} else if !reflect.DeepEqual(rsrField, &RSRField{Id: "static_header", staticValue: "static_value"}) {
+	} else if !reflect.DeepEqual(rsrField, &RSRField{Id: "static_header", Rules: rulesStr,
+		staticValue: "static_value"}) {
 		t.Errorf("Unexpected RSRField received: %v", rsrField)
 	} else if parsed := rsrField.ParseValue("dynamic_value"); parsed != "static_value" {
 		t.Errorf("Expected: %s, received: %s", "static_value", parsed)
 	}
-	if rsrField, err := NewRSRField(`^static_hdrvalue`); err != nil {
+	rulesStr = `^static_hdrvalue`
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
 		t.Error(err)
-	} else if !reflect.DeepEqual(rsrField, &RSRField{Id: "static_hdrvalue", staticValue: "static_hdrvalue"}) {
+	} else if !reflect.DeepEqual(rsrField, &RSRField{Id: "static_hdrvalue", Rules: rulesStr,
+		staticValue: "static_hdrvalue"}) {
 		t.Errorf("Unexpected RSRField received: %v", rsrField)
 	} else if parsed := rsrField.ParseValue("dynamic_value"); parsed != "static_hdrvalue" {
 		t.Errorf("Expected: %s, received: %s", "static_hdrvalue", parsed)
@@ -114,9 +126,11 @@ func TestRSRParseStatic(t *testing.T) {
 }
 
 func TestConvertDurToSecs(t *testing.T) {
-	expectRSRField := &RSRField{Id: "9", RSRules: []*ReSearchReplace{
-		&ReSearchReplace{SearchRegexp: regexp.MustCompile(`^(\d+)$`), ReplaceTemplate: "${1}s"}}}
-	rsrField, err := NewRSRField(`~9:s/^(\d+)$/${1}s/`)
+	rulesStr := `~9:s/^(\d+)$/${1}s/`
+	expectRSRField := &RSRField{Id: "9", Rules: rulesStr,
+		RSRules: []*ReSearchReplace{
+			&ReSearchReplace{SearchRegexp: regexp.MustCompile(`^(\d+)$`), ReplaceTemplate: "${1}s"}}}
+	rsrField, err := NewRSRField(rulesStr)
 	if err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(rsrField, expectRSRField) {
@@ -128,9 +142,11 @@ func TestConvertDurToSecs(t *testing.T) {
 }
 
 func TestPrefix164(t *testing.T) {
-	expectRSRField := &RSRField{Id: "0", RSRules: []*ReSearchReplace{
-		&ReSearchReplace{SearchRegexp: regexp.MustCompile(`^([1-9]\d+)$`), ReplaceTemplate: "+$1"}}}
-	rsrField, err := NewRSRField(`~0:s/^([1-9]\d+)$/+$1/`)
+	rulesStr := `~0:s/^([1-9]\d+)$/+$1/`
+	expectRSRField := &RSRField{Id: "0", Rules: rulesStr,
+		RSRules: []*ReSearchReplace{
+			&ReSearchReplace{SearchRegexp: regexp.MustCompile(`^([1-9]\d+)$`), ReplaceTemplate: "+$1"}}}
+	rsrField, err := NewRSRField(rulesStr)
 	if err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(rsrField, expectRSRField) {
@@ -166,10 +182,10 @@ func TestParseRSRFields(t *testing.T) {
 	}
 	fields := `host,~sip_redirected_to:s/sip:\+49(\d+)@/0$1/,destination`
 	expectParsedFields := RSRFields{
-		&RSRField{Id: "host"},
-		&RSRField{Id: "sip_redirected_to",
+		&RSRField{Id: "host", Rules: "host"},
+		&RSRField{Id: "sip_redirected_to", Rules: `~sip_redirected_to:s/sip:\+49(\d+)@/0$1/`,
 			RSRules: []*ReSearchReplace{&ReSearchReplace{SearchRegexp: regexp.MustCompile(`sip:\+49(\d+)@`), ReplaceTemplate: "0$1"}}},
-		&RSRField{Id: "destination"}}
+		&RSRField{Id: "destination", Rules: "destination"}}
 	if parsedFields, err := ParseRSRFields(fields, FIELDS_SEP); err != nil {
 		t.Error("Unexpected error: ", err.Error())
 	} else if !reflect.DeepEqual(parsedFields, expectParsedFields) {
@@ -230,6 +246,15 @@ func TestRSRCostDetails(t *testing.T) {
 	}
 	if parsedVal := rsrField.ParseValue(fieldsStr1); parsedVal != "Canada" {
 		t.Errorf("Expecting: Canada, received: %s", parsedVal)
+	}
+	fieldsStr2 := `{"Direction":"*out","Category":"call","Tenant":"sip.test.cgrates.org","Subject":"dan","Account":"dan","Destination":"+4986517174963","TOR":"*voice","Cost":0,"Timespans":[{"TimeStart":"2015-05-13T15:03:34+02:00","TimeEnd":"2015-05-13T15:03:38+02:00","Cost":0,"RateInterval":{"Timing":{"Years":[],"Months":[],"MonthDays":[],"WeekDays":[],"StartTime":"00:00:00","EndTime":""},"Rating":{"ConnectFee":0,"RoundingMethod":"*middle","RoundingDecimals":4,"MaxCost":0,"MaxCostStrategy":"","Rates":[{"GroupIntervalStart":0,"Value":0,"RateIncrement":1000000000,"RateUnit":60000000000}]},"Weight":10},"DurationIndex":4000000000,"Increments":[{"Duration":1000000000,"Cost":0,"BalanceInfo":{"Unit":null,"Monetary":null,"AccountID":""},"CompressFactor":4}],"RoundIncrement":null,"MatchedSubject":"*out:sip.test.cgrates.org:call:*any","MatchedPrefix":"+31800","MatchedDestId":"CST_49800_DE080","RatingPlanId":"ISC_V","CompressFactor":1}],"RatedUsage":4}`
+	rsrField, err = NewRSRField(`~CostDetails:s/"MatchedDestId":.*_(\w{5})/${1}/:s/"MatchedDestId":"INTERNAL"/ON010/`)
+	if err != nil {
+		t.Error(err)
+	}
+	eMatch := "DE080"
+	if parsedVal := rsrField.ParseValue(fieldsStr2); parsedVal != eMatch {
+		t.Errorf("Expecting: <%s>, received: <%s>", eMatch, parsedVal)
 	}
 }
 
@@ -379,5 +404,45 @@ func TestRSRFiltersPass(t *testing.T) {
 	}
 	if fltrs.Pass("teS", false) {
 		t.Error("Passing")
+	}
+}
+
+func TestParseDifferentMethods(t *testing.T) {
+	rlStr := `~effective_caller_id_number:s/(\d+)/+$1/`
+	resParseStr, _ := ParseRSRFields(rlStr, INFIELD_SEP)
+	resParseSlc, _ := ParseRSRFieldsFromSlice([]string{rlStr})
+	if !reflect.DeepEqual(resParseStr, resParseSlc) {
+		t.Errorf("Expecting: %+v, received: %+v", resParseStr, resParseSlc)
+	}
+}
+
+func TestIsParsed(t *testing.T) {
+	rulesStr := `^static_hdrvalue`
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
+		t.Error(err)
+	} else if !rsrField.IsParsed() {
+		t.Error("Not parsed")
+	}
+	rulesStr = `~effective_caller_id_number:s/(\d+)/+$1/`
+	if rsrField, err := NewRSRField(rulesStr); err != nil {
+		t.Error(err)
+	} else if !rsrField.IsParsed() {
+		t.Error("Not parsed")
+	}
+	rsrField := &RSRField{Rules: rulesStr}
+	if rsrField.IsParsed() {
+		t.Error("Is parsed")
+	}
+}
+
+func TestParseRules(t *testing.T) {
+	rulesStr := `^static_hdrvalue`
+	rsrField := &RSRField{Rules: rulesStr}
+	if err := rsrField.ParseRules(); err != nil {
+		t.Error(err)
+	}
+	newRSRFld, _ := NewRSRField(rulesStr)
+	if reflect.DeepEqual(rsrField, newRSRFld) {
+		t.Errorf("Expecting: %+v, received: %+v", rsrField, newRSRFld)
 	}
 }

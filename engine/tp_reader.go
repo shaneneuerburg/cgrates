@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/structmatcher"
 	"github.com/cgrates/cgrates/utils"
 )
@@ -53,6 +54,9 @@ type TpReader struct {
 	users             map[string]*UserProfile
 	aliases           map[string]*Alias
 	resLimits         map[string]*utils.TPResourceLimit
+	revDests,
+	revAliases,
+	acntActionPlans map[string][]string
 }
 
 func NewTpReader(rs RatingStorage, as AccountingStorage, lr LoadReader, tpid, timezone string) *TpReader {
@@ -104,27 +108,48 @@ func (tpr *TpReader) Init() {
 	tpr.aliases = make(map[string]*Alias)
 	tpr.derivedChargers = make(map[string]*utils.DerivedChargers)
 	tpr.resLimits = make(map[string]*utils.TPResourceLimit)
+	tpr.revDests = make(map[string][]string)
+	tpr.revAliases = make(map[string][]string)
+	tpr.acntActionPlans = make(map[string][]string)
 }
 
 func (tpr *TpReader) LoadDestinationsFiltered(tag string) (bool, error) {
-	tpDests, err := tpr.lr.GetTpDestinations(tpr.tpid, tag)
-
-	dest := &Destination{Id: tag}
-	for _, tpDest := range tpDests {
-		dest.AddPrefix(tpDest.Prefix)
+	tpDests, err := tpr.lr.GetTPDestinations(tpr.tpid, tag)
+	if err != nil {
+		return false, err
+	} else if len(tpDests) == 0 {
+		return false, nil
 	}
-	tpr.ratingStorage.SetDestination(dest, utils.NonTransactional)
-	tpr.ratingStorage.SetReverseDestination(dest, utils.NonTransactional)
-	return len(tpDests) > 0, err
+	transID := utils.GenUUID()
+	for _, tpDst := range tpDests {
+		dst := NewDestinationFromTPDestination(tpDst)
+		// ToDo: Fix transactions at onlineDB level
+		if err = tpr.ratingStorage.SetDestination(dst, transID); err != nil {
+			cache.RollbackTransaction(transID)
+		}
+		if err = tpr.ratingStorage.SetReverseDestination(dst, transID); err != nil {
+			cache.RollbackTransaction(transID)
+		}
+	}
+	cache.CommitTransaction(transID)
+	return true, nil
 }
 
 func (tpr *TpReader) LoadDestinations() (err error) {
-	tps, err := tpr.lr.GetTpDestinations(tpr.tpid, "")
+	tps, err := tpr.lr.GetTPDestinations(tpr.tpid, "")
 	if err != nil {
-		return err
+		return
 	}
-	tpr.destinations, err = TpDestinations(tps).GetDestinations()
-	return err
+	for _, tpDst := range tps {
+		tpr.destinations[tpDst.Tag] = NewDestinationFromTPDestination(tpDst)
+		for _, prfx := range tpr.destinations[tpDst.Tag].Prefixes {
+			if _, hasIt := tpr.revDests[prfx]; !hasIt {
+				tpr.revDests[prfx] = make([]string, 0)
+			}
+			tpr.revDests[prfx] = append(tpr.revDests[prfx], tpDst.Tag)
+		}
+	}
+	return
 }
 
 func (tpr *TpReader) LoadTimings() (err error) {
@@ -248,10 +273,13 @@ func (tpr *TpReader) LoadRatingPlansFiltered(tag string) (bool, error) {
 				if drate.DestinationId == utils.ANY {
 					continue // no need of loading the destinations in this case
 				}
-				tpDests, err := tpr.lr.GetTpDestinations(tpr.tpid, drate.DestinationId)
-				dms, err := TpDestinations(tpDests).GetDestinations()
+				tpDests, err := tpr.lr.GetTPDestinations(tpr.tpid, drate.DestinationId)
 				if err != nil {
 					return false, err
+				}
+				dms := make([]*Destination, len(tpDests))
+				for i, tpDst := range tpDests {
+					dms[i] = NewDestinationFromTPDestination(tpDst)
 				}
 				destsExist := len(dms) != 0
 				if !destsExist && tpr.ratingStorage != nil {
@@ -671,7 +699,6 @@ func (tpr *TpReader) LoadActionPlans() (err error) {
 			tpr.actionPlans[atId] = actPln
 		}
 	}
-
 	return nil
 }
 
@@ -858,7 +885,6 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *TpAccountAction) error 
 				exitingAccountIds[id] = true
 				actionPlan.AccountIDs = exitingAccountIds
 			}
-
 			// write tasks
 			for _, at := range actionPlan.ActionTimings {
 				if at.IsASAP() {
@@ -875,9 +901,14 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *TpAccountAction) error 
 				}
 			}
 			// write action plan
-			err = tpr.ratingStorage.SetActionPlan(accountAction.ActionPlanId, actionPlan, false, utils.NonTransactional)
-			if err != nil {
+			if err = tpr.ratingStorage.SetActionPlan(accountAction.ActionPlanId, actionPlan, false, utils.NonTransactional); err != nil {
 				return errors.New(err.Error() + " (SetActionPlan): " + accountAction.ActionPlanId)
+			}
+			if err = tpr.ratingStorage.SetAccountActionPlans(id, []string{accountAction.ActionPlanId}, false); err != nil {
+				return err
+			}
+			if err = tpr.ratingStorage.CacheDataFromDB(utils.AccountActionPlansPrefix, []string{id}, true); err != nil {
+				return err
 			}
 		}
 		// action triggers
@@ -1127,8 +1158,9 @@ func (tpr *TpReader) LoadAccountActions() (err error) {
 	}
 
 	for _, aa := range storAts {
+		aaKeyID := aa.KeyId()
 		if _, alreadyDefined := tpr.accountActions[aa.KeyId()]; alreadyDefined {
-			return fmt.Errorf("duplicate account action found: %s", aa.KeyId())
+			return fmt.Errorf("duplicate account action found: %s", aaKeyID)
 		}
 		var aTriggers ActionTriggers
 		if aa.ActionTriggersId != "" {
@@ -1138,13 +1170,13 @@ func (tpr *TpReader) LoadAccountActions() (err error) {
 			}
 		}
 		ub := &Account{
-			ID:             aa.KeyId(),
+			ID:             aaKeyID,
 			ActionTriggers: aTriggers,
 			AllowNegative:  aa.AllowNegative,
 			Disabled:       aa.Disabled,
 		}
 		ub.InitCounters()
-		tpr.accountActions[aa.KeyId()] = ub
+		tpr.accountActions[aaKeyID] = ub
 		if aa.ActionPlanId != "" {
 			actionPlan, exists := tpr.actionPlans[aa.ActionPlanId]
 			if !exists {
@@ -1153,7 +1185,12 @@ func (tpr *TpReader) LoadAccountActions() (err error) {
 			if actionPlan.AccountIDs == nil {
 				actionPlan.AccountIDs = make(utils.StringMap)
 			}
-			actionPlan.AccountIDs[aa.KeyId()] = true
+
+			actionPlan.AccountIDs[aaKeyID] = true
+			if _, hasKey := tpr.acntActionPlans[aaKeyID]; !hasKey {
+				tpr.acntActionPlans[aaKeyID] = make([]string, 0)
+			}
+			tpr.acntActionPlans[aaKeyID] = append(tpr.acntActionPlans[aaKeyID], aa.ActionPlanId)
 		}
 	}
 	return nil
@@ -1557,6 +1594,12 @@ func (tpr *TpReader) LoadAliases() error {
 				av.Pairs[v.Target] = make(map[string]string)
 			}
 			av.Pairs[v.Target][v.Original] = v.Alias
+			// Report reverse aliases keys which we need to reload late
+			rvAlsKey := v.Alias + v.Target + tal.Context
+			if _, hasIt := tpr.revAliases[rvAlsKey]; !hasIt {
+				tpr.revAliases[rvAlsKey] = make([]string, 0)
+			}
+			tpr.revAliases[rvAlsKey] = append(tpr.revAliases[rvAlsKey], utils.ConcatenatedKey(al.GetId(), v.DestinationId))
 		}
 	}
 	return err
@@ -1669,9 +1712,10 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 			log.Print("\t", d.Id, " : ", d.Prefixes)
 		}
 	}
-	if !disable_reverse && len(tpr.destinations) > 0 {
-		if err = tpr.ratingStorage.RebuildReverseForPrefix(utils.REVERSE_DESTINATION_PREFIX); err != nil {
-			return err
+	if verbose {
+		log.Print("Reverse Destinations:")
+		for id, vals := range tpr.revDests {
+			log.Printf("\t %s : %+v", id, vals)
 		}
 	}
 	if verbose {
@@ -1737,6 +1781,12 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		}
 		if verbose {
 			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("Account Action Plans:")
+		for id, vals := range tpr.acntActionPlans {
+			log.Printf("\t %s : %+v", id, vals)
 		}
 	}
 	if verbose {
@@ -1847,9 +1897,10 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 			log.Print("\t", al.GetId())
 		}
 	}
-	if !disable_reverse && len(tpr.aliases) > 0 {
-		if err = tpr.accountingStorage.RebuildReverseForPrefix(utils.REVERSE_ALIASES_PREFIX); err != nil {
-			return err
+	if verbose {
+		log.Print("Reverse Aliases:")
+		for id, vals := range tpr.revAliases {
+			log.Printf("\t %s : %+v", id, vals)
 		}
 	}
 	if verbose {
@@ -1865,6 +1916,32 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		}
 		if verbose {
 			log.Print("\t", rl.ID)
+		}
+	}
+	if !disable_reverse {
+		if len(tpr.destinations) > 0 {
+			if verbose {
+				log.Print("Rebuilding Reverse Destinations")
+			}
+			if err = tpr.ratingStorage.RebuildReverseForPrefix(utils.REVERSE_DESTINATION_PREFIX); err != nil {
+				return err
+			}
+		}
+		if len(tpr.acntActionPlans) > 0 {
+			if verbose {
+				log.Print("Rebuilding Account Action Plans")
+			}
+			if err = tpr.ratingStorage.RebuildReverseForPrefix(utils.AccountActionPlansPrefix); err != nil {
+				return err
+			}
+		}
+		if len(tpr.aliases) > 0 {
+			if verbose {
+				log.Print("Rebuilding Reverse Aliases")
+			}
+			if err = tpr.accountingStorage.RebuildReverseForPrefix(utils.REVERSE_ALIASES_PREFIX); err != nil {
+				return err
+			}
 		}
 	}
 	return
@@ -1942,6 +2019,14 @@ func (tpr *TpReader) GetLoadedIds(categ string) ([]string, error) {
 			i++
 		}
 		return keys, nil
+	case utils.REVERSE_DESTINATION_PREFIX:
+		keys := make([]string, len(tpr.revDests))
+		i := 0
+		for k := range tpr.revDests {
+			keys[i] = k
+			i++
+		}
+		return keys, nil
 	case utils.RATING_PLAN_PREFIX:
 		keys := make([]string, len(tpr.ratingPlans))
 		i := 0
@@ -1970,6 +2055,14 @@ func (tpr *TpReader) GetLoadedIds(categ string) ([]string, error) {
 		keys := make([]string, len(tpr.actionPlans))
 		i := 0
 		for k := range tpr.actionPlans {
+			keys[i] = k
+			i++
+		}
+		return keys, nil
+	case utils.AccountActionPlansPrefix:
+		keys := make([]string, len(tpr.acntActionPlans))
+		i := 0
+		for k := range tpr.acntActionPlans {
 			keys[i] = k
 			i++
 		}
@@ -2010,6 +2103,14 @@ func (tpr *TpReader) GetLoadedIds(categ string) ([]string, error) {
 		keys := make([]string, len(tpr.aliases))
 		i := 0
 		for k := range tpr.aliases {
+			keys[i] = k
+			i++
+		}
+		return keys, nil
+	case utils.REVERSE_ALIASES_PREFIX:
+		keys := make([]string, len(tpr.revAliases))
+		i := 0
+		for k := range tpr.revAliases {
 			keys[i] = k
 			i++
 		}

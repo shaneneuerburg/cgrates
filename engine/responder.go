@@ -29,6 +29,7 @@ import (
 	"github.com/cgrates/cgrates/balancer2go"
 	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
@@ -97,7 +98,7 @@ func (rs *Responder) GetCost(arg *CallDescriptor, reply *CallCost) (err error) {
 		r, e := rs.getCallCost(arg, "Responder.GetCost")
 		*reply, err = *r, e
 	} else {
-		r, e := Guardian.Guard(func() (interface{}, error) {
+		r, e := guardian.Guardian.Guard(func() (interface{}, error) {
 			return arg.GetCost()
 		}, 0, arg.GetAccountKey())
 		if r != nil {
@@ -573,18 +574,6 @@ func (rs *Responder) GetLCR(attrs *AttrGetLcr, reply *LCRCost) error {
 	return nil
 }
 
-func (rs *Responder) FlushCache(arg *CallDescriptor, reply *float64) (err error) {
-	if rs.Bal != nil {
-		*reply, err = rs.callMethod(arg, "Responder.FlushCache")
-	} else {
-		r, e := Guardian.Guard(func() (interface{}, error) {
-			return 0, arg.FlushCache()
-		}, 0, arg.GetAccountKey())
-		*reply, err = r.(float64), e
-	}
-	return
-}
-
 func (rs *Responder) Status(arg string, reply *map[string]interface{}) (err error) {
 	if arg != "" { // Introduce  delay in answer, used in some automated tests
 		if delay, err := utils.ParseDurationWithSecs(arg); err == nil {
@@ -598,8 +587,9 @@ func (rs *Responder) Status(arg string, reply *map[string]interface{}) (err erro
 	if rs.Bal != nil {
 		response["Raters"] = rs.Bal.GetClientAddresses()
 	}
-	response["memstat"] = utils.SizeFmt(float64(memstats.HeapAlloc), "")
-	response["footprint"] = utils.SizeFmt(float64(memstats.Sys), "")
+	response["MemoryUsage"] = utils.SizeFmt(float64(memstats.HeapAlloc), "")
+	response[utils.ActiveGoroutines] = runtime.NumGoroutine()
+	response["Footprint"] = utils.SizeFmt(float64(memstats.Sys), "")
 	*reply = response
 	return
 }
@@ -627,7 +617,7 @@ func (rs *Responder) getCallCost(key *CallDescriptor, method string) (reply *Cal
 			utils.Logger.Info("<Balancer> Waiting for raters to register...")
 			time.Sleep(1 * time.Second) // wait one second and retry
 		} else {
-			_, err = Guardian.Guard(func() (interface{}, error) {
+			_, err = guardian.Guardian.Guard(func() (interface{}, error) {
 				err = client.Call(method, *key, reply)
 				return reply, err
 			}, 0, key.GetAccountKey())
@@ -650,7 +640,7 @@ func (rs *Responder) callMethod(key *CallDescriptor, method string) (reply float
 			utils.Logger.Info("Waiting for raters to register...")
 			time.Sleep(1 * time.Second) // wait one second and retry
 		} else {
-			_, err = Guardian.Guard(func() (interface{}, error) {
+			_, err = guardian.Guardian.Guard(func() (interface{}, error) {
 				err = client.Call(method, *key, &reply)
 				return reply, err
 			}, 0, key.GetAccountKey())

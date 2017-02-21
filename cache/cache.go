@@ -18,9 +18,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package cache
 
 import (
+	"fmt"
+	"reflect"
 	"sync"
+	"time"
 
 	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
 )
 
@@ -109,6 +113,7 @@ func Set(key string, value interface{}, commit bool, transID string) {
 	}
 }
 
+// RemKey removes a specific item from cache
 func RemKey(key string, commit bool, transID string) {
 	if commit {
 		if transID == "" { // Lock per operation not transaction
@@ -123,6 +128,7 @@ func RemKey(key string, commit bool, transID string) {
 	}
 }
 
+// RemPrefixKey removes a complete category of data out of cache
 func RemPrefixKey(prefix string, commit bool, transID string) {
 	if commit {
 		if transID == "" { // Lock locally
@@ -149,6 +155,33 @@ func Get(key string) (interface{}, bool) {
 	cacheMux.RLock()
 	defer cacheMux.RUnlock()
 	return cache.Get(key)
+}
+
+func GetCloned(key string) (cln interface{}, err error) {
+	return guardian.Guardian.Guard(func() (cln interface{}, err error) {
+		cacheMux.RLock()
+		origVal, hasIt := cache.Get(key)
+		cacheMux.RUnlock()
+		if !hasIt {
+			return nil, utils.NewCGRError(utils.Cache,
+				utils.NotFoundCaps, utils.ItemNotFound,
+				fmt.Sprintf("item with key <%s> was not found in <%s>", key))
+		} else if origVal == nil {
+			return nil, nil
+		}
+		if _, canClone := origVal.(utils.Cloner); !canClone {
+			return nil, utils.NewCGRError(utils.Cache,
+				utils.NotCloneableCaps, utils.ItemNotCloneable,
+				fmt.Sprintf("item with key <%s> is not following cloner interface", key))
+		}
+		retVals := reflect.ValueOf(origVal).MethodByName("Clone").Call(nil) // Call Clone method on the object
+		errIf := retVals[1].Interface()
+		var notNil bool
+		if err, notNil = errIf.(error); notNil {
+			return
+		}
+		return retVals[0].Interface(), nil
+	}, time.Duration(2*time.Second), utils.Cache+"GetClone"+key)
 }
 
 func CountEntries(prefix string) (result int) {

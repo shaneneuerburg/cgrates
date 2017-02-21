@@ -21,10 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/scheduler"
 	"github.com/cgrates/cgrates/utils"
 )
 
@@ -99,75 +99,12 @@ import (
 ]
 */
 
-type AttrsGetScheduledActions struct {
-	Tenant, Account    string
-	TimeStart, TimeEnd time.Time // Filter based on next runTime
-	utils.Paginator
-}
-
-type ScheduledActions struct {
-	NextRunTime                               time.Time
-	Accounts                                  int
-	ActionsId, ActionPlanId, ActionTimingUuid string
-}
-
-func (self *ApierV1) GetScheduledActions(attrs AttrsGetScheduledActions, reply *[]*ScheduledActions) error {
-	if self.Sched == nil {
-		return errors.New("SCHEDULER_NOT_ENABLED")
+func (self *ApierV1) GetScheduledActions(args scheduler.ArgsGetScheduledActions, reply *[]*scheduler.ScheduledAction) error {
+	sched := self.ServManager.GetScheduler()
+	if sched == nil {
+		return errors.New(utils.SchedulerNotRunningCaps)
 	}
-	schedActions := make([]*ScheduledActions, 0) // needs to be initialized if remains empty
-	scheduledActions := self.Sched.GetQueue()
-	for _, qActions := range scheduledActions {
-		sas := &ScheduledActions{ActionsId: qActions.ActionsID, ActionPlanId: qActions.GetActionPlanID(), ActionTimingUuid: qActions.Uuid, Accounts: len(qActions.GetAccountIDs())}
-		if attrs.SearchTerm != "" &&
-			!(strings.Contains(sas.ActionPlanId, attrs.SearchTerm) ||
-				strings.Contains(sas.ActionsId, attrs.SearchTerm)) {
-			continue
-		}
-		sas.NextRunTime = qActions.GetNextStartTime(time.Now())
-		if !attrs.TimeStart.IsZero() && sas.NextRunTime.Before(attrs.TimeStart) {
-			continue // Filter here only requests in the filtered interval
-		}
-		if !attrs.TimeEnd.IsZero() && (sas.NextRunTime.After(attrs.TimeEnd) || sas.NextRunTime.Equal(attrs.TimeEnd)) {
-			continue
-		}
-		// filter on account
-		if attrs.Tenant != "" || attrs.Account != "" {
-			found := false
-			for accID := range qActions.GetAccountIDs() {
-				split := strings.Split(accID, utils.CONCATENATED_KEY_SEP)
-				if len(split) != 2 {
-					continue // malformed account id
-				}
-				if attrs.Tenant != "" && attrs.Tenant != split[0] {
-					continue
-				}
-				if attrs.Account != "" && attrs.Account != split[1] {
-					continue
-				}
-				found = true
-				break
-			}
-			if !found {
-				continue
-			}
-		}
-
-		// we have a winner
-
-		schedActions = append(schedActions, sas)
-	}
-	if attrs.Paginator.Offset != nil {
-		if *attrs.Paginator.Offset <= len(schedActions) {
-			schedActions = schedActions[*attrs.Paginator.Offset:]
-		}
-	}
-	if attrs.Paginator.Limit != nil {
-		if *attrs.Paginator.Limit <= len(schedActions) {
-			schedActions = schedActions[:*attrs.Paginator.Limit]
-		}
-	}
-	*reply = schedActions
+	*reply = sched.GetScheduledActions(args)
 	return nil
 }
 
@@ -193,7 +130,7 @@ func (self *ApierV1) ExecuteScheduledActions(attr AttrsExecuteScheduledActions, 
 
 				at.SetAccountIDs(apl.AccountIDs) // copy the accounts
 				at.SetActionPlanID(apl.Id)
-				err := at.Execute()
+				err := at.Execute(nil, nil)
 				if err != nil {
 					*reply = err.Error()
 					return err
@@ -238,7 +175,7 @@ func (self *ApierV1) ExecuteScheduledActions(attr AttrsExecuteScheduledActions, 
 			current = a0.GetNextStartTime(current)
 			if current.Before(attr.TimeEnd) || current.Equal(attr.TimeEnd) {
 				utils.Logger.Info(fmt.Sprintf("<Replay Scheduler> Executing action %s for time %v", a0.ActionsID, current))
-				err := a0.Execute()
+				err := a0.Execute(nil, nil)
 				if err != nil {
 					*reply = err.Error()
 					return err

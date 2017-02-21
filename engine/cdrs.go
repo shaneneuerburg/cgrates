@@ -18,18 +18,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"net/url"
-	"path"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
@@ -87,7 +85,7 @@ func NewCdrServer(cgrCfg *config.CGRConfig, cdrDb CdrStorage, dataDB AccountingS
 		stats = nil
 	}
 	return &CdrServer{cgrCfg: cgrCfg, cdrDb: cdrDb, dataDB: dataDB,
-		rals: rater, pubsub: pubsub, users: users, aliases: aliases, stats: stats, guard: Guardian,
+		rals: rater, pubsub: pubsub, users: users, aliases: aliases, stats: stats, guard: guardian.Guardian,
 		httpPoster: utils.NewHTTPPoster(cgrCfg.HttpSkipTlsVerify, cgrCfg.ReplyTimeout)}, nil
 }
 
@@ -100,7 +98,7 @@ type CdrServer struct {
 	users         rpcclient.RpcClientConnection
 	aliases       rpcclient.RpcClientConnection
 	stats         rpcclient.RpcClientConnection
-	guard         *GuardianLock
+	guard         *guardian.GuardianLock
 	responseCache *cache.ResponseCache
 	httpPoster    *utils.HTTPPoster // used for replication
 }
@@ -175,6 +173,9 @@ func (self *CdrServer) processCdr(cdr *CDR) (err error) {
 	if !cdr.Rated { // Enforce the RunID if CDR is not rated
 		cdr.RunID = utils.MetaRaw
 	}
+	if cdr.RunID == utils.MetaRaw {
+		cdr.Cost = -1.0
+	}
 	if self.cgrCfg.CDRSStoreCdrs { // Store RawCDRs, this we do sync so we can reply with the status
 		if cdr.CostDetails != nil {
 			cdr.CostDetails.UpdateCost()
@@ -190,12 +191,11 @@ func (self *CdrServer) processCdr(cdr *CDR) (err error) {
 		var out int
 		go self.stats.Call("CDRStatsV1.AppendCDR", cdr, &out)
 	}
-	if len(self.cgrCfg.CDRSCdrReplication) != 0 { // Replicate raw CDR
-		go self.replicateCdr(cdr)
+	if len(self.cgrCfg.CDRSOnlineCDRExports) != 0 { // Replicate raw CDR
+		self.replicateCDRs([]*CDR{cdr})
 	}
-
 	if self.rals != nil && !cdr.Rated { // CDRs not rated will be processed by Rating
-		go self.deriveRateStoreStatsReplicate(cdr, self.cgrCfg.CDRSStoreCdrs, self.stats != nil, len(self.cgrCfg.CDRSCdrReplication) != 0)
+		go self.deriveRateStoreStatsReplicate(cdr, self.cgrCfg.CDRSStoreCdrs, self.stats != nil, len(self.cgrCfg.CDRSOnlineCDRExports) != 0)
 	}
 	return nil
 }
@@ -204,6 +204,7 @@ func (self *CdrServer) processCdr(cdr *CDR) (err error) {
 func (self *CdrServer) deriveRateStoreStatsReplicate(cdr *CDR, store, stats, replicate bool) error {
 	cdrRuns, err := self.deriveCdrs(cdr)
 	if err != nil {
+		utils.Logger.Err(fmt.Sprintf("<CDRS> Deriving CDR %+v, got error: %s", cdr, err.Error()))
 		return err
 	}
 	var ratedCDRs []*CDR // Gather all CDRs received from rating subsystem
@@ -278,9 +279,7 @@ func (self *CdrServer) deriveRateStoreStatsReplicate(cdr *CDR, store, stats, rep
 		}
 	}
 	if replicate {
-		for _, ratedCDR := range ratedCDRs {
-			self.replicateCdr(ratedCDR)
-		}
+		self.replicateCDRs(ratedCDRs)
 	}
 	return nil
 }
@@ -368,6 +367,7 @@ func (self *CdrServer) rateCDR(cdr *CDR) ([]*CDR, error) {
 	if cdr.RequestType == utils.META_NONE {
 		return nil, nil
 	}
+	cdr.ExtraInfo = "" // Clean previous ExtraInfo, useful when re-rating
 	var cdrsRated []*CDR
 	_, hasLastUsed := cdr.ExtraFields[utils.LastUsed]
 	if utils.IsSliceMember([]string{utils.META_PREPAID, utils.PREPAID}, cdr.RequestType) && (cdr.Usage != 0 || hasLastUsed) { // ToDo: Get rid of PREPAID as soon as we don't want to support it backwards
@@ -445,81 +445,22 @@ func (self *CdrServer) getCostFromRater(cdr *CDR) (*CallCost, error) {
 	return cc, nil
 }
 
-// ToDo: Add websocket support
-func (self *CdrServer) replicateCdr(cdr *CDR) error {
-	for _, rplCfg := range self.cgrCfg.CDRSCdrReplication {
-		if len(rplCfg.ContentFields) == 0 {
-			utils.Logger.Warning(fmt.Sprintf(
-				"<CDRReplicator> No content fields defined for replication to address: <%s>, ignoring", rplCfg.Address))
-			return nil
-		}
-		passesFilters := true
-		for _, cdfFltr := range rplCfg.CdrFilter {
-			if !cdfFltr.FilterPasses(cdr.FieldAsString(cdfFltr)) {
-				passesFilters = false
-				break
-			}
-		}
-		if !passesFilters { // Not passes filters, ignore this replication
+func (self *CdrServer) replicateCDRs(cdrs []*CDR) (err error) {
+	for _, exportID := range self.cgrCfg.CDRSOnlineCDRExports {
+		expTpl := self.cgrCfg.CdreProfiles[exportID] // not checking for existence of profile since this should be done in a higher layer
+		var cdre *CDRExporter
+		if cdre, err = NewCDRExporter(cdrs, expTpl, expTpl.ExportFormat, expTpl.ExportPath, self.cgrCfg.FailedPostsDir, "CDRSReplication",
+			expTpl.Synchronous, expTpl.Attempts, expTpl.FieldSeparator, expTpl.UsageMultiplyFactor,
+			expTpl.CostMultiplyFactor, self.cgrCfg.RoundingDecimals, self.cgrCfg.HttpSkipTlsVerify, self.httpPoster); err != nil {
+			utils.Logger.Err(fmt.Sprintf("<CDRS> Building CDRExporter for online exports got error: <%s>", err.Error()))
 			continue
 		}
-		var body interface{}
-		var content = ""
-		switch rplCfg.Transport {
-		case utils.MetaHTTPjsonCDR:
-			content = utils.CONTENT_JSON
-			jsn, err := json.Marshal(cdr)
-			if err != nil {
-				return err
-			}
-			body = jsn
-		case utils.MetaHTTPjsonMap:
-			content = utils.CONTENT_JSON
-			expMp, err := cdr.AsExportMap(rplCfg.ContentFields, self.cgrCfg.HttpSkipTlsVerify, nil)
-			if err != nil {
-				return err
-			}
-			jsn, err := json.Marshal(expMp)
-			if err != nil {
-				return err
-			}
-			body = jsn
-		case utils.META_HTTP_POST:
-			content = utils.CONTENT_FORM
-			expMp, err := cdr.AsExportMap(rplCfg.ContentFields, self.cgrCfg.HttpSkipTlsVerify, nil)
-			if err != nil {
-				return err
-			}
-			vals := url.Values{}
-			for fld, val := range expMp {
-				vals.Set(fld, val)
-			}
-			body = vals
-		}
-		var errChan chan error
-		if rplCfg.Synchronous {
-			errChan = make(chan error)
-		}
-		go func(body interface{}, rplCfg *config.CDRReplicationCfg, content string, errChan chan error) {
-			fallbackPath := path.Join(
-				self.cgrCfg.HttpFailedDir,
-				rplCfg.FallbackFileName())
-			if _, err := self.httpPoster.Post(rplCfg.Address, content, body, rplCfg.Attempts, fallbackPath); err != nil {
-				utils.Logger.Err(fmt.Sprintf(
-					"<CDRReplicator> Replicating CDR: %+v, got error: %s", cdr, err.Error()))
-				if rplCfg.Synchronous {
-					errChan <- err
-				}
-			}
-			if rplCfg.Synchronous {
-				errChan <- nil
-			}
-		}(body, rplCfg, content, errChan)
-		if rplCfg.Synchronous { // Synchronize here
-			<-errChan
+		if err = cdre.ExportCDRs(); err != nil {
+			utils.Logger.Err(fmt.Sprintf("<CDRS> Replicating CDR: %+v, got error: <%s>", err.Error()))
+			continue
 		}
 	}
-	return nil
+	return
 }
 
 // Called by rate/re-rate API, FixMe: deprecate it once new APIer structure is operational
@@ -529,7 +470,7 @@ func (self *CdrServer) RateCDRs(cdrFltr *utils.CDRsFilter, sendToStats bool) err
 		return err
 	}
 	for _, cdr := range cdrs {
-		if err := self.deriveRateStoreStatsReplicate(cdr, self.cgrCfg.CDRSStoreCdrs, sendToStats, len(self.cgrCfg.CDRSCdrReplication) != 0); err != nil {
+		if err := self.deriveRateStoreStatsReplicate(cdr, self.cgrCfg.CDRSStoreCdrs, sendToStats, len(self.cgrCfg.CDRSOnlineCDRExports) != 0); err != nil {
 			utils.Logger.Err(fmt.Sprintf("<CDRS> Processing CDR %+v, got error: %s", cdr, err.Error()))
 		}
 	}
@@ -539,6 +480,9 @@ func (self *CdrServer) RateCDRs(cdrFltr *utils.CDRsFilter, sendToStats bool) err
 // Internally used and called from CDRSv1
 // Cached requests for HA setups
 func (self *CdrServer) V1ProcessCDR(cdr *CDR, reply *string) error {
+	if len(cdr.CGRID) == 0 { // Populate CGRID if not present
+		cdr.ComputeCGRID()
+	}
 	cacheKey := "V1ProcessCDR" + cdr.CGRID + cdr.RunID
 	if item, err := self.getCache().Get(cacheKey); err == nil && item != nil {
 		if item.Value != nil {
@@ -557,6 +501,11 @@ func (self *CdrServer) V1ProcessCDR(cdr *CDR, reply *string) error {
 
 // RPC method, differs from storeSMCost through it's signature
 func (self *CdrServer) V1StoreSMCost(attr AttrCDRSStoreSMCost, reply *string) error {
+	if attr.Cost.CGRID == "" {
+		return utils.NewCGRError(utils.CDRSCtx,
+			utils.MandatoryIEMissingCaps, fmt.Sprintf("%s: CGRID", utils.MandatoryInfoMissing),
+			"SMCost: %+v with empty CGRID")
+	}
 	cacheKey := "V1StoreSMCost" + attr.Cost.CGRID + attr.Cost.RunID + attr.Cost.OriginID
 	if item, err := self.getCache().Get(cacheKey); err == nil && item != nil {
 		if item.Value != nil {
@@ -591,7 +540,7 @@ func (self *CdrServer) V1RateCDRs(attrs utils.AttrRateCDRs, reply *string) error
 	if attrs.SendToStatS != nil {
 		sendToStats = *attrs.SendToStatS
 	}
-	replicate := len(self.cgrCfg.CDRSCdrReplication) != 0
+	replicate := len(self.cgrCfg.CDRSOnlineCDRExports) != 0
 	if attrs.ReplicateCDRs != nil {
 		replicate = *attrs.ReplicateCDRs
 	}

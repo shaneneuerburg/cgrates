@@ -1,3 +1,5 @@
+// +build integration
+
 /*
 Real-time Online/Offline Charging System (OCS) for Telecom & ISP environments
 Copyright (C) ITsysCOM GmbH
@@ -19,7 +21,6 @@ package engine
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"path"
 	"strconv"
@@ -30,12 +31,8 @@ import (
 	"github.com/cgrates/cgrates/utils"
 )
 
-var testIntegration = flag.Bool("integration", false, "Perform the tests in integration mode, not by default.") // This flag will be passed here via "go test -local" args
-
 func TestITCDRsMySQL(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
+
 	cfg, err := config.NewCGRConfigFromFolder(path.Join(*dataDir, "conf", "samples", "storage", "mysql"))
 	if err != nil {
 		t.Error(err)
@@ -52,9 +49,7 @@ func TestITCDRsMySQL(t *testing.T) {
 }
 
 func TestITCDRsPSQL(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
+
 	cfg, err := config.NewCGRConfigFromFolder(path.Join(*dataDir, "conf", "samples", "storage", "postgres"))
 	if err != nil {
 		t.Error(err)
@@ -71,9 +66,7 @@ func TestITCDRsPSQL(t *testing.T) {
 }
 
 func TestITCDRsMongo(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
+
 	cfg, err := config.NewCGRConfigFromFolder(path.Join(*dataDir, "conf", "samples", "storage", "mongo"))
 	if err != nil {
 		t.Error(err)
@@ -720,7 +713,18 @@ func testGetCDRs(cfg *config.CGRConfig) error {
 	} else if len(CDRs) != 2 {
 		return fmt.Errorf("Filter on DestinationPrefix and NotDestinationPrefix, unexpected number of CDRs returned: %+v", CDRs)
 	}
-
+	// Filter on MinUsage
+	if CDRs, _, err := cdrStorage.GetCDRs(&utils.CDRsFilter{MinUsage: "125"}, false); err != nil {
+		return err
+	} else if len(CDRs) != 2 {
+		return fmt.Errorf("Filter on MinUsage, unexpected number of CDRs returned: %d", len(CDRs))
+	}
+	// Filter on MaxUsage
+	if CDRs, _, err := cdrStorage.GetCDRs(&utils.CDRsFilter{MaxUsage: "1ms"}, false); err != nil {
+		return err
+	} else if len(CDRs) != 1 {
+		return fmt.Errorf("Unexpected number of CDRs returned: %d", len(CDRs))
+	}
 	// Filter on MaxCost
 	var orderIdStart, orderIdEnd int64 // Capture also orderIds for the next test
 	if CDRs, _, err := cdrStorage.GetCDRs(&utils.CDRsFilter{MaxCost: utils.Float64Pointer(0.0)}, false); err != nil {

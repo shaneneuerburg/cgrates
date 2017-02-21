@@ -32,15 +32,19 @@ type Storage interface {
 	Close()
 	Flush(string) error
 	GetKeysForPrefix(string) ([]string, error)
-	PreloadCacheForPrefix(string) error
 	RebuildReverseForPrefix(string) error
+	GetVersions(itm string) (vrs Versions, err error)
+	SetVersions(vrs Versions) (err error)
+	RemoveVersions(vrs Versions) (err error)
+	SelectDatabase(dbName string) (err error)
 }
 
 // Interface for storage providers.
 type RatingStorage interface {
 	Storage
+	Marshaler() Marshaler
 	HasData(string, string) (bool, error)
-	PreloadRatingCache() error
+	LoadRatingCache(dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs []string) error
 	GetRatingPlan(string, bool, string) (*RatingPlan, error)
 	SetRatingPlan(*RatingPlan, string) error
 	GetRatingProfile(string, bool, string) (*RatingProfile, error)
@@ -70,13 +74,18 @@ type RatingStorage interface {
 	GetActionPlan(string, bool, string) (*ActionPlan, error)
 	SetActionPlan(string, *ActionPlan, bool, string) error
 	GetAllActionPlans() (map[string]*ActionPlan, error)
+	GetAccountActionPlans(acntID string, skipCache bool, transactionID string) (apIDs []string, err error)
+	SetAccountActionPlans(acntID string, apIDs []string, overwrite bool) (err error)
+	RemAccountActionPlans(acntID string, aPlIDs []string) (err error)
 	PushTask(*Task) error
 	PopTask() (*Task, error)
+	CacheDataFromDB(prefix string, IDs []string, mustBeCached bool) error
 }
 
 type AccountingStorage interface {
 	Storage
-	PreloadAccountingCache() error
+	Marshaler() Marshaler
+	LoadAccountingCache(alsIDs, rvAlsIDs, rlIDs []string) error
 	GetAccount(string) (*Account, error)
 	SetAccount(*Account) error
 	RemoveAccount(string) error
@@ -94,7 +103,6 @@ type AccountingStorage interface {
 	RemoveAlias(string, string) error
 	SetReverseAlias(*Alias, string) error
 	GetReverseAlias(string, bool, string) ([]string, error)
-	UpdateReverseAlias(*Alias, *Alias, string) error
 	GetResourceLimit(string, bool, string) (*ResourceLimit, error)
 	SetResourceLimit(*ResourceLimit, string) error
 	RemoveResourceLimit(string, string) error
@@ -105,6 +113,85 @@ type AccountingStorage interface {
 	GetReqFilterIndexes(dbKey string) (indexes map[string]map[string]utils.StringMap, err error)
 	SetReqFilterIndexes(dbKey string, indexes map[string]map[string]utils.StringMap) (err error)
 	MatchReqFilterIndex(dbKey, fieldValKey string) (itemIDs utils.StringMap, err error)
+	CacheDataFromDB(prefix string, IDs []string, mustBeCached bool) error
+}
+
+// OnlineStorage contains methods to use for administering online data
+type DataDB interface {
+	Storage
+	Marshaler() Marshaler
+	HasData(string, string) (bool, error)
+	LoadRatingCache(dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs []string) error
+	GetRatingPlan(string, bool, string) (*RatingPlan, error)
+	SetRatingPlan(*RatingPlan, string) error
+	GetRatingProfile(string, bool, string) (*RatingProfile, error)
+	SetRatingProfile(*RatingProfile, string) error
+	RemoveRatingProfile(string, string) error
+	GetDestination(string, bool, string) (*Destination, error)
+	SetDestination(*Destination, string) error
+	RemoveDestination(string, string) error
+	SetReverseDestination(*Destination, string) error
+	GetReverseDestination(string, bool, string) ([]string, error)
+	UpdateReverseDestination(*Destination, *Destination, string) error
+	GetLCR(string, bool, string) (*LCR, error)
+	SetLCR(*LCR, string) error
+	SetCdrStats(*CdrStats) error
+	GetCdrStats(string) (*CdrStats, error)
+	GetAllCdrStats() ([]*CdrStats, error)
+	GetDerivedChargers(string, bool, string) (*utils.DerivedChargers, error)
+	SetDerivedChargers(string, *utils.DerivedChargers, string) error
+	GetActions(string, bool, string) (Actions, error)
+	SetActions(string, Actions, string) error
+	RemoveActions(string, string) error
+	GetSharedGroup(string, bool, string) (*SharedGroup, error)
+	SetSharedGroup(*SharedGroup, string) error
+	GetActionTriggers(string, bool, string) (ActionTriggers, error)
+	SetActionTriggers(string, ActionTriggers, string) error
+	RemoveActionTriggers(string, string) error
+	GetActionPlan(string, bool, string) (*ActionPlan, error)
+	SetActionPlan(string, *ActionPlan, bool, string) error
+	GetAllActionPlans() (map[string]*ActionPlan, error)
+	GetAccountActionPlans(acntID string, skipCache bool, transactionID string) (apIDs []string, err error)
+	SetAccountActionPlans(acntID string, apIDs []string, overwrite bool) (err error)
+	RemAccountActionPlans(acntID string, apIDs []string) (err error)
+	PushTask(*Task) error
+	PopTask() (*Task, error)
+	LoadAccountingCache(alsIDs, rvAlsIDs, rlIDs []string) error
+	GetAccount(string) (*Account, error)
+	SetAccount(*Account) error
+	RemoveAccount(string) error
+	GetCdrStatsQueue(string) (*StatsQueue, error)
+	SetCdrStatsQueue(*StatsQueue) error
+	GetSubscribers() (map[string]*SubscriberData, error)
+	SetSubscriber(string, *SubscriberData) error
+	RemoveSubscriber(string) error
+	SetUser(*UserProfile) error
+	GetUser(string) (*UserProfile, error)
+	GetUsers() ([]*UserProfile, error)
+	RemoveUser(string) error
+	SetAlias(*Alias, string) error
+	GetAlias(string, bool, string) (*Alias, error)
+	RemoveAlias(string, string) error
+	SetReverseAlias(*Alias, string) error
+	GetReverseAlias(string, bool, string) ([]string, error)
+	GetResourceLimit(string, bool, string) (*ResourceLimit, error)
+	SetResourceLimit(*ResourceLimit, string) error
+	RemoveResourceLimit(string, string) error
+	GetLoadHistory(int, bool, string) ([]*utils.LoadInstance, error)
+	AddLoadHistory(*utils.LoadInstance, int, string) error
+	GetStructVersion() (*StructVersion, error)
+	SetStructVersion(*StructVersion) error
+	GetReqFilterIndexes(dbKey string) (indexes map[string]map[string]utils.StringMap, err error)
+	SetReqFilterIndexes(dbKey string, indexes map[string]map[string]utils.StringMap) (err error)
+	MatchReqFilterIndex(dbKey, fieldValKey string) (itemIDs utils.StringMap, err error)
+	// CacheDataFromDB loads data to cache, prefix represents the cache prefix, IDs should be nil if all available data should be loaded
+	CacheDataFromDB(prefix string, IDs []string, mustBeCached bool) error // ToDo: Move this to dataManager
+}
+
+type StorDB interface {
+	CdrStorage
+	LoadReader
+	LoadWriter
 }
 
 type CdrStorage interface {
@@ -126,7 +213,7 @@ type LoadReader interface {
 	GetTpIds() ([]string, error)
 	GetTpTableIds(string, string, utils.TPDistinctIds, map[string]string, *utils.Paginator) ([]string, error)
 	GetTpTimings(string, string) ([]TpTiming, error)
-	GetTpDestinations(string, string) ([]TpDestination, error)
+	GetTPDestinations(string, string) ([]*utils.TPDestination, error)
 	GetTpRates(string, string) ([]TpRate, error)
 	GetTpDestinationRates(string, string, *utils.Paginator) ([]TpDestinationRate, error)
 	GetTpRatingPlans(string, string, *utils.Paginator) ([]TpRatingPlan, error)
@@ -147,7 +234,7 @@ type LoadReader interface {
 type LoadWriter interface {
 	RemTpData(string, string, map[string]string) error
 	SetTpTimings([]TpTiming) error
-	SetTpDestinations([]TpDestination) error
+	SetTPDestinations([]*utils.TPDestination) error
 	SetTpRates([]TpRate) error
 	SetTpDestinationRates([]TpDestinationRate) error
 	SetTpRatingPlans([]TpRatingPlan) error

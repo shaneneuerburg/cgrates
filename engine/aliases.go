@@ -42,6 +42,17 @@ type Alias struct {
 	Values    AliasValues
 }
 
+func (al *Alias) ReverseAliasIDs() (rvAl []string) {
+	for _, value := range al.Values {
+		for target, pairs := range value.Pairs {
+			for _, alias := range pairs {
+				rvAl = append(rvAl, strings.Join([]string{alias, target, al.Context}, ""))
+			}
+		}
+	}
+	return
+}
+
 type AliasValue struct {
 	DestinationId string
 	Pairs         AliasPairs
@@ -176,7 +187,7 @@ type AttrAddAlias struct {
 }
 
 // SetAlias will set/overwrite specified alias
-func (am *AliasHandler) SetAlias(attr *AttrAddAlias, reply *string) error {
+func (am *AliasHandler) SetAlias(attr *AttrAddAlias, reply *string) (err error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
@@ -184,15 +195,18 @@ func (am *AliasHandler) SetAlias(attr *AttrAddAlias, reply *string) error {
 	if !attr.Overwrite { // get previous value
 		oldAlias, _ = am.accountingDb.GetAlias(attr.Alias.GetId(), false, utils.NonTransactional)
 	}
-
 	if attr.Overwrite || oldAlias == nil {
-		if err := am.accountingDb.SetAlias(attr.Alias, utils.NonTransactional); err != nil {
-			*reply = err.Error()
+		if err = am.accountingDb.SetAlias(attr.Alias, utils.NonTransactional); err != nil {
 			return err
 		}
-		if err := am.accountingDb.SetReverseAlias(attr.Alias, utils.NonTransactional); err != nil {
-			*reply = err.Error()
-			return err
+		if err = am.accountingDb.CacheDataFromDB(utils.ALIASES_PREFIX, []string{attr.Alias.GetId()}, true); err != nil {
+			return
+		}
+		if err = am.accountingDb.SetReverseAlias(attr.Alias, utils.NonTransactional); err != nil {
+			return
+		}
+		if err = am.accountingDb.CacheDataFromDB(utils.REVERSE_ALIASES_PREFIX, attr.Alias.ReverseAliasIDs(), true); err != nil {
+			return
 		}
 	} else {
 		for _, value := range attr.Alias.Values {
@@ -219,19 +233,18 @@ func (am *AliasHandler) SetAlias(attr *AttrAddAlias, reply *string) error {
 				oldAlias.Values = append(oldAlias.Values, value)
 			}
 		}
-		if err := am.accountingDb.SetAlias(oldAlias, utils.NonTransactional); err != nil {
-			*reply = err.Error()
-			return err
+		if err = am.accountingDb.SetAlias(oldAlias, utils.NonTransactional); err != nil {
+			return
 		}
-		if err := am.accountingDb.SetReverseAlias(oldAlias, utils.NonTransactional); err != nil {
-			*reply = err.Error()
-			return err
+		if err = am.accountingDb.CacheDataFromDB(utils.ALIASES_PREFIX, []string{oldAlias.GetId()}, true); err != nil {
+			return
 		}
-		//FIXME: optimize by creating better update reverse alias
-		/*err := am.accountingDb.UpdateReverseAlias(oldAlias, oldAlias)
-		if err != nil {
-			return err
-		}*/
+		if err = am.accountingDb.SetReverseAlias(oldAlias, utils.NonTransactional); err != nil {
+			return
+		}
+		if err = am.accountingDb.CacheDataFromDB(utils.REVERSE_ALIASES_PREFIX, attr.Alias.ReverseAliasIDs(), true); err != nil {
+			return
+		}
 	}
 
 	*reply = utils.OK
@@ -368,7 +381,7 @@ func (am *AliasHandler) Call(serviceMethod string, args interface{}, reply inter
 }
 
 func LoadAlias(attr *AttrMatchingAlias, in interface{}, extraFields string) error {
-	if aliasService == nil { // no alias service => no fun
+	if aliasService == nil {
 		return nil
 	}
 	response := Alias{}

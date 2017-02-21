@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/syslog"
 	//	_ "net/http/pprof"
 	"os"
 	"runtime"
@@ -38,6 +39,7 @@ import (
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/history"
 	"github.com/cgrates/cgrates/scheduler"
+	"github.com/cgrates/cgrates/servmanager"
 	"github.com/cgrates/cgrates/sessionmanager"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
@@ -126,6 +128,7 @@ func startCdrc(internalCdrSChan, internalRaterChan chan rpcclient.RpcClientConne
 	if err := cdrc.Run(); err != nil {
 		utils.Logger.Crit(fmt.Sprintf("Cdrc run error: %s", err.Error()))
 		exitChan <- true // If run stopped, something is bad, stop the application
+		return
 	}
 }
 
@@ -150,16 +153,11 @@ func startSmGeneric(internalSMGChan chan *sessionmanager.SMGeneric, internalRate
 			return
 		}
 	}
-	smgReplConns := make([]*sessionmanager.SMGReplicationConn, len(cfg.SmGenericConfig.SMGReplicationConns))
-	for i, replConnCfg := range cfg.SmGenericConfig.SMGReplicationConns {
-		if replCon, err := rpcclient.NewRpcClient("tcp", replConnCfg.Address, cfg.ConnectAttempts, cfg.Reconnects,
-			cfg.ConnectTimeout, cfg.ReplyTimeout, replConnCfg.Transport[1:], nil, true); err != nil {
-			utils.Logger.Crit(fmt.Sprintf("<SMGeneric> Could not connect to SMGReplicationConn: <%s>, error: <%s>", replConnCfg.Address, err.Error()))
-			exitChan <- true
-			return
-		} else {
-			smgReplConns[i] = &sessionmanager.SMGReplicationConn{Connection: replCon, Synchronous: replConnCfg.Synchronous}
-		}
+	smgReplConns, err := sessionmanager.NewSMGReplicationConns(cfg.SmGenericConfig.SMGReplicationConns, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout)
+	if err != nil {
+		utils.Logger.Crit(fmt.Sprintf("<SMGeneric> Could not connect to SMGReplicationConnection error: <%s>", err.Error()))
+		exitChan <- true
+		return
 	}
 	sm := sessionmanager.NewSMGeneric(cfg, ralsConns, cdrsConn, smgReplConns, cfg.DefaultTimezone)
 	if err = sm.Connect(); err != nil {
@@ -171,10 +169,13 @@ func startSmGeneric(internalSMGChan chan *sessionmanager.SMGeneric, internalRate
 	smgRpc := v1.NewSMGenericV1(sm)
 	server.RpcRegister(smgRpc)
 	// Register BiRpc handlers
-	//server.BiRPCRegister(v1.NewSMGenericBiRpcV1(sm))
-	smgBiRpc := v1.NewSMGenericBiRpcV1(sm)
-	for method, handler := range smgBiRpc.Handlers() {
-		server.BiRPCRegisterName(method, handler)
+	if cfg.SmGenericConfig.ListenBijson != "" {
+		smgBiRpc := v1.NewSMGenericBiRpcV1(sm)
+		for method, handler := range smgBiRpc.Handlers() {
+			server.BiRPCRegisterName(method, handler)
+		}
+		//server.BiRPCRegister(smgBiRpc)
+		go server.ServeBiJSON(cfg.SmGenericConfig.ListenBijson)
 	}
 }
 
@@ -411,22 +412,20 @@ func startCDRS(internalCdrSChan chan rpcclient.RpcClientConnection, cdrDb engine
 	internalCdrSChan <- cdrServer // Signal that cdrS is operational
 }
 
-func startScheduler(internalSchedulerChan chan *scheduler.Scheduler, cacheDoneChan chan struct{}, ratingDb engine.RatingStorage, exitChan chan bool) {
+func startScheduler(internalSchedulerChan chan *scheduler.Scheduler, cacheDoneChan chan struct{}, ratingDB engine.RatingStorage, exitChan chan bool) {
 	// Wait for cache to load data before starting
 	cacheDone := <-cacheDoneChan
 	cacheDoneChan <- cacheDone
 	utils.Logger.Info("Starting CGRateS Scheduler.")
-	sched := scheduler.NewScheduler(ratingDb)
-	go reloadSchedulerSingnalHandler(sched, ratingDb)
-	time.Sleep(1)
+	sched := scheduler.NewScheduler(ratingDB)
 	internalSchedulerChan <- sched
-	sched.Reload(true)
+
 	sched.Loop()
 	exitChan <- true // Should not get out of loop though
 }
 
-func startCdrStats(internalCdrStatSChan chan rpcclient.RpcClientConnection, ratingDb engine.RatingStorage, accountDb engine.AccountingStorage, server *utils.Server) {
-	cdrStats := engine.NewStats(ratingDb, accountDb, cfg.CDRStatsSaveInterval)
+func startCdrStats(internalCdrStatSChan chan rpcclient.RpcClientConnection, ratingDB engine.RatingStorage, accountDb engine.AccountingStorage, server *utils.Server) {
+	cdrStats := engine.NewStats(ratingDB, accountDb, cfg.CDRStatsSaveInterval)
 	server.RpcRegister(cdrStats)
 	server.RpcRegister(&v1.CDRStatsV1{CdrStats: cdrStats}) // Public APIs
 	internalCdrStatSChan <- cdrStats
@@ -437,6 +436,7 @@ func startHistoryServer(internalHistorySChan chan rpcclient.RpcClientConnection,
 	if err != nil {
 		utils.Logger.Crit(fmt.Sprintf("<HistoryServer> Could not start, error: %s", err.Error()))
 		exitChan <- true
+		return
 	}
 	server.RpcRegisterName("HistoryV1", scribeServer)
 	internalHistorySChan <- scribeServer
@@ -458,13 +458,6 @@ func startAliasesServer(internalAliaseSChan chan rpcclient.RpcClientConnection, 
 		internalAliaseSChan <- aliasesServer
 		return
 	}
-
-	if err := accountDb.PreloadAccountingCache(); err != nil {
-		utils.Logger.Crit(fmt.Sprintf("<Aliases> Could not start, error: %s", err.Error()))
-		exitChan <- true
-		return
-	}
-
 	internalAliaseSChan <- aliasesServer
 }
 
@@ -551,10 +544,21 @@ func writePid() {
 	}
 }
 
+// initLogger will initialize syslog writter, needs to be called after config init
+func initLogger(cfg *config.CGRConfig) error {
+	if l, err := syslog.New(syslog.LOG_INFO,
+		fmt.Sprintf("CGRateS <%s> ", cfg.InstanceID)); err != nil {
+		return err
+	} else {
+		utils.Logger.SetSyslog(l)
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 	if *version {
-		fmt.Println("CGRateS " + utils.VERSION)
+		fmt.Println(utils.GetCGRVersion())
 		return
 	}
 	if *pidFile != "" {
@@ -581,12 +585,19 @@ func main() {
 		go func() { // Schedule shutdown
 			time.Sleep(shutdownDur)
 			exitChan <- true
+			return
 		}()
 	}
-
+	// Init config
 	cfg, err = config.NewCGRConfigFromFolder(*cfgDir)
 	if err != nil {
 		log.Fatalf("Could not parse config: ", err)
+		return
+	}
+	config.SetCgrConfig(cfg) // Share the config object
+	// init syslog
+	if err = initLogger(cfg); err != nil {
+		log.Fatalf("Could not initialize sylog connection, err: <%s>", err.Error())
 		return
 	}
 	lgLevel := cfg.LogLevel
@@ -594,22 +605,23 @@ func main() {
 		lgLevel = *logLevel
 	}
 	utils.Logger.SetLogLevel(lgLevel)
-	config.SetCgrConfig(cfg) // Share the config object
+
+	// Init cache
 	cache.NewCache(cfg.CacheConfig)
 
-	var ratingDb engine.RatingStorage
+	var ratingDB engine.RatingStorage
 	var accountDb engine.AccountingStorage
 	var loadDb engine.LoadStorage
 	var cdrDb engine.CdrStorage
 	if cfg.RALsEnabled || cfg.SchedulerEnabled || cfg.CDRStatsEnabled { // Only connect to dataDb if necessary
-		ratingDb, err = engine.ConfigureRatingStorage(cfg.TpDbType, cfg.TpDbHost, cfg.TpDbPort,
+		ratingDB, err = engine.ConfigureRatingStorage(cfg.TpDbType, cfg.TpDbHost, cfg.TpDbPort,
 			cfg.TpDbName, cfg.TpDbUser, cfg.TpDbPass, cfg.DBDataEncoding, cfg.CacheConfig, cfg.LoadHistorySize)
 		if err != nil { // Cannot configure getter database, show stopper
 			utils.Logger.Crit(fmt.Sprintf("Could not configure dataDb: %s exiting!", err))
 			return
 		}
-		defer ratingDb.Close()
-		engine.SetRatingStorage(ratingDb)
+		defer ratingDB.Close()
+		engine.SetRatingStorage(ratingDB)
 	}
 	if cfg.RALsEnabled || cfg.CDRStatsEnabled || cfg.PubSubServerEnabled || cfg.AliasesServerEnabled || cfg.UserServerEnabled {
 		accountDb, err = engine.ConfigureAccountingStorage(cfg.DataDbType, cfg.DataDbHost, cfg.DataDbPort,
@@ -653,7 +665,6 @@ func main() {
 	internalBalancerChan := make(chan *balancer2go.Balancer, 1)
 	internalRaterChan := make(chan rpcclient.RpcClientConnection, 1)
 	cacheDoneChan := make(chan struct{}, 1)
-	internalSchedulerChan := make(chan *scheduler.Scheduler, 1)
 	internalCdrSChan := make(chan rpcclient.RpcClientConnection, 1)
 	internalCdrStatSChan := make(chan rpcclient.RpcClientConnection, 1)
 	internalHistorySChan := make(chan rpcclient.RpcClientConnection, 1)
@@ -662,6 +673,10 @@ func main() {
 	internalAliaseSChan := make(chan rpcclient.RpcClientConnection, 1)
 	internalSMGChan := make(chan *sessionmanager.SMGeneric, 1)
 	internalRLSChan := make(chan rpcclient.RpcClientConnection, 1)
+
+	// Start ServiceManager
+	srvManager := servmanager.NewServiceManager(cfg, ratingDB, exitChan, cacheDoneChan)
+
 	// Start balancer service
 	if cfg.BalancerEnabled {
 		go startBalancer(internalBalancerChan, &stopHandled, exitChan) // Not really needed async here but to cope with uniformity
@@ -669,13 +684,13 @@ func main() {
 
 	// Start rater service
 	if cfg.RALsEnabled {
-		go startRater(internalRaterChan, cacheDoneChan, internalBalancerChan, internalSchedulerChan, internalCdrStatSChan, internalHistorySChan, internalPubSubSChan, internalUserSChan, internalAliaseSChan,
-			server, ratingDb, accountDb, loadDb, cdrDb, &stopHandled, exitChan)
+		go startRater(internalRaterChan, cacheDoneChan, internalBalancerChan, internalCdrStatSChan, internalHistorySChan, internalPubSubSChan, internalUserSChan, internalAliaseSChan,
+			srvManager, server, ratingDB, accountDb, loadDb, cdrDb, &stopHandled, exitChan)
 	}
 
 	// Start Scheduler
 	if cfg.SchedulerEnabled {
-		go startScheduler(internalSchedulerChan, cacheDoneChan, ratingDb, exitChan)
+		go srvManager.StartScheduler(true)
 	}
 
 	// Start CDR Server
@@ -686,7 +701,7 @@ func main() {
 
 	// Start CDR Stats server
 	if cfg.CDRStatsEnabled {
-		go startCdrStats(internalCdrStatSChan, ratingDb, accountDb, server)
+		go startCdrStats(internalCdrStatSChan, ratingDB, accountDb, server)
 	}
 
 	// Start CDRC components if necessary

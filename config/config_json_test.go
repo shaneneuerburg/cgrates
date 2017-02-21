@@ -38,12 +38,14 @@ func TestDfNewdfCgrJsonCfgFromReader(t *testing.T) {
 
 func TestDfGeneralJsonCfg(t *testing.T) {
 	eCfg := &GeneralJsonCfg{
+		Instance_id:          utils.StringPointer(""),
+		Log_level:            utils.IntPointer(utils.LOGLEVEL_INFO),
 		Http_skip_tls_verify: utils.BoolPointer(false),
 		Rounding_decimals:    utils.IntPointer(5),
 		Dbdata_encoding:      utils.StringPointer("msgpack"),
 		Tpexport_dir:         utils.StringPointer("/var/spool/cgrates/tpe"),
-		Httpposter_attempts:  utils.IntPointer(3),
-		Http_failed_dir:      utils.StringPointer("/var/spool/cgrates/http_failed"),
+		Poster_attempts:      utils.IntPointer(3),
+		Failed_posts_dir:     utils.StringPointer("/var/spool/cgrates/failed_posts"),
 		Default_request_type: utils.StringPointer(utils.META_RATED),
 		Default_category:     utils.StringPointer("call"),
 		Default_tenant:       utils.StringPointer("cgrates.org"),
@@ -55,7 +57,7 @@ func TestDfGeneralJsonCfg(t *testing.T) {
 		Response_cache_ttl:   utils.StringPointer("0s"),
 		Internal_ttl:         utils.StringPointer("2m"),
 		Locking_timeout:      utils.StringPointer("5s"),
-		Log_level:            utils.IntPointer(utils.LOGLEVEL_INFO)}
+	}
 	if gCfg, err := dfCgrJsonCfg.GeneralJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, gCfg) {
@@ -81,6 +83,8 @@ func TestCacheJsonCfg(t *testing.T) {
 			Ttl: utils.StringPointer("0s"), Precache: utils.BoolPointer(false)},
 		Action_plans: &CacheParamJsonCfg{Limit: utils.IntPointer(10000),
 			Ttl: utils.StringPointer("0s"), Precache: utils.BoolPointer(false)},
+		Account_action_plans: &CacheParamJsonCfg{Limit: utils.IntPointer(10000),
+			Ttl: utils.StringPointer("0s"), Precache: utils.BoolPointer(false)},
 		Action_triggers: &CacheParamJsonCfg{Limit: utils.IntPointer(10000),
 			Ttl: utils.StringPointer("0s"), Precache: utils.BoolPointer(false)},
 		Shared_groups: &CacheParamJsonCfg{Limit: utils.IntPointer(10000),
@@ -88,6 +92,10 @@ func TestCacheJsonCfg(t *testing.T) {
 		Aliases: &CacheParamJsonCfg{Limit: utils.IntPointer(10000),
 			Ttl: utils.StringPointer("0s"), Precache: utils.BoolPointer(false)},
 		Reverse_aliases: &CacheParamJsonCfg{Limit: utils.IntPointer(10000),
+			Ttl: utils.StringPointer("0s"), Precache: utils.BoolPointer(false)},
+		Derived_chargers: &CacheParamJsonCfg{Limit: utils.IntPointer(10000),
+			Ttl: utils.StringPointer("0s"), Precache: utils.BoolPointer(false)},
+		Resource_limits: &CacheParamJsonCfg{Limit: utils.IntPointer(10000),
 			Ttl: utils.StringPointer("0s"), Precache: utils.BoolPointer(false)},
 	}
 	if gCfg, err := dfCgrJsonCfg.CacheJsonCfg(); err != nil {
@@ -195,11 +203,11 @@ func TestDfCdrsJsonCfg(t *testing.T) {
 			&HaPoolJsonCfg{
 				Address: utils.StringPointer("*internal"),
 			}},
-		Pubsubs_conns:   &[]*HaPoolJsonCfg{},
-		Users_conns:     &[]*HaPoolJsonCfg{},
-		Aliases_conns:   &[]*HaPoolJsonCfg{},
-		Cdrstats_conns:  &[]*HaPoolJsonCfg{},
-		Cdr_replication: &[]*CdrReplicationJsonCfg{},
+		Pubsubs_conns:      &[]*HaPoolJsonCfg{},
+		Users_conns:        &[]*HaPoolJsonCfg{},
+		Aliases_conns:      &[]*HaPoolJsonCfg{},
+		Cdrstats_conns:     &[]*HaPoolJsonCfg{},
+		Online_cdr_exports: &[]string{},
 	}
 	if cfg, err := dfCgrJsonCfg.CdrsJsonCfg(); err != nil {
 		t.Error(err)
@@ -274,17 +282,17 @@ func TestDfCdreJsonCfgs(t *testing.T) {
 	}
 	eCfg := map[string]*CdreJsonCfg{
 		utils.META_DEFAULT: &CdreJsonCfg{
-			Cdr_format:                    utils.StringPointer("csv"),
-			Field_separator:               utils.StringPointer(","),
-			Data_usage_multiply_factor:    utils.Float64Pointer(1.0),
-			Sms_usage_multiply_factor:     utils.Float64Pointer(1.0),
-			Mms_usage_multiply_factor:     utils.Float64Pointer(1.0),
-			Generic_usage_multiply_factor: utils.Float64Pointer(1.0),
-			Cost_multiply_factor:          utils.Float64Pointer(1.0),
-			Export_directory:              utils.StringPointer("/var/spool/cgrates/cdre"),
-			Header_fields:                 &eFields,
-			Content_fields:                &eContentFlds,
-			Trailer_fields:                &eFields,
+			Export_format:         utils.StringPointer(utils.MetaFileCSV),
+			Export_path:           utils.StringPointer("/var/spool/cgrates/cdre"),
+			Cdr_filter:            utils.StringPointer(""),
+			Synchronous:           utils.BoolPointer(false),
+			Attempts:              utils.IntPointer(1),
+			Field_separator:       utils.StringPointer(","),
+			Usage_multiply_factor: &map[string]float64{utils.ANY: 1.0},
+			Cost_multiply_factor:  utils.Float64Pointer(1.0),
+			Header_fields:         &eFields,
+			Content_fields:        &eContentFlds,
+			Trailer_fields:        &eFields,
 		},
 	}
 	if cfg, err := dfCgrJsonCfg.CdreJsonCfgs(); err != nil {

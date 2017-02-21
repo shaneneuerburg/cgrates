@@ -20,6 +20,7 @@ package scheduler
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,24 +29,62 @@ import (
 )
 
 type Scheduler struct {
-	queue       engine.ActionTimingPriorityList
-	timer       *time.Timer
-	restartLoop chan bool
-	sync.Mutex
-	storage          engine.RatingStorage
-	schedulerStarted bool
+	sync.RWMutex
+	queue                           engine.ActionTimingPriorityList
+	timer                           *time.Timer
+	restartLoop                     chan bool
+	storage                         engine.RatingStorage
+	schedulerStarted                bool
+	actStatsInterval                time.Duration                 // How long time to keep the stats in memory
+	actSucessChan, actFailedChan    chan *engine.Action           // ActionPlan will pass actions via these channels
+	aSMux, aFMux                    sync.RWMutex                  // protect schedStats
+	actSuccessStats, actFailedStats map[string]map[time.Time]bool // keep here stats regarding executed actions, map[actionType]map[execTime]bool
 }
 
 func NewScheduler(storage engine.RatingStorage) *Scheduler {
-	return &Scheduler{
+	s := &Scheduler{
 		restartLoop: make(chan bool),
 		storage:     storage,
 	}
+	s.Reload()
+	return s
+}
+
+func (s *Scheduler) updateActStats(act *engine.Action, isFailed bool) {
+	mux := s.aSMux
+	statsMp := s.actSuccessStats
+	if isFailed {
+		mux = s.aFMux
+		statsMp = s.actFailedStats
+	}
+	now := time.Now()
+	mux.Lock()
+	for aType := range statsMp {
+		for t := range statsMp[aType] {
+			if now.Sub(t) > s.actStatsInterval {
+				delete(statsMp[aType], t)
+				if len(statsMp[aType]) == 0 {
+					delete(statsMp, aType)
+				}
+			}
+		}
+	}
+	if act == nil {
+		return
+	}
+	if _, hasIt := statsMp[act.ActionType]; !hasIt {
+		statsMp[act.ActionType] = make(map[time.Time]bool)
+	}
+	statsMp[act.ActionType][now] = true
+	mux.Unlock()
 }
 
 func (s *Scheduler) Loop() {
 	s.schedulerStarted = true
 	for {
+		if !s.schedulerStarted { // shutdown requested
+			break
+		}
 		for len(s.queue) == 0 { //hang here if empty
 			<-s.restartLoop
 		}
@@ -56,7 +95,7 @@ func (s *Scheduler) Loop() {
 		now := time.Now()
 		start := a0.GetNextStartTime(now)
 		if start.Equal(now) || start.Before(now) {
-			go a0.Execute()
+			go a0.Execute(s.actSucessChan, s.actFailedChan)
 			// if after execute the next start time is in the past then
 			// do not add it to the queue
 			a0.ResetStartTimeCache()
@@ -86,7 +125,7 @@ func (s *Scheduler) Loop() {
 	}
 }
 
-func (s *Scheduler) Reload(protect bool) {
+func (s *Scheduler) Reload() {
 	s.loadActionPlans()
 	s.restart()
 }
@@ -153,6 +192,70 @@ func (s *Scheduler) restart() {
 	}
 }
 
-func (s *Scheduler) GetQueue() engine.ActionTimingPriorityList {
-	return s.queue
+type ArgsGetScheduledActions struct {
+	Tenant, Account    *string
+	TimeStart, TimeEnd *time.Time // Filter based on next runTime
+	utils.Paginator
+}
+
+type ScheduledAction struct {
+	NextRunTime                               time.Time
+	Accounts                                  int // Number of acccounts this action will run on
+	ActionPlanID, ActionTimingUUID, ActionsID string
+}
+
+func (s *Scheduler) GetScheduledActions(fltr ArgsGetScheduledActions) (schedActions []*ScheduledAction) {
+	s.RLock()
+	for _, at := range s.queue {
+		sas := &ScheduledAction{NextRunTime: at.GetNextStartTime(time.Now()), Accounts: len(at.GetAccountIDs()),
+			ActionPlanID: at.GetActionPlanID(), ActionTimingUUID: at.Uuid, ActionsID: at.ActionsID}
+		if fltr.TimeStart != nil && !fltr.TimeStart.IsZero() && sas.NextRunTime.Before(*fltr.TimeStart) {
+			continue // need to match the filter interval
+		}
+		if fltr.TimeEnd != nil && !fltr.TimeEnd.IsZero() && (sas.NextRunTime.After(*fltr.TimeEnd) || sas.NextRunTime.Equal(*fltr.TimeEnd)) {
+			continue
+		}
+		// filter on account
+		if fltr.Tenant != nil || fltr.Account != nil {
+			found := false
+			for accID := range at.GetAccountIDs() {
+				split := strings.Split(accID, utils.CONCATENATED_KEY_SEP)
+				if len(split) != 2 {
+					continue // malformed account id
+				}
+				if fltr.Tenant != nil && *fltr.Tenant != split[0] {
+					continue
+				}
+				if fltr.Account != nil && *fltr.Account != split[1] {
+					continue
+				}
+				found = true
+				break
+			}
+			if !found {
+				continue
+			}
+		}
+		schedActions = append(schedActions, sas)
+	}
+	if fltr.Paginator.Offset != nil {
+		if *fltr.Paginator.Offset <= len(schedActions) {
+			schedActions = schedActions[*fltr.Paginator.Offset:]
+		}
+	}
+	if fltr.Paginator.Limit != nil {
+		if *fltr.Paginator.Limit <= len(schedActions) {
+			schedActions = schedActions[:*fltr.Paginator.Limit]
+		}
+	}
+	s.RUnlock()
+	return
+}
+
+func (s *Scheduler) Shutdown() {
+	s.schedulerStarted = false // disable loop on next run
+	s.restartLoop <- true      // cancel waiting tasks
+	if s.timer != nil {
+		s.timer.Stop()
+	}
 }

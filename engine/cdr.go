@@ -41,7 +41,7 @@ func NewCDRFromExternalCDR(extCdr *ExternalCDR, timezone string) (*CDR, error) {
 		}
 	}
 	if len(cdr.CGRID) == 0 { // Populate CGRID if not present
-		cdr.CGRID = utils.Sha1(cdr.OriginID, cdr.SetupTime.UTC().String())
+		cdr.ComputeCGRID()
 	}
 	if extCdr.AnswerTime != "" {
 		if cdr.AnswerTime, err = utils.ParseTimeDetectLayout(extCdr.AnswerTime, timezone); err != nil {
@@ -111,6 +111,15 @@ type CDR struct {
 func (cdr *CDR) CostDetailsJson() string {
 	mrshled, _ := json.Marshal(cdr.CostDetails)
 	return string(mrshled)
+}
+
+func (cdr *CDR) AccountSummaryJson() string {
+	mrshled, _ := json.Marshal(cdr.AccountSummary)
+	return string(mrshled)
+}
+
+func (cdr *CDR) ComputeCGRID() {
+	cdr.CGRID = utils.Sha1(cdr.OriginID, cdr.SetupTime.UTC().String())
 }
 
 // Used to multiply usage on export
@@ -195,6 +204,8 @@ func (cdr *CDR) FieldAsString(rsrFld *utils.RSRField) string {
 		return rsrFld.ParseValue(strconv.FormatFloat(cdr.Cost, 'f', -1, 64)) // Recommended to use FormatCost
 	case utils.COST_DETAILS:
 		return rsrFld.ParseValue(cdr.CostDetailsJson())
+	case utils.ACCOUNT_SUMMARY:
+		return rsrFld.ParseValue(cdr.AccountSummaryJson())
 	case utils.PartialField:
 		return rsrFld.ParseValue(strconv.FormatBool(cdr.Partial))
 	default:
@@ -212,6 +223,8 @@ func (cdr *CDR) ParseFieldValue(fieldId, fieldVal, timezone string) error {
 		}
 	case utils.TOR:
 		cdr.ToR += fieldVal
+	case utils.MEDI_RUNID:
+		cdr.RunID += fieldVal
 	case utils.ACCID:
 		cdr.OriginID += fieldVal
 	case utils.REQTYPE:
@@ -703,13 +716,6 @@ func (cdr *CDR) exportFieldValue(cfgCdrFld *config.CfgCdrField) (string, error) 
 	for _, rsrFld := range cfgCdrFld.Value {
 		var cdrVal string
 		switch rsrFld.Id {
-		case utils.COST_DETAILS: // Special case when we need to further extract cost_details out of logDb
-			if cdr.CostDetails == nil {
-				cdrVal = ""
-			} else {
-				jsonVal, _ := json.Marshal(cdr.CostDetails)
-				cdrVal = string(jsonVal)
-			}
 		case utils.COST:
 			cdrVal = cdr.FormatCost(cfgCdrFld.CostShiftDigits, cfgCdrFld.RoundingDecimals)
 		case utils.USAGE:
@@ -786,11 +792,22 @@ func (cdr *CDR) formatField(cfgFld *config.CfgCdrField, httpSkipTlsCheck bool, g
 
 }
 
+// Part of event interface
+func (cdr *CDR) AsMapStringIface() (map[string]interface{}, error) {
+	return nil, utils.ErrNotImplemented
+}
+
 // Used in place where we need to export the CDR based on an export template
 // ExportRecord is a []string to keep it compatible with encoding/csv Writer
-func (cdr *CDR) AsExportRecord(exportFields []*config.CfgCdrField, httpSkipTlsCheck bool, groupedCDRs []*CDR) (expRecord []string, err error) {
+func (cdr *CDR) AsExportRecord(exportFields []*config.CfgCdrField, httpSkipTlsCheck bool, groupedCDRs []*CDR, roundingDecs int) (expRecord []string, err error) {
 	expRecord = make([]string, len(exportFields))
 	for idx, cfgFld := range exportFields {
+		if roundingDecs != 0 {
+			clnFld := new(config.CfgCdrField) // Clone so we can modify the rounding decimals without affecting the template
+			*clnFld = *cfgFld
+			clnFld.RoundingDecimals = roundingDecs
+			cfgFld = clnFld
+		}
 		if fmtOut, err := cdr.formatField(cfgFld, httpSkipTlsCheck, groupedCDRs); err != nil {
 			return nil, err
 		} else {
@@ -800,16 +817,17 @@ func (cdr *CDR) AsExportRecord(exportFields []*config.CfgCdrField, httpSkipTlsCh
 	return expRecord, nil
 }
 
-// Part of event interface
-func (cdr *CDR) AsMapStringIface() (map[string]interface{}, error) {
-	return nil, utils.ErrNotImplemented
-}
-
 // AsExportMap converts the CDR into a map[string]string based on export template
 // Used in real-time replication as well as remote exports
-func (cdr *CDR) AsExportMap(exportFields []*config.CfgCdrField, httpSkipTlsCheck bool, groupedCDRs []*CDR) (expMap map[string]string, err error) {
+func (cdr *CDR) AsExportMap(exportFields []*config.CfgCdrField, httpSkipTlsCheck bool, groupedCDRs []*CDR, roundingDecs int) (expMap map[string]string, err error) {
 	expMap = make(map[string]string)
 	for _, cfgFld := range exportFields {
+		if roundingDecs != 0 {
+			clnFld := new(config.CfgCdrField) // Clone so we can modify the rounding decimals without affecting the template
+			*clnFld = *cfgFld
+			clnFld.RoundingDecimals = roundingDecs
+			cfgFld = clnFld
+		}
 		if fmtOut, err := cdr.formatField(cfgFld, httpSkipTlsCheck, groupedCDRs); err != nil {
 			return nil, err
 		} else {
@@ -866,7 +884,8 @@ type UsageRecord struct {
 
 func (self *UsageRecord) AsStoredCdr(timezone string) (*CDR, error) {
 	var err error
-	cdr := &CDR{CGRID: self.GetId(), ToR: self.ToR, RequestType: self.RequestType, Direction: self.Direction, Tenant: self.Tenant, Category: self.Category, Account: self.Account, Subject: self.Subject, Destination: self.Destination}
+	cdr := &CDR{CGRID: self.GetId(), ToR: self.ToR, RequestType: self.RequestType, Direction: self.Direction,
+		Tenant: self.Tenant, Category: self.Category, Account: self.Account, Subject: self.Subject, Destination: self.Destination}
 	if cdr.SetupTime, err = utils.ParseTimeDetectLayout(self.SetupTime, timezone); err != nil {
 		return nil, err
 	}
@@ -885,17 +904,18 @@ func (self *UsageRecord) AsStoredCdr(timezone string) (*CDR, error) {
 	return cdr, nil
 }
 
-func (self *UsageRecord) AsCallDescriptor(timezone string) (*CallDescriptor, error) {
+func (self *UsageRecord) AsCallDescriptor(timezone string, denyNegative bool) (*CallDescriptor, error) {
 	var err error
 	cd := &CallDescriptor{
-		CgrID:       self.GetId(),
-		TOR:         self.ToR,
-		Direction:   self.Direction,
-		Tenant:      self.Tenant,
-		Category:    self.Category,
-		Subject:     self.Subject,
-		Account:     self.Account,
-		Destination: self.Destination,
+		CgrID:               self.GetId(),
+		TOR:                 self.ToR,
+		Direction:           self.Direction,
+		Tenant:              self.Tenant,
+		Category:            self.Category,
+		Subject:             self.Subject,
+		Account:             self.Account,
+		Destination:         self.Destination,
+		DenyNegativeAccount: denyNegative,
 	}
 	timeStr := self.AnswerTime
 	if len(timeStr) == 0 { // In case of auth, answer time will not be defined, so take it out of setup one

@@ -28,6 +28,7 @@ import (
 
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/engine"
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
@@ -38,7 +39,7 @@ const (
 
 func NewPartialRecordsCache(ttl time.Duration, expiryAction string, cdrOutDir string, csvSep rune, roundDecimals int, timezone string, httpSkipTlsCheck bool, cdrs rpcclient.RpcClientConnection) (*PartialRecordsCache, error) {
 	return &PartialRecordsCache{ttl: ttl, expiryAction: expiryAction, cdrOutDir: cdrOutDir, csvSep: csvSep, roundDecimals: roundDecimals, timezone: timezone, httpSkipTlsCheck: httpSkipTlsCheck, cdrs: cdrs,
-		partialRecords: make(map[string]*PartialCDRRecord), dumpTimers: make(map[string]*time.Timer), guard: engine.Guardian}, nil
+		partialRecords: make(map[string]*PartialCDRRecord), dumpTimers: make(map[string]*time.Timer), guard: guardian.Guardian}, nil
 }
 
 type PartialRecordsCache struct {
@@ -52,7 +53,7 @@ type PartialRecordsCache struct {
 	cdrs             rpcclient.RpcClientConnection
 	partialRecords   map[string]*PartialCDRRecord // [OriginID]*PartialRecord
 	dumpTimers       map[string]*time.Timer       // [OriginID]*time.Timer which can be canceled or reset
-	guard            *engine.GuardianLock
+	guard            *guardian.GuardianLock
 }
 
 // Dumps the cache into a .unpaired file in the outdir and cleans cache after
@@ -68,7 +69,7 @@ func (prc *PartialRecordsCache) dumpPartialRecords(originID string) {
 			csvWriter := csv.NewWriter(fileOut)
 			csvWriter.Comma = prc.csvSep
 			for _, cdr := range prc.partialRecords[originID].cdrs {
-				expRec, err := cdr.AsExportRecord(prc.partialRecords[originID].cacheDumpFields, prc.httpSkipTlsCheck, nil)
+				expRec, err := cdr.AsExportRecord(prc.partialRecords[originID].cacheDumpFields, prc.httpSkipTlsCheck, nil, prc.roundDecimals)
 				if err != nil {
 					return nil, err
 				}

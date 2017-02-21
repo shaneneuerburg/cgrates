@@ -53,11 +53,15 @@ func (self *SQLStorage) Flush(scriptsPath string) (err error) {
 	return nil
 }
 
+func (rs *SQLStorage) SelectDatabase(dbName string) (err error) {
+	return
+}
+
 func (self *SQLStorage) GetKeysForPrefix(prefix string) ([]string, error) {
 	return nil, utils.ErrNotImplemented
 }
 
-func (ms *SQLStorage) RebuildReverseForPrefix(prefix string) error {
+func (self *SQLStorage) RebuildReverseForPrefix(prefix string) error {
 	return utils.ErrNotImplemented
 }
 
@@ -225,25 +229,22 @@ func (self *SQLStorage) SetTpTimings(timings []TpTiming) error {
 	return nil
 }
 
-func (self *SQLStorage) SetTpDestinations(dests []TpDestination) error {
+func (self *SQLStorage) SetTPDestinations(dests []*utils.TPDestination) error {
 	if len(dests) == 0 {
 		return nil
 	}
-	m := make(map[string]bool)
-
 	tx := self.db.Begin()
-	for _, dest := range dests {
-		if found, _ := m[dest.Tag]; !found {
-			m[dest.Tag] = true
-			if err := tx.Where(&TpDestination{Tpid: dest.Tpid, Tag: dest.Tag}).Delete(TpDestination{}).Error; err != nil {
+	for _, dst := range dests {
+		// Remove previous
+		if err := tx.Where(&TpDestination{Tpid: dst.TPid, Tag: dst.Tag}).Delete(TpDestination{}).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+		for _, dstPrfx := range dst.Prefixes {
+			if err := tx.Save(&TpDestination{Tpid: dst.TPid, Tag: dst.Tag, Prefix: dstPrfx}).Error; err != nil {
 				tx.Rollback()
 				return err
 			}
-		}
-		save := tx.Save(&dest)
-		if save.Error != nil {
-			tx.Rollback()
-			return save.Error
 		}
 	}
 	tx.Commit()
@@ -896,14 +897,22 @@ func (self *SQLStorage) GetCDRs(qryFltr *utils.CDRsFilter, remove bool) ([]*CDR,
 		if minUsage, err := utils.ParseDurationWithSecs(qryFltr.MinUsage); err != nil {
 			return nil, 0, err
 		} else {
-			q = q.Where("usage >= ?", minUsage.Seconds())
+			if self.db.Dialect().GetName() == utils.MYSQL { // MySQL needs escaping for usage
+				q = q.Where("`usage` >= ?", minUsage.Seconds())
+			} else {
+				q = q.Where("usage >= ?", minUsage.Seconds())
+			}
 		}
 	}
 	if len(qryFltr.MaxUsage) != 0 {
 		if maxUsage, err := utils.ParseDurationWithSecs(qryFltr.MaxUsage); err != nil {
 			return nil, 0, err
 		} else {
-			q = q.Where("usage < ?", maxUsage.Seconds())
+			if self.db.Dialect().GetName() == utils.MYSQL { // MySQL needs escaping for usage
+				q = q.Where("`usage` < ?", maxUsage.Seconds())
+			} else {
+				q = q.Where("usage < ?", maxUsage.Seconds())
+			}
 		}
 
 	}
@@ -962,7 +971,6 @@ func (self *SQLStorage) GetCDRs(qryFltr *utils.CDRsFilter, remove bool) ([]*CDR,
 	// Execute query
 	results := make([]*TBLCDRs, 0)
 	q.Find(&results)
-
 	for _, result := range results {
 		extraFieldsMp := make(map[string]string)
 		if result.ExtraFields != "" {
@@ -1015,8 +1023,8 @@ func (self *SQLStorage) GetCDRs(qryFltr *utils.CDRsFilter, remove bool) ([]*CDR,
 	return cdrs, 0, nil
 }
 
-func (self *SQLStorage) GetTpDestinations(tpid, tag string) ([]TpDestination, error) {
-	var tpDests []TpDestination
+func (self *SQLStorage) GetTPDestinations(tpid, tag string) (uTPDsts []*utils.TPDestination, err error) {
+	var tpDests TpDestinations
 	q := self.db.Where("tpid = ?", tpid)
 	if len(tag) != 0 {
 		q = q.Where("tag = ?", tag)
@@ -1024,8 +1032,7 @@ func (self *SQLStorage) GetTpDestinations(tpid, tag string) ([]TpDestination, er
 	if err := q.Find(&tpDests).Error; err != nil {
 		return nil, err
 	}
-
-	return tpDests, nil
+	return tpDests.AsTPDestinations(), nil
 }
 
 func (self *SQLStorage) GetTpRates(tpid, tag string) ([]TpRate, error) {
@@ -1368,4 +1375,55 @@ func (self *SQLStorage) GetTpResourceLimits(tpid, tag string) (TpResourceLimits,
 		return nil, err
 	}
 	return tpResourceLimits, nil
+}
+
+// GetVersions returns slice of all versions or a specific version if tag is specified
+func (self *SQLStorage) GetVersions(itm string) (vrs Versions, err error) {
+	q := self.db.Model(&TBLVersion{})
+	if itm != "" {
+		q = self.db.Where(&TBLVersion{Item: itm})
+	}
+	var verModels []*TBLVersion
+	if err = q.Find(&verModels).Error; err != nil {
+		return
+	}
+	vrs = make(Versions)
+	for _, verModel := range verModels {
+		vrs[verModel.Item] = verModel.Version
+	}
+	return
+}
+
+// SetVersions will set a slice of versions, updating existing
+func (self *SQLStorage) SetVersions(vrs Versions) (err error) {
+	tx := self.db.Begin()
+	for key, val := range vrs {
+		vrModel := &TBLVersion{Item: key, Version: val}
+		if err = tx.Save(vrModel).Error; err != nil {
+			if err = tx.Model(&TBLVersion{}).Where(
+				TBLVersion{Item: vrModel.Item}).Updates(TBLVersion{Version: val}).Error; err != nil {
+				tx.Rollback()
+				return
+			}
+		}
+	}
+	tx.Commit()
+	return
+}
+
+// RemoveVersions will remove specific versions out of storage
+func (self *SQLStorage) RemoveVersions(vrs Versions) (err error) {
+	if len(vrs) == 0 { // Remove all if no key provided
+		err = self.db.Delete(TBLVersion{}).Error
+		return
+	}
+	tx := self.db.Begin()
+	for key := range vrs {
+		if err = tx.Where(&TBLVersion{Item: key}).Delete(TBLVersion{}).Error; err != nil {
+			tx.Rollback()
+			return
+		}
+	}
+	tx.Commit()
+	return
 }

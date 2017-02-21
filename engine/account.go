@@ -21,12 +21,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/structmatcher"
 	"github.com/cgrates/cgrates/utils"
-
-	"strings"
 )
 
 /*
@@ -151,7 +151,9 @@ func (acc *Account) setBalanceAction(a *Action) error {
 	}
 	// modify if necessary the shared groups here
 	if !found || !previousSharedGroups.Equal(balance.SharedGroups) {
-		_, err := Guardian.Guard(func() (interface{}, error) {
+		_, err := guardian.Guardian.Guard(func() (interface{}, error) {
+			sgs := make([]string, len(balance.SharedGroups))
+			i := 0
 			for sgID := range balance.SharedGroups {
 				// add shared group member
 				sg, err := ratingStorage.GetSharedGroup(sgID, false, utils.NonTransactional)
@@ -168,7 +170,9 @@ func (acc *Account) setBalanceAction(a *Action) error {
 						ratingStorage.SetSharedGroup(sg, utils.NonTransactional)
 					}
 				}
+				i++
 			}
+			ratingStorage.CacheDataFromDB(utils.SHARED_GROUP_PREFIX, sgs, true)
 			return 0, nil
 		}, 0, balance.SharedGroups.Slice()...)
 		if err != nil {
@@ -239,7 +243,9 @@ func (ub *Account) debitBalanceAction(a *Action, reset bool) error {
 			}
 		}
 		ub.BalanceMap[balanceType] = append(ub.BalanceMap[balanceType], bClone)
-		_, err := Guardian.Guard(func() (interface{}, error) {
+		_, err := guardian.Guardian.Guard(func() (interface{}, error) {
+			sgs := make([]string, len(bClone.SharedGroups))
+			i := 0
 			for sgId := range bClone.SharedGroups {
 				// add shared group member
 				sg, err := ratingStorage.GetSharedGroup(sgId, false, utils.NonTransactional)
@@ -256,7 +262,9 @@ func (ub *Account) debitBalanceAction(a *Action, reset bool) error {
 						ratingStorage.SetSharedGroup(sg, utils.NonTransactional)
 					}
 				}
+				i++
 			}
+			ratingStorage.CacheDataFromDB(utils.SHARED_GROUP_PREFIX, sgs, true)
 			return 0, nil
 		}, 0, bClone.SharedGroups.Slice()...)
 		if err != nil {
@@ -268,33 +276,6 @@ func (ub *Account) debitBalanceAction(a *Action, reset bool) error {
 	return nil
 }
 
-/*
-func (ub *Account) enableDisableBalanceAction(a *Action) error {
-	if a == nil {
-		return errors.New("nil action")
-	}
-
-	if ub.BalanceMap == nil {
-		ub.BalanceMap = make(map[string]Balances)
-	}
-	found := false
-	id := a.BalanceType
-	disabled := a.Balance.Disabled
-	a.Balance.Disabled = !disabled // match for the opposite
-	for _, b := range ub.BalanceMap[id] {
-		if b.MatchFilter(a.Balance, false) {
-			b.Disabled = disabled
-			b.dirty = true
-			found = true
-		}
-	}
-	a.Balance.Disabled = disabled // restore balance aaction as it is cached
-	if !found {
-		return utils.ErrNotFound
-	}
-	return nil
-}
-*/
 func (ub *Account) getBalancesForPrefix(prefix, category, direction, tor string, sharedGroup string) Balances {
 	var balances Balances
 	balances = append(balances, ub.BalanceMap[tor]...)
@@ -416,6 +397,7 @@ func (ub *Account) debitCreditBalance(cd *CallDescriptor, count bool, dryRun boo
 				if debitErr != nil {
 					return nil, debitErr
 				}
+
 				//utils.Logger.Info(fmt.Sprintf("CD AFTER UNIT: %+v", cd))
 				if partCC != nil {
 					//log.Printf("partCC: %+v", partCC.Timespans[0])
@@ -511,9 +493,13 @@ func (ub *Account) debitCreditBalance(cd *CallDescriptor, count bool, dryRun boo
 	if leftCC.Cost > 0 && goNegative {
 		initialLength := len(cc.Timespans)
 		cc.Timespans = append(cc.Timespans, leftCC.Timespans...)
+
+		var debitedConnectFeeBalance Balance
+		var ok bool
+
 		if initialLength == 0 {
 			// this is the first add, debit the connect fee
-			ub.DebitConnectionFee(cc, usefulMoneyBalances, count, true)
+			ok, debitedConnectFeeBalance = ub.DebitConnectionFee(cc, usefulMoneyBalances, count, true)
 		}
 		//log.Printf("Left CC: %+v ", leftCC)
 		// get the default money balanance
@@ -522,11 +508,37 @@ func (ub *Account) debitCreditBalance(cd *CallDescriptor, count bool, dryRun boo
 			utils.Logger.Err(fmt.Sprintf("<Rater> Going negative on account %s with AllowNegative: false", cd.GetAccountKey()))
 		}
 		leftCC.Timespans.Decompress()
-		for _, ts := range leftCC.Timespans {
+		for tsIndex, ts := range leftCC.Timespans {
 			if ts.Increments == nil {
 				ts.createIncrementsSlice()
 			}
-			for _, increment := range ts.Increments {
+
+			if tsIndex == 0 && ts.RateInterval.Rating.ConnectFee > 0 && cc.deductConnectFee && ok {
+
+				inc := &Increment{
+					Duration: 0,
+					Cost:     ts.RateInterval.Rating.ConnectFee,
+					BalanceInfo: &DebitInfo{
+						Monetary: &MonetaryInfo{
+							UUID:  debitedConnectFeeBalance.Uuid,
+							ID:    debitedConnectFeeBalance.ID,
+							Value: debitedConnectFeeBalance.Value,
+						},
+						AccountID: ub.ID,
+					},
+				}
+
+				incs := []*Increment{inc}
+				ts.Increments = append(incs, ts.Increments...)
+			}
+
+			for incIndex, increment := range ts.Increments {
+
+				if tsIndex == 0 && incIndex == 0 && ts.RateInterval.Rating.ConnectFee > 0 && cc.deductConnectFee && ok {
+					// go to nextincrement
+					continue
+				}
+
 				cost := increment.Cost
 				defaultBalance := ub.GetDefaultMoneyBalance()
 				defaultBalance.SubstractValue(cost)
@@ -823,7 +835,9 @@ func (acc *Account) Clone() *Account {
 	return newAcc
 }
 
-func (acc *Account) DebitConnectionFee(cc *CallCost, usefulMoneyBalances Balances, count bool, block bool) bool {
+func (acc *Account) DebitConnectionFee(cc *CallCost, usefulMoneyBalances Balances, count bool, block bool) (bool, Balance) {
+	var debitedBalance Balance
+
 	if cc.deductConnectFee {
 		connectFee := cc.GetConnectFee()
 		//log.Print("CONNECT FEE: %f", connectFee)
@@ -836,10 +850,11 @@ func (acc *Account) DebitConnectionFee(cc *CallCost, usefulMoneyBalances Balance
 					acc.countUnits(connectFee, utils.MONETARY, cc, b)
 				}
 				connectFeePaid = true
+				debitedBalance = *b
 				break
 			}
 			if b.Blocker && block { // stop here
-				return false
+				return false, debitedBalance
 			}
 		}
 		// debit connect fee
@@ -848,13 +863,14 @@ func (acc *Account) DebitConnectionFee(cc *CallCost, usefulMoneyBalances Balance
 			// there are no money for the connect fee; go negative
 			b := acc.GetDefaultMoneyBalance()
 			b.SubstractValue(connectFee)
+			debitedBalance = *b
 			// the conect fee is not refundable!
 			if count {
 				acc.countUnits(connectFee, utils.MONETARY, cc, b)
 			}
 		}
 	}
-	return true
+	return true, debitedBalance
 }
 
 func (acc *Account) matchActionFilter(condition string) (bool, error) {

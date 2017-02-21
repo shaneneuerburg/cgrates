@@ -28,6 +28,7 @@ import (
 
 	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
@@ -46,16 +47,16 @@ func init() {
 	case "map":
 		ratingStorage, _ = NewMapStorage()
 		accountingStorage, _ = NewMapStorage()
-	case "mongo":
-		ratingStorage, err = NewMongoStorage("127.0.0.1", "27017", "cgrates_rating_test", "", "", nil, &config.CacheConfig{RatingPlans: &config.CacheParamConfig{Precache: true}}, 10)
+	case utils.MONGO:
+		ratingStorage, err = NewMongoStorage("127.0.0.1", "27017", "cgrates_rating_test", "", "", utils.TariffPlanDB, nil, &config.CacheConfig{RatingPlans: &config.CacheParamConfig{Precache: true}}, 10)
 		if err != nil {
 			log.Fatal(err)
 		}
-		accountingStorage, err = NewMongoStorage("127.0.0.1", "27017", "cgrates_accounting_test", "", "", nil, &config.CacheConfig{RatingPlans: &config.CacheParamConfig{Precache: true}}, 10)
+		accountingStorage, err = NewMongoStorage("127.0.0.1", "27017", "cgrates_accounting_test", "", "", utils.DataDB, nil, &config.CacheConfig{RatingPlans: &config.CacheParamConfig{Precache: true}}, 10)
 		if err != nil {
 			log.Fatal(err)
 		}
-	case "redis":
+	case utils.REDIS:
 		ratingStorage, _ = NewRedisStorage("127.0.0.1:6379", 12, "", utils.MSGPACK, utils.REDIS_MAX_CONNS, &config.CacheConfig{RatingPlans: &config.CacheParamConfig{Precache: true}}, 10)
 		if err != nil {
 			log.Fatal(err)
@@ -150,16 +151,17 @@ type CallDescriptor struct {
 	TOR                                   string            // used unit balances selector
 	ExtraFields                           map[string]string // Extra fields, mostly used for user profile matching
 	// session limits
-	MaxRate         float64
-	MaxRateUnit     time.Duration
-	MaxCostSoFar    float64
-	CgrID           string
-	RunID           string
-	ForceDuration   bool // for Max debit if less than duration return err
-	PerformRounding bool // flag for rating info rounding
-	DryRun          bool
-	account         *Account
-	testCallcost    *CallCost // testing purpose only!
+	MaxRate             float64
+	MaxRateUnit         time.Duration
+	MaxCostSoFar        float64
+	CgrID               string
+	RunID               string
+	ForceDuration       bool // for Max debit if less than duration return err
+	PerformRounding     bool // flag for rating info rounding
+	DryRun              bool
+	DenyNegativeAccount bool // prevent account going on negative during debit
+	account             *Account
+	testCallcost        *CallCost // testing purpose only!
 }
 
 func (cd *CallDescriptor) ValidateCallData() error {
@@ -369,6 +371,7 @@ func (cd *CallDescriptor) splitInTimeSpans() (timespans []*TimeSpan) {
 		}
 		//log.Printf("After SplitByRatingPlan: %+v", utils.ToJSON(timespans))
 		// split on days
+
 		for i := 0; i < len(timespans); i++ {
 			rp := timespans[i].ratingInfo
 			newTs := timespans[i].SplitByDay()
@@ -385,6 +388,7 @@ func (cd *CallDescriptor) splitInTimeSpans() (timespans []*TimeSpan) {
 	}
 	//log.Printf("After SplitByDay: %+v", utils.ToJSON(timespans))
 	// split on rate intervals
+
 	for i := 0; i < len(timespans); i++ {
 		//log.Printf("==============%v==================", i)
 		//log.Printf("TS: %+v", timespans[i])
@@ -500,6 +504,7 @@ func (cd *CallDescriptor) GetCost() (*CallCost, error) {
 }
 
 func (cd *CallDescriptor) getCost() (*CallCost, error) {
+
 	// check for 0 duration
 	if cd.GetDuration() == 0 {
 		cc := cd.CreateCallCost()
@@ -632,7 +637,7 @@ func (cd *CallDescriptor) GetMaxSessionDuration() (duration time.Duration, err e
 		return 0, err
 	} else {
 		if memberIds, err := account.GetUniqueSharedGroupMembers(cd); err == nil {
-			if _, err := Guardian.Guard(func() (interface{}, error) {
+			if _, err := guardian.Guardian.Guard(func() (interface{}, error) {
 				duration, err = cd.getMaxSessionDuration(account)
 				return 0, err
 			}, 0, memberIds.Slice()...); err != nil {
@@ -698,8 +703,8 @@ func (cd *CallDescriptor) Debit() (cc *CallCost, err error) {
 		return nil, err
 	} else {
 		if memberIds, sgerr := account.GetUniqueSharedGroupMembers(cd); sgerr == nil {
-			_, err = Guardian.Guard(func() (interface{}, error) {
-				cc, err = cd.debit(account, cd.DryRun, true)
+			_, err = guardian.Guardian.Guard(func() (interface{}, error) {
+				cc, err = cd.debit(account, cd.DryRun, !cd.DenyNegativeAccount)
 				return 0, err
 			}, 0, memberIds.Slice()...)
 		} else {
@@ -720,7 +725,7 @@ func (cd *CallDescriptor) MaxDebit() (cc *CallCost, err error) {
 	} else {
 		//log.Printf("ACC: %+v", account)
 		if memberIDs, err := account.GetUniqueSharedGroupMembers(cd); err == nil {
-			_, err = Guardian.Guard(func() (interface{}, error) {
+			_, err = guardian.Guardian.Guard(func() (interface{}, error) {
 				remainingDuration, err := cd.getMaxSessionDuration(account)
 				if err != nil && cd.GetDuration() > 0 {
 					return 0, err
@@ -754,7 +759,7 @@ func (cd *CallDescriptor) MaxDebit() (cc *CallCost, err error) {
 					cd.DurationIndex -= initialDuration - remainingDuration
 				}
 				//log.Print("Remaining duration: ", remainingDuration)
-				cc, err = cd.debit(account, cd.DryRun, true)
+				cc, err = cd.debit(account, cd.DryRun, !cd.DenyNegativeAccount)
 				//log.Print(balanceMap[0].Value, balanceMap[1].Value)
 				return 0, err
 			}, 0, memberIDs.Slice()...)
@@ -779,7 +784,7 @@ func (cd *CallDescriptor) RefundIncrements() error {
 		}
 	}
 	// start increment refunding loop
-	_, err := Guardian.Guard(func() (interface{}, error) {
+	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
 		accountsCache := make(map[string]*Account)
 		for _, increment := range cd.Increments {
 			account, found := accountsCache[increment.BalanceInfo.AccountID]
@@ -828,7 +833,7 @@ func (cd *CallDescriptor) RefundRounding() error {
 		accMap[inc.BalanceInfo.AccountID] = true
 	}
 	// start increment refunding loop
-	_, err := Guardian.Guard(func() (interface{}, error) {
+	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
 		accountsCache := make(map[string]*Account)
 		for _, increment := range cd.Increments {
 			account, found := accountsCache[increment.BalanceInfo.AccountID]
@@ -857,14 +862,6 @@ func (cd *CallDescriptor) RefundRounding() error {
 		return 0, nil
 	}, 0, accMap.Slice()...)
 	return err
-}
-
-func (cd *CallDescriptor) FlushCache() (err error) {
-	cache.Flush()
-	ratingStorage.PreloadRatingCache()
-	accountingStorage.PreloadAccountingCache()
-	return nil
-
 }
 
 // Creates a CallCost structure copying related data from CallDescriptor

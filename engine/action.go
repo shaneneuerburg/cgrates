@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 	"github.com/mitchellh/mapstructure"
@@ -52,24 +53,23 @@ type Action struct {
 }
 
 const (
-	LOG             = "*log"
-	RESET_TRIGGERS  = "*reset_triggers"
-	SET_RECURRENT   = "*set_recurrent"
-	UNSET_RECURRENT = "*unset_recurrent"
-	ALLOW_NEGATIVE  = "*allow_negative"
-	DENY_NEGATIVE   = "*deny_negative"
-	RESET_ACCOUNT   = "*reset_account"
-	REMOVE_ACCOUNT  = "*remove_account"
-	SET_BALANCE     = "*set_balance"
-	REMOVE_BALANCE  = "*remove_balance"
-	TOPUP_RESET     = "*topup_reset"
-	TOPUP           = "*topup"
-	DEBIT_RESET     = "*debit_reset"
-	DEBIT           = "*debit"
-	RESET_COUNTERS  = "*reset_counters"
-	ENABLE_ACCOUNT  = "*enable_account"
-	DISABLE_ACCOUNT = "*disable_account"
-	//ENABLE_DISABLE_BALANCE    = "*enable_disable_balance"
+	LOG                       = "*log"
+	RESET_TRIGGERS            = "*reset_triggers"
+	SET_RECURRENT             = "*set_recurrent"
+	UNSET_RECURRENT           = "*unset_recurrent"
+	ALLOW_NEGATIVE            = "*allow_negative"
+	DENY_NEGATIVE             = "*deny_negative"
+	RESET_ACCOUNT             = "*reset_account"
+	REMOVE_ACCOUNT            = "*remove_account"
+	SET_BALANCE               = "*set_balance"
+	REMOVE_BALANCE            = "*remove_balance"
+	TOPUP_RESET               = "*topup_reset"
+	TOPUP                     = "*topup"
+	DEBIT_RESET               = "*debit_reset"
+	DEBIT                     = "*debit"
+	RESET_COUNTERS            = "*reset_counters"
+	ENABLE_ACCOUNT            = "*enable_account"
+	DISABLE_ACCOUNT           = "*disable_account"
 	CALL_URL                  = "*call_url"
 	CALL_URL_ASYNC            = "*call_url_async"
 	MAIL_ASYNC                = "*mail_async"
@@ -81,38 +81,30 @@ const (
 )
 
 func (a *Action) Clone() *Action {
-	return &Action{
-		Id:         a.Id,
-		ActionType: a.ActionType,
-		//BalanceType:      a.BalanceType,
-		ExtraParameters:  a.ExtraParameters,
-		ExpirationString: a.ExpirationString,
-		Weight:           a.Weight,
-		Balance:          a.Balance,
-	}
+	var clonedAction Action
+	utils.Clone(a, &clonedAction)
+	return &clonedAction
 }
 
 type actionTypeFunc func(*Account, *StatsQueueTriggered, *Action, Actions) error
 
 func getActionFunc(typ string) (actionTypeFunc, bool) {
 	actionFuncMap := map[string]actionTypeFunc{
-		LOG:             logAction,
-		CDRLOG:          cdrLogAction,
-		RESET_TRIGGERS:  resetTriggersAction,
-		SET_RECURRENT:   setRecurrentAction,
-		UNSET_RECURRENT: unsetRecurrentAction,
-		ALLOW_NEGATIVE:  allowNegativeAction,
-		DENY_NEGATIVE:   denyNegativeAction,
-		RESET_ACCOUNT:   resetAccountAction,
-		TOPUP_RESET:     topupResetAction,
-		TOPUP:           topupAction,
-		DEBIT_RESET:     debitResetAction,
-		DEBIT:           debitAction,
-		RESET_COUNTERS:  resetCountersAction,
-		ENABLE_ACCOUNT:  enableAccountAction,
-		DISABLE_ACCOUNT: disableAccountAction,
-		//case ENABLE_DISABLE_BALANCE:
-		//	return enableDisableBalanceAction, true
+		LOG:                       logAction,
+		CDRLOG:                    cdrLogAction,
+		RESET_TRIGGERS:            resetTriggersAction,
+		SET_RECURRENT:             setRecurrentAction,
+		UNSET_RECURRENT:           unsetRecurrentAction,
+		ALLOW_NEGATIVE:            allowNegativeAction,
+		DENY_NEGATIVE:             denyNegativeAction,
+		RESET_ACCOUNT:             resetAccountAction,
+		TOPUP_RESET:               topupResetAction,
+		TOPUP:                     topupAction,
+		DEBIT_RESET:               debitResetAction,
+		DEBIT:                     debitAction,
+		RESET_COUNTERS:            resetCountersAction,
+		ENABLE_ACCOUNT:            enableAccountAction,
+		DISABLE_ACCOUNT:           disableAccountAction,
 		CALL_URL:                  callUrl,
 		CALL_URL_ASYNC:            callUrlAsync,
 		MAIL_ASYNC:                mailAsync,
@@ -421,9 +413,12 @@ func callUrl(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actions) error
 		return err
 	}
 	cfg := config.CgrConfig()
-	fallbackPath := path.Join(cfg.HttpFailedDir, fmt.Sprintf("act_%s_%s_%s.json", a.ActionType, a.ExtraParameters, utils.GenUUID()))
+	ffn := &utils.FallbackFileName{Module: fmt.Sprintf("%s>%s", utils.ActionsPoster, a.ActionType),
+		Transport: utils.MetaHTTPjson, Address: a.ExtraParameters,
+		RequestID: utils.GenUUID(), FileSuffix: utils.JSNSuffix}
 	_, err = utils.NewHTTPPoster(config.CgrConfig().HttpSkipTlsVerify,
-		config.CgrConfig().ReplyTimeout).Post(a.ExtraParameters, utils.CONTENT_JSON, jsn, config.CgrConfig().HttpPosterAttempts, fallbackPath)
+		config.CgrConfig().ReplyTimeout).Post(a.ExtraParameters, utils.CONTENT_JSON, jsn,
+		config.CgrConfig().PosterAttempts, path.Join(cfg.FailedPostsDir, ffn.AsString()))
 	return err
 }
 
@@ -441,9 +436,12 @@ func callUrlAsync(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actions) 
 		return err
 	}
 	cfg := config.CgrConfig()
-	fallbackPath := path.Join(cfg.HttpFailedDir, fmt.Sprintf("act_%s_%s_%s.json", a.ActionType, a.ExtraParameters, utils.GenUUID()))
+	ffn := &utils.FallbackFileName{Module: fmt.Sprintf("%s>%s", utils.ActionsPoster, a.ActionType),
+		Transport: utils.MetaHTTPjson, Address: a.ExtraParameters,
+		RequestID: utils.GenUUID(), FileSuffix: utils.JSNSuffix}
 	go utils.NewHTTPPoster(config.CgrConfig().HttpSkipTlsVerify,
-		config.CgrConfig().ReplyTimeout).Post(a.ExtraParameters, utils.CONTENT_JSON, jsn, config.CgrConfig().HttpPosterAttempts, fallbackPath)
+		config.CgrConfig().ReplyTimeout).Post(a.ExtraParameters, utils.CONTENT_JSON, jsn,
+		config.CgrConfig().PosterAttempts, path.Join(cfg.FailedPostsDir, ffn.AsString()))
 	return nil
 }
 
@@ -492,7 +490,7 @@ func mailAsync(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actions) err
 	return nil
 }
 
-func setddestinations(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actions) error {
+func setddestinations(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actions) (err error) {
 	var ddcDestId string
 	for _, bchain := range ub.BalanceMap {
 		for _, b := range bchain {
@@ -520,12 +518,19 @@ func setddestinations(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actio
 		}
 		newDest := &Destination{Id: ddcDestId, Prefixes: prefixes}
 		oldDest, err := ratingStorage.GetDestination(ddcDestId, false, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
 		// update destid in storage
-		ratingStorage.SetDestination(newDest, utils.NonTransactional)
+		if err = ratingStorage.SetDestination(newDest, utils.NonTransactional); err != nil {
+			return err
+		}
+		if err = ratingStorage.CacheDataFromDB(utils.DESTINATION_PREFIX, []string{ddcDestId}, true); err != nil {
+			return err
+		}
 
 		if err == nil && oldDest != nil {
-			err = ratingStorage.UpdateReverseDestination(oldDest, newDest, utils.NonTransactional)
-			if err != nil {
+			if err = ratingStorage.UpdateReverseDestination(oldDest, newDest, utils.NonTransactional); err != nil {
 				return err
 			}
 		}
@@ -536,6 +541,7 @@ func setddestinations(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actio
 }
 
 func removeAccountAction(ub *Account, sq *StatsQueueTriggered, a *Action, acs Actions) error {
+
 	var accID string
 	if ub != nil {
 		accID = ub.ID
@@ -554,31 +560,39 @@ func removeAccountAction(ub *Account, sq *StatsQueueTriggered, a *Action, acs Ac
 	if accID == "" {
 		return utils.ErrInvalidKey
 	}
+
 	if err := accountingStorage.RemoveAccount(accID); err != nil {
 		utils.Logger.Err(fmt.Sprintf("Could not remove account Id: %s: %v", accID, err))
 		return err
 	}
-	_, err := Guardian.Guard(func() (interface{}, error) {
-		// clean the account id from all action plans
-		allAPs, err := ratingStorage.GetAllActionPlans()
+
+	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
+		acntAPids, err := ratingStorage.GetAccountActionPlans(accID, false, utils.NonTransactional)
 		if err != nil && err != utils.ErrNotFound {
 			utils.Logger.Err(fmt.Sprintf("Could not get action plans: %s: %v", accID, err))
 			return 0, err
 		}
-		//var dirtyAps []string
-		for key, ap := range allAPs {
-			if _, exists := ap.AccountIDs[accID]; !exists {
-				// save action plan
-				delete(ap.AccountIDs, key)
-				ratingStorage.SetActionPlan(key, ap, true, utils.NonTransactional)
-				//dirtyAps = append(dirtyAps, utils.ACTION_PLAN_PREFIX+key)
+		for _, apID := range acntAPids {
+			ap, err := ratingStorage.GetActionPlan(apID, false, utils.NonTransactional)
+			if err != nil {
+				utils.Logger.Err(fmt.Sprintf("Could not retrieve action plan: %s: %v", apID, err))
+				return 0, err
+			}
+			delete(ap.AccountIDs, accID)
+			if err := ratingStorage.SetActionPlan(apID, ap, true, utils.NonTransactional); err != nil {
+				utils.Logger.Err(fmt.Sprintf("Could not save action plan: %s: %v", apID, err))
+				return 0, err
 			}
 		}
-		/*if len(dirtyAps) > 0 {
-			// cache
-			ratingStorage.CacheRatingPrefixValues("RemoveAccountAction", map[string][]string{
-				utils.ACTION_PLAN_PREFIX: dirtyAps})
-		}*/
+		if err = ratingStorage.CacheDataFromDB(utils.ACTION_PLAN_PREFIX, acntAPids, true); err != nil {
+			return 0, err
+		}
+		if err = ratingStorage.RemAccountActionPlans(accID, nil); err != nil {
+			return 0, err
+		}
+		if err = ratingStorage.CacheDataFromDB(utils.AccountActionPlansPrefix, []string{accID}, true); err != nil && err.Error() != utils.ErrNotFound.Error() {
+			return 0, err
+		}
 		return 0, nil
 
 	}, 0, utils.ACTION_PLAN_PREFIX)
@@ -748,4 +762,22 @@ func (apl Actions) Less(j, i int) bool {
 
 func (apl Actions) Sort() {
 	sort.Sort(apl)
+}
+
+func (apl Actions) Clone() (interface{}, error) {
+	var cln Actions
+	if err := utils.Clone(apl, &cln); err != nil {
+		return nil, err
+	}
+	for i, act := range apl { // Fix issues with gob cloning nil pointer towards false value
+		if act.Balance != nil {
+			if act.Balance.Disabled != nil && !*act.Balance.Disabled {
+				cln[i].Balance.Disabled = utils.BoolPointer(*act.Balance.Disabled)
+			}
+			if act.Balance.Blocker != nil && !*act.Balance.Blocker {
+				cln[i].Balance.Blocker = utils.BoolPointer(*act.Balance.Blocker)
+			}
+		}
+	}
+	return cln, nil
 }

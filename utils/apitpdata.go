@@ -38,10 +38,55 @@ type Paginator struct {
 	SearchTerm string // Global matching pattern in items returned, partially used in some APIs
 }
 
-type TPDestination struct {
+func (pgnt *Paginator) PaginateStringSlice(in []string) (out []string) {
+	if len(in) == 0 {
+		return
+	}
+	var limit, offset int
+	if pgnt.Limit != nil && *pgnt.Limit > 0 {
+		limit = *pgnt.Limit
+	}
+	if pgnt.Offset != nil && *pgnt.Offset > 0 {
+		offset = *pgnt.Offset
+	}
+	if limit == 0 && offset == 0 {
+		return in
+	}
+	if offset > len(in) {
+		return
+	}
+	if offset != 0 {
+		limit = limit + offset
+	}
+	if limit == 0 {
+		limit = len(in[offset:])
+	} else if limit > len(in) {
+		limit = len(in)
+	}
+	ret := in[offset:limit]
+	out = make([]string, len(ret))
+	for i, itm := range ret {
+		out[i] = itm
+	}
+	return
+}
+
+// Deprecated version of TPDestination
+type V1TPDestination struct {
 	TPid          string   // Tariff plan id
 	DestinationId string   // Destination id
 	Prefixes      []string // Prefixes attached to this destination
+}
+
+func (v1TPDst *V1TPDestination) AsTPDestination() *TPDestination {
+	return &TPDestination{TPid: v1TPDst.TPid, Tag: v1TPDst.DestinationId, Prefixes: v1TPDst.Prefixes}
+}
+
+// TPDestination represents one destination in storDB
+type TPDestination struct {
+	TPid     string   // Tariff plan id
+	Tag      string   // Destination id
+	Prefixes []string // Prefixes attached to this destination
 }
 
 // This file deals with tp_* data definition
@@ -172,7 +217,6 @@ func (self *TPRatingPlanBinding) Timing() *TPTiming {
 
 // Used to rebuild a TPRatingProfile (empty RatingPlanActivations) out of it's key in nosqldb
 func NewTPRatingProfileFromKeyId(tpid, loadId, keyId string) (*TPRatingProfile, error) {
-	// *out:cgrates.org:call:*any
 	s := strings.Split(keyId, ":")
 	if len(s) != 4 {
 		return nil, fmt.Errorf("Cannot parse key %s into RatingProfile", keyId)
@@ -548,18 +592,35 @@ type AttrGetAccounts struct {
 	Limit      int // Limit number of items retrieved
 }
 
+type ArgsCache struct {
+	DestinationIDs        *[]string
+	ReverseDestinationIDs *[]string
+	RatingPlanIDs         *[]string
+	RatingProfileIDs      *[]string
+	ActionIDs             *[]string
+	ActionPlanIDs         *[]string
+	AccountActionPlanIDs  *[]string
+	ActionTriggerIDs      *[]string
+	SharedGroupIDs        *[]string
+	LCRids                *[]string
+	DerivedChargerIDs     *[]string
+	AliasIDs              *[]string
+	ReverseAliasIDs       *[]string
+	ResourceLimitIDs      *[]string
+}
+
 // Data used to do remote cache reloads via api
 type AttrReloadCache struct {
-	DestinationIds   *[]string
-	RatingPlanIds    *[]string
-	RatingProfileIds *[]string
-	ActionIds        *[]string
-	ActionPlanIds    *[]string
-	SharedGroupIds   *[]string
-	LCRIds           *[]string
-	DerivedChargers  *[]string
-	Aliases          *[]string
-	ResourceLimits   *[]string
+	ArgsCache
+	FlushAll bool // If provided, cache flush will be executed before any action
+}
+
+type ArgsCacheKeys struct {
+	ArgsCache
+	Paginator
+}
+
+type CacheKeys struct {
 }
 
 type AttrCacheStats struct { // Add in the future filters here maybe so we avoid counting complete cache
@@ -572,6 +633,7 @@ type CacheStats struct {
 	RatingProfiles      int
 	Actions             int
 	ActionPlans         int
+	AccountActionPlans  int
 	SharedGroups        int
 	DerivedChargers     int
 	LcrProfiles         int
@@ -620,6 +682,7 @@ func (self *AttrExpFileCdrs) AsCDRsFilter(timezone string) (*CDRsFilter, error) 
 	cdrFltr := &CDRsFilter{
 		CGRIDs:              self.CgrIds,
 		RunIDs:              self.MediationRunIds,
+		NotRunIDs:           []string{MetaRaw}, // In exportv1 automatically filter out *raw CDRs
 		ToRs:                self.TORs,
 		OriginHosts:         self.CdrHosts,
 		Sources:             self.CdrSources,
@@ -791,6 +854,9 @@ func (attrRateCDRs *AttrRateCdrs) AsCDRsFilter(timezone string) (*CDRsFilter, er
 		}
 	} else if attrRateCDRs.RerateRated {
 		cdrFltr.MinCost = Float64Pointer(0.0)
+	}
+	if attrRateCDRs.RerateErrors || attrRateCDRs.RerateRated {
+		cdrFltr.NotRunIDs = append(cdrFltr.NotRunIDs, MetaRaw)
 	}
 	return cdrFltr, nil
 }
@@ -1069,22 +1135,6 @@ func (self *RPCCDRsFilter) AsCDRsFilter(timezone string) (*CDRsFilter, error) {
 		}
 	}
 	return cdrFltr, nil
-}
-
-type AttrExportCdrsToFile struct {
-	CdrFormat                  *string  // Cdr output file format <utils.CdreCdrFormats>
-	FieldSeparator             *string  // Separator used between fields
-	ExportID                   *string  // Optional exportid
-	ExportDirectory            *string  // If provided it overwrites the configured export directory
-	ExportFileName             *string  // If provided the output filename will be set to this
-	ExportTemplate             *string  // Exported fields template  <""|fld1,fld2|*xml:instance_name>
-	DataUsageMultiplyFactor    *float64 // Multiply data usage before export (eg: convert from KBytes to Bytes)
-	SMSUsageMultiplyFactor     *float64 // Multiply sms usage before export (eg: convert from SMS unit to call duration for some billing systems)
-	MMSUsageMultiplyFactor     *float64 // Multiply mms usage before export (eg: convert from MMS unit to call duration for some billing systems)
-	GenericUsageMultiplyFactor *float64 // Multiply generic usage before export (eg: convert from GENERIC unit to call duration for some billing systems)
-	CostMultiplyFactor         *float64 // Multiply the cost before export, eg: apply VAT
-	Verbose                    bool     // Disable CgrIds reporting in reply/ExportedCgrIds and reply/UnexportedCgrIds
-	RPCCDRsFilter                       // Inherit the CDR filter attributes
 }
 
 type AttrSetActions struct {

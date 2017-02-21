@@ -26,7 +26,7 @@ import (
 	"github.com/cgrates/cgrates/balancer2go"
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/history"
-	"github.com/cgrates/cgrates/scheduler"
+	"github.com/cgrates/cgrates/servmanager"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
@@ -50,10 +50,10 @@ func startBalancer(internalBalancerChan chan *balancer2go.Balancer, stopHandled 
 }
 
 // Starts rater and reports on chan
-func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneChan chan struct{}, internalBalancerChan chan *balancer2go.Balancer, internalSchedulerChan chan *scheduler.Scheduler,
+func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneChan chan struct{}, internalBalancerChan chan *balancer2go.Balancer,
 	internalCdrStatSChan chan rpcclient.RpcClientConnection, internalHistorySChan chan rpcclient.RpcClientConnection,
 	internalPubSubSChan chan rpcclient.RpcClientConnection, internalUserSChan chan rpcclient.RpcClientConnection, internalAliaseSChan chan rpcclient.RpcClientConnection,
-	server *utils.Server,
+	serviceManager *servmanager.ServiceManager, server *utils.Server,
 	ratingDb engine.RatingStorage, accountDb engine.AccountingStorage, loadDb engine.LoadStorage, cdrDb engine.CdrStorage, stopHandled *bool, exitChan chan bool) {
 	var waitTasks []chan struct{}
 
@@ -63,15 +63,63 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 	go func() {
 		defer close(cacheTaskChan)
 
-		loadHist, err := accountDb.GetLoadHistory(1, true, utils.NonTransactional)
+		/*loadHist, err := accountDb.GetLoadHistory(1, true, utils.NonTransactional)
 		if err != nil || len(loadHist) == 0 {
 			utils.Logger.Info(fmt.Sprintf("could not get load history: %v (%v)", loadHist, err))
 			cacheDoneChan <- struct{}{}
 			return
 		}
-
-		if err := ratingDb.PreloadRatingCache(); err != nil {
-			utils.Logger.Crit(fmt.Sprintf("Cache rating error: %s", err.Error()))
+		*/
+		var dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs, alsIDs, rvAlsIDs, rlIDs []string
+		if !cfg.CacheConfig.Destinations.Precache {
+			dstIDs = make([]string, 0) // Don't cache any
+		}
+		if !cfg.CacheConfig.ReverseDestinations.Precache {
+			rvDstIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.RatingPlans.Precache {
+			rplIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.RatingProfiles.Precache {
+			rpfIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.Actions.Precache {
+			actIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.ActionPlans.Precache {
+			aplIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.AccountActionPlans.Precache {
+			aapIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.ActionTriggers.Precache {
+			atrgIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.SharedGroups.Precache {
+			sgIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.Lcr.Precache {
+			lcrIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.DerivedChargers.Precache {
+			dcIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.Aliases.Precache {
+			alsIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.ReverseAliases.Precache {
+			rvAlsIDs = make([]string, 0)
+		}
+		if !cfg.CacheConfig.ResourceLimits.Precache {
+			rlIDs = make([]string, 0)
+		}
+		if err := ratingDb.LoadRatingCache(dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs); err != nil {
+			utils.Logger.Crit(fmt.Sprintf("<RALs> Cache rating error: %s", err.Error()))
+			exitChan <- true
+			return
+		}
+		if err := accountDb.LoadAccountingCache(alsIDs, rvAlsIDs, rlIDs); err != nil {
+			utils.Logger.Crit(fmt.Sprintf("<RALs> Cache accounting error: %s", err.Error()))
 			exitChan <- true
 			return
 		}
@@ -79,24 +127,6 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 		cacheDoneChan <- struct{}{}
 	}()
 
-	// Retrieve scheduler for it's API methods
-	var sched *scheduler.Scheduler // Need the scheduler in APIer
-	if cfg.SchedulerEnabled {
-		schedTaskChan := make(chan struct{})
-		waitTasks = append(waitTasks, schedTaskChan)
-		go func() {
-			defer close(schedTaskChan)
-			select {
-			case sched = <-internalSchedulerChan:
-				internalSchedulerChan <- sched
-			case <-time.After(cfg.InternalTtl):
-				utils.Logger.Crit("<Rater>: Internal scheduler connection timeout.")
-				exitChan <- true
-				return
-			}
-
-		}()
-	}
 	var bal *balancer2go.Balancer
 	if cfg.RALsBalancer != "" { // Connection to balancer
 		balTaskChan := make(chan struct{})
@@ -200,8 +230,8 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 	}
 	responder := &engine.Responder{Bal: bal, ExitChan: exitChan}
 	responder.SetTimeToLive(cfg.ResponseCacheTTL, nil)
-	apierRpcV1 := &v1.ApierV1{StorDb: loadDb, RatingDb: ratingDb, AccountDb: accountDb, CdrDb: cdrDb, Sched: sched,
-		Config: cfg, Responder: responder}
+	apierRpcV1 := &v1.ApierV1{StorDb: loadDb, RatingDb: ratingDb, AccountDb: accountDb, CdrDb: cdrDb,
+		Config: cfg, Responder: responder, ServManager: serviceManager, HTTPPoster: utils.NewHTTPPoster(cfg.HttpSkipTlsVerify, cfg.ReplyTimeout)}
 	if cdrStats != nil { // ToDo: Fix here properly the init of stats
 		responder.Stats = cdrStats
 		apierRpcV1.CdrStatsSrv = cdrStats
@@ -212,7 +242,6 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 	apierRpcV2 := &v2.ApierV2{
 		ApierV1: *apierRpcV1}
 
-	// internalSchedulerChan shared here
 	server.RpcRegister(responder)
 	server.RpcRegister(apierRpcV1)
 	server.RpcRegister(apierRpcV2)

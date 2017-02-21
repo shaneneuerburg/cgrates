@@ -111,8 +111,8 @@ TOPUP10_AT,TOPUP10_AC1,ASAP,10`
 		t.Error("No account saved")
 	}
 	cache.Flush()
-	ratingDb.PreloadRatingCache()
-	acntDb.PreloadAccountingCache()
+	ratingDb.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	acntDb.LoadAccountingCache(nil, nil, nil)
 
 	if cachedDests := cache.CountEntries(utils.DESTINATION_PREFIX); cachedDests != 0 {
 		t.Error("Wrong number of cached destinations found", cachedDests)
@@ -129,7 +129,7 @@ TOPUP10_AT,TOPUP10_AC1,ASAP,10`
 }
 
 func TestExecuteActions(t *testing.T) {
-	scheduler.NewScheduler(ratingDb).Reload(false)
+	scheduler.NewScheduler(ratingDb).Reload()
 	time.Sleep(10 * time.Millisecond) // Give time to scheduler to topup the account
 	if acnt, err := acntDb.GetAccount("cgrates.org:12344"); err != nil {
 		t.Error(err)

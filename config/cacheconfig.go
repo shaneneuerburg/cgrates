@@ -57,10 +57,13 @@ type CacheConfig struct {
 	CdrStats            *CacheParamConfig
 	Actions             *CacheParamConfig
 	ActionPlans         *CacheParamConfig
+	AccountActionPlans  *CacheParamConfig
 	ActionTriggers      *CacheParamConfig
 	SharedGroups        *CacheParamConfig
 	Aliases             *CacheParamConfig
 	ReverseAliases      *CacheParamConfig
+	DerivedChargers     *CacheParamConfig
+	ResourceLimits      *CacheParamConfig
 }
 
 func (self *CacheConfig) loadFromJsonCfg(jsnCfg *CacheJsonCfg) error {
@@ -112,6 +115,12 @@ func (self *CacheConfig) loadFromJsonCfg(jsnCfg *CacheJsonCfg) error {
 			return err
 		}
 	}
+	if jsnCfg.Account_action_plans != nil {
+		self.AccountActionPlans = &CacheParamConfig{}
+		if err := self.AccountActionPlans.loadFromJsonCfg(jsnCfg.Account_action_plans); err != nil {
+			return err
+		}
+	}
 	if jsnCfg.Action_triggers != nil {
 		self.ActionTriggers = &CacheParamConfig{}
 		if err := self.ActionTriggers.loadFromJsonCfg(jsnCfg.Action_triggers); err != nil {
@@ -133,6 +142,18 @@ func (self *CacheConfig) loadFromJsonCfg(jsnCfg *CacheJsonCfg) error {
 	if jsnCfg.Reverse_aliases != nil {
 		self.ReverseAliases = &CacheParamConfig{}
 		if err := self.ReverseAliases.loadFromJsonCfg(jsnCfg.Reverse_aliases); err != nil {
+			return err
+		}
+	}
+	if jsnCfg.Derived_chargers != nil {
+		self.DerivedChargers = &CacheParamConfig{}
+		if err := self.DerivedChargers.loadFromJsonCfg(jsnCfg.Derived_chargers); err != nil {
+			return err
+		}
+	}
+	if jsnCfg.Resource_limits != nil {
+		self.ResourceLimits = &CacheParamConfig{}
+		if err := self.ResourceLimits.loadFromJsonCfg(jsnCfg.Resource_limits); err != nil {
 			return err
 		}
 	}

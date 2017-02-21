@@ -184,6 +184,7 @@ FILTER,*topup,,"{""*and"":[{""Value"":{""*lt"":0}},{""Id"":{""*eq"":""*default""
 EXP,*topup,,,,*voice,*out,,,,,*monthly,*any,300,10,false,false,10
 NOEXP,*topup,,,,*voice,*out,,,,,*unlimited,*any,50,10,false,false,10
 VF,*debit,,,,*monetary,*out,,,,,*unlimited,*any,"{""Method"":""*incremental"",""Params"":{""Units"":10, ""Interval"":""month"", ""Increment"":""day""}}",10,false,false,10
+TOPUP_RST_GNR_1000,*topup_reset,"{""*voice"": 60.0,""*data"":1024.0,""*sms"":1.0}",,,*generic,*out,,*any,,,*unlimited,,1000,20,false,false,10
 `
 	actionPlans = `
 MORE_MINUTES,MINI,ONE_TIME_RUN,10
@@ -334,8 +335,8 @@ func init() {
 	}
 	csvr.WriteToDatabase(false, false, false)
 	cache.Flush()
-	ratingStorage.PreloadRatingCache()
-	accountingStorage.PreloadAccountingCache()
+	ratingStorage.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	accountingStorage.LoadAccountingCache(nil, nil, nil)
 }
 
 func TestLoadDestinations(t *testing.T) {
@@ -381,6 +382,30 @@ func TestLoadDestinations(t *testing.T) {
 				t.Error("Faild to load destinations", d)
 			}
 		}
+	}
+}
+
+func TestLoadReverseDestinations(t *testing.T) {
+	eRevDsts := map[string][]string{
+		"444":     []string{"EU_LANDLINE"},
+		"0257":    []string{"NAT"},
+		"112":     []string{"URG"},
+		"49":      []string{"ALL GERMANY"},
+		"+4972":   []string{"PSTN_72"},
+		"999":     []string{"EXOTIC"},
+		"+4970":   []string{"PSTN_70"},
+		"41":      []string{"ALL GERMANY_O2"},
+		"0724":    []string{"RET"},
+		"0723045": []string{"SPEC"},
+		"43":      []string{"GERMANY_PREMIUM ALL"},
+		"0256":    []string{"NAT"},
+		"+49":     []string{"NAT"},
+		"+4971":   []string{"PSTN_71"},
+		"447956":  []string{"DST_UK_Mobile_BIG5"},
+		"0723":    []string{"RET NAT"},
+	}
+	if len(eRevDsts) != len(csvr.revDests) {
+		t.Errorf("Expecting: %+v, received: %+v", eRevDsts, csvr.revDests)
 	}
 }
 
@@ -850,7 +875,7 @@ func TestLoadRatingProfiles(t *testing.T) {
 }
 
 func TestLoadActions(t *testing.T) {
-	if len(csvr.actions) != 15 {
+	if len(csvr.actions) != 16 {
 		t.Error("Failed to load actions: ", len(csvr.actions))
 	}
 	as1 := csvr.actions["MINI"]
@@ -946,6 +971,30 @@ func TestLoadActions(t *testing.T) {
 	}
 	if !reflect.DeepEqual(as3, expected) {
 		t.Errorf("Error loading action: %+v", as3[0].Balance)
+	}
+	asGnrc := csvr.actions["TOPUP_RST_GNR_1000"]
+	//TOPUP_RST_GNR_1000,*topup_reset,"{""*voice"": 60.0,""*data"":1024.0,""*sms"":1.0}",,,*generic,*out,,*any,,,*unlimited,,1000,20,false,false,10
+	expected = []*Action{
+		&Action{
+			Id:               "TOPUP_RST_GNR_1000",
+			ActionType:       TOPUP_RESET,
+			ExtraParameters:  `{"*voice": 60.0,"*data":1024.0,"*sms":1.0}`,
+			Weight:           10,
+			ExpirationString: utils.UNLIMITED,
+			Balance: &BalanceFilter{
+				Uuid:       asGnrc[0].Balance.Uuid,
+				Type:       utils.StringPointer(utils.GENERIC),
+				Directions: utils.StringMapPointer(utils.NewStringMap(utils.OUT)),
+				//DestinationIDs: utils.StringMapPointer(utils.NewStringMap("*any")),
+				Value:    &utils.ValueFormula{Static: 1000},
+				Weight:   utils.Float64Pointer(20),
+				Disabled: utils.BoolPointer(false),
+				Blocker:  utils.BoolPointer(false),
+			},
+		},
+	}
+	if !reflect.DeepEqual(asGnrc, expected) {
+		t.Errorf("Expecting: %+v, received: %+v", expected[0].Balance, asGnrc[0].Balance)
 	}
 }
 
@@ -1309,6 +1358,21 @@ func TestLoadAliases(t *testing.T) {
 			t.Logf("Value: %+v", value)
 		}
 		t.Errorf("Unexpected alias %+v", csvr.aliases[alias1.GetId()])
+	}
+}
+
+func TestLoadReverseAliases(t *testing.T) {
+	eRevAliases := map[string][]string{
+		"minuAccount*rating": []string{"*out:cgrates.org:call:remo:remo:*rating:*any", "*out:vdf:0:a1:a1:*rating:*any"},
+		"dan1Subject*rating": []string{"*out:cgrates.org:call:dan:dan:*rating:EU_LANDLINE"},
+		"rif1Subject*rating": []string{"*out:cgrates.org:call:dan:dan:*rating:EU_LANDLINE", "*any:*any:*any:*any:*any:*rating:*any"},
+		"0724Cli*rating":     []string{"*out:cgrates.org:call:dan:dan:*rating:EU_LANDLINE"},
+		"dan2Subject*rating": []string{"*out:cgrates.org:call:dan:dan:*rating:GLOBAL1"},
+		"dan1Account*rating": []string{"*any:*any:*any:*any:*any:*rating:*any"},
+		"minuSubject*rating": []string{"*out:cgrates.org:call:remo:remo:*rating:*any", "*out:vdf:0:a1:a1:*rating:*any"},
+	}
+	if len(eRevAliases) != len(csvr.revAliases) {
+		t.Errorf("Expecting: %+v, received: %+v", eRevAliases, csvr.revAliases)
 	}
 }
 

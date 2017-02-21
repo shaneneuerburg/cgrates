@@ -1,3 +1,5 @@
+// +build integration
+
 /*
 Real-time Online/Offline Charging System (OCS) for Telecom & ISP environments
 Copyright (C) ITsysCOM GmbH
@@ -30,19 +32,14 @@ import (
 	"github.com/cgrates/cgrates/utils"
 )
 
-var testIntegration = flag.Bool("integration", false, "Perform the tests in integration mode, not by default.") // This flag will be passed here via "go test -local" args
 var waitRater = flag.Int("wait_rater", 150, "Number of miliseconds to wait for rater to start and cache")
 var dataDir = flag.String("data_dir", "/usr/share/cgrates", "CGR data dir path here")
 
 var daCfgPath string
 var daCfg *config.CGRConfig
 var smgRPC *rpc.Client
-var err error
 
 func TestSMGVoiceInitCfg(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	daCfgPath = path.Join(*dataDir, "conf", "samples", "smg")
 	// Init config first
 	var err error
@@ -56,9 +53,6 @@ func TestSMGVoiceInitCfg(t *testing.T) {
 
 // Remove data in both rating and accounting db
 func TestSMGVoiceResetDataDb(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	if err := engine.InitDataDb(daCfg); err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +60,6 @@ func TestSMGVoiceResetDataDb(t *testing.T) {
 
 // Wipe out the cdr database
 func TestSMGVoiceResetStorDb(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	if err := engine.InitStorDb(daCfg); err != nil {
 		t.Fatal(err)
 	}
@@ -76,9 +67,6 @@ func TestSMGVoiceResetStorDb(t *testing.T) {
 
 // Start CGR Engine
 func TestSMGVoiceStartEngine(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	if _, err := engine.StopStartEngine(daCfgPath, *waitRater); err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +74,6 @@ func TestSMGVoiceStartEngine(t *testing.T) {
 
 // Connect rpc client to rater
 func TestSMGVoiceApierRpcConn(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	var err error
 	smgRPC, err = jsonrpc.Dial("tcp", daCfg.RPCJSONListen) // We connect over JSON so we can also troubleshoot if needed
 	if err != nil {
@@ -98,9 +83,6 @@ func TestSMGVoiceApierRpcConn(t *testing.T) {
 
 // Load the tariff plan, creating accounts and their balances
 func TestSMGVoiceTPFromFolder(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	attrs := &utils.AttrLoadTpFromFolder{FolderPath: path.Join(*dataDir, "tariffplans", "tutorial")}
 	var loadInst utils.LoadInstance
 	if err := smgRPC.Call("ApierV2.LoadTariffPlanFromFolder", attrs, &loadInst); err != nil {
@@ -110,9 +92,6 @@ func TestSMGVoiceTPFromFolder(t *testing.T) {
 }
 
 func TestSMGVoiceMonetaryRefund(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	smgEv := SMGenericEvent{
 		utils.EVENT_NAME:  "TEST_EVENT",
 		utils.TOR:         utils.VOICE,
@@ -171,9 +150,6 @@ func TestSMGVoiceMonetaryRefund(t *testing.T) {
 }
 
 func TestSMGVoiceVoiceRefund(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	smgEv := SMGenericEvent{
 		utils.EVENT_NAME:  "TEST_EVENT",
 		utils.TOR:         utils.VOICE,
@@ -232,9 +208,6 @@ func TestSMGVoiceVoiceRefund(t *testing.T) {
 }
 
 func TestSMGVoiceMixedRefund(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	var acnt *engine.Account
 	attrs := &utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1001"}
 	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
@@ -306,9 +279,6 @@ func TestSMGVoiceMixedRefund(t *testing.T) {
 }
 
 func TestSMGVoiceLastUsed(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	var acnt *engine.Account
 	attrs := &utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1001"}
 	eAcntVal := 8.790000
@@ -423,9 +393,6 @@ func TestSMGVoiceLastUsed(t *testing.T) {
 }
 
 func TestSMGVoiceLastUsedEnd(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	var acnt *engine.Account
 	attrs := &utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1001"}
 	eAcntVal := 7.59000
@@ -514,9 +481,6 @@ func TestSMGVoiceLastUsedEnd(t *testing.T) {
 }
 
 func TestSMGVoiceLastUsedNotFixed(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	var acnt *engine.Account
 	attrs := &utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1001"}
 	eAcntVal := 6.59000
@@ -605,9 +569,6 @@ func TestSMGVoiceLastUsedNotFixed(t *testing.T) {
 }
 
 func TestSMGVoiceSessionTTL(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	var acnt *engine.Account
 	attrs := &utils.AttrGetAccount{Tenant: "cgrates.org", Account: "1001"}
 	eAcntVal := 5.590000
@@ -635,11 +596,12 @@ func TestSMGVoiceSessionTTL(t *testing.T) {
 	if err := smgRPC.Call("SMGenericV1.InitiateSession", smgEv, &maxUsage); err != nil {
 		t.Error(err)
 	}
+	time.Sleep(time.Duration(30 * time.Millisecond))
 	if maxUsage != 120 {
 		t.Error("Bad max usage: ", maxUsage)
 	}
 	var aSessions []*ActiveSession
-	if err := smgRPC.Call("SMGenericV1.ActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT, utils.ACCID: "12360"}, &aSessions); err != nil {
+	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT, utils.ACCID: "12360"}, &aSessions); err != nil {
 		t.Error(err)
 	} else if len(aSessions) != 1 {
 		t.Errorf("Unexpected number of sessions received: %+v", aSessions)
@@ -669,10 +631,11 @@ func TestSMGVoiceSessionTTL(t *testing.T) {
 	if err := smgRPC.Call("SMGenericV1.UpdateSession", smgEv, &maxUsage); err != nil {
 		t.Error(err)
 	}
+	time.Sleep(time.Duration(10 * time.Millisecond))
 	if maxUsage != 120 {
 		t.Error("Bad max usage: ", maxUsage)
 	}
-	if err := smgRPC.Call("SMGenericV1.ActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT, utils.ACCID: "12360"}, &aSessions); err != nil {
+	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT, utils.ACCID: "12360"}, &aSessions); err != nil {
 		t.Error(err)
 	} else if len(aSessions) != 1 {
 		t.Errorf("Unexpected number of sessions received: %+v", aSessions)
@@ -709,9 +672,6 @@ func TestSMGVoiceSessionTTL(t *testing.T) {
 }
 
 func TestSMGVoiceSessionTTLWithRelocate(t *testing.T) {
-	if !*testIntegration {
-		return
-	}
 	attrSetBalance := utils.AttrSetBalance{Tenant: "cgrates.org", Account: "TestTTLWithRelocate", BalanceType: utils.VOICE, BalanceID: utils.StringPointer("TestTTLWithRelocate"),
 		Value: utils.Float64Pointer(300), RatingSubject: utils.StringPointer("*zero50ms")}
 	var reply string
@@ -747,23 +707,24 @@ func TestSMGVoiceSessionTTLWithRelocate(t *testing.T) {
 	if err := smgRPC.Call("SMGenericV1.InitiateSession", smgEv, &maxUsage); err != nil {
 		t.Error(err)
 	}
+	time.Sleep(time.Duration(10) * time.Millisecond)
 	if maxUsage != 120 {
 		t.Error("Bad max usage: ", maxUsage)
 	}
-	eAcntVal = 180.0
-	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
-		t.Error(err)
-	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
-		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
-	}
 	var aSessions []*ActiveSession
-	if err := smgRPC.Call("SMGenericV1.ActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
+	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
 		utils.ACCID: smgEv.GetOriginID(utils.META_DEFAULT)}, &aSessions); err != nil {
 		t.Error(err)
 	} else if len(aSessions) != 1 {
 		t.Errorf("Unexpected number of sessions received: %+v", aSessions)
 	} else if aSessions[0].Usage != time.Duration(120)*time.Second {
 		t.Errorf("Expecting 2m, received usage: %v", aSessions[0].Usage)
+	}
+	eAcntVal = 180.0
+	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
+		t.Error(err)
+	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
+		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
 	}
 	smgEv = SMGenericEvent{
 		utils.EVENT_NAME:      smgEv[utils.EVENT_NAME],
@@ -786,13 +747,8 @@ func TestSMGVoiceSessionTTLWithRelocate(t *testing.T) {
 	if maxUsage != 120 {
 		t.Error("Bad max usage: ", maxUsage)
 	}
-	eAcntVal = 150.0
-	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
-		t.Error(err)
-	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
-		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
-	}
-	if err := smgRPC.Call("SMGenericV1.ActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
+	time.Sleep(time.Duration(20) * time.Millisecond)
+	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
 		utils.ACCID: smgEv.GetOriginID(utils.META_DEFAULT)}, &aSessions); err != nil {
 		t.Error(err)
 	} else if len(aSessions) != 1 {
@@ -800,6 +756,13 @@ func TestSMGVoiceSessionTTLWithRelocate(t *testing.T) {
 	} else if aSessions[0].Usage != time.Duration(150)*time.Second {
 		t.Errorf("Expecting 2m30s, received usage: %v", aSessions[0].Usage)
 	}
+	eAcntVal = 150.0
+	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
+		t.Error(err)
+	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
+		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
+	}
+
 	time.Sleep(100 * time.Millisecond)
 	eAcntVal = 149.95
 	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
@@ -807,7 +770,7 @@ func TestSMGVoiceSessionTTLWithRelocate(t *testing.T) {
 	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
 		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
 	}
-	if err := smgRPC.Call("SMGenericV1.ActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
+	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
 		utils.ACCID: smgEv.GetOriginID(utils.META_DEFAULT)}, &aSessions); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err, aSessions)
 	}
@@ -825,10 +788,149 @@ func TestSMGVoiceSessionTTLWithRelocate(t *testing.T) {
 
 }
 
-func TestSMGVoiceSessionStopCgrEngine(t *testing.T) {
-	if !*testIntegration {
-		return
+func TestSMGVoiceRelocateWithOriginIDPrefix(t *testing.T) {
+	attrSetBalance := utils.AttrSetBalance{Tenant: "cgrates.org", Account: "TestRelocateWithOriginIDPrefix",
+		BalanceType: utils.VOICE, BalanceID: utils.StringPointer("TestRelocateWithOriginIDPrefix"),
+		Value: utils.Float64Pointer(300), RatingSubject: utils.StringPointer("*zero1s")}
+	var reply string
+	if err := smgRPC.Call("ApierV2.SetBalance", attrSetBalance, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("Received: %s", reply)
 	}
+	var acnt *engine.Account
+	attrs := &utils.AttrGetAccount{Tenant: attrSetBalance.Tenant, Account: attrSetBalance.Account}
+	eAcntVal := 300.0
+	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
+		t.Error(err)
+	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
+		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
+	}
+	smgEv := SMGenericEvent{
+		utils.EVENT_NAME:  "TEST_EVENT_RELOCATE_ORIGPREFIX",
+		utils.TOR:         utils.VOICE,
+		utils.ACCID:       "12371",
+		utils.DIRECTION:   utils.OUT,
+		utils.ACCOUNT:     attrSetBalance.Account,
+		utils.SUBJECT:     attrSetBalance.Account,
+		utils.DESTINATION: "12371",
+		utils.CATEGORY:    "call",
+		utils.TENANT:      "cgrates.org",
+		utils.REQTYPE:     utils.META_PREPAID,
+		utils.SETUP_TIME:  "2016-01-05 18:30:49",
+		utils.ANSWER_TIME: "2016-01-05 18:31:05",
+		utils.USAGE:       "2m",
+	}
+	var maxUsage float64
+	if err := smgRPC.Call("SMGenericV1.InitiateSession", smgEv, &maxUsage); err != nil {
+		t.Error(err)
+	}
+	time.Sleep(time.Duration(20) * time.Millisecond)
+	if maxUsage != 120 {
+		t.Error("Bad max usage: ", maxUsage)
+	}
+	var aSessions []*ActiveSession
+	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
+		utils.ACCID: smgEv.GetOriginID(utils.META_DEFAULT)}, &aSessions); err != nil {
+		t.Error(err)
+	} else if len(aSessions) != 1 {
+		t.Errorf("Unexpected number of sessions received: %+v", aSessions)
+	} else if aSessions[0].Usage != time.Duration(120)*time.Second {
+		t.Errorf("Expecting 2m, received usage: %v", aSessions[0].Usage)
+	}
+	eAcntVal = 180.0
+	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
+		t.Error(err)
+	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
+		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
+	}
+	smgEv = SMGenericEvent{
+		utils.EVENT_NAME:      smgEv[utils.EVENT_NAME],
+		utils.TOR:             smgEv[utils.TOR],
+		utils.InitialOriginID: smgEv[utils.ACCID],
+		utils.ACCID:           "12372-1",
+		utils.DIRECTION:       smgEv[utils.DIRECTION],
+		utils.ACCOUNT:         smgEv[utils.ACCOUNT],
+		utils.SUBJECT:         smgEv[utils.SUBJECT],
+		utils.DESTINATION:     smgEv[utils.DESTINATION],
+		utils.CATEGORY:        smgEv[utils.CATEGORY],
+		utils.TENANT:          smgEv[utils.TENANT],
+		utils.REQTYPE:         smgEv[utils.REQTYPE],
+		utils.USAGE:           "2m",
+		utils.LastUsed:        "30s",
+	}
+	if err := smgRPC.Call("SMGenericV1.UpdateSession", smgEv, &maxUsage); err != nil {
+		t.Error(err)
+	}
+	if maxUsage != 120 {
+		t.Error("Bad max usage: ", maxUsage)
+	}
+	time.Sleep(time.Duration(20) * time.Millisecond)
+	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
+		utils.ACCID: "12372-1"}, &aSessions); err != nil {
+		t.Error(err)
+	} else if len(aSessions) != 1 {
+		t.Errorf("Unexpected number of sessions received: %+v", aSessions)
+	} else if aSessions[0].Usage != time.Duration(150)*time.Second {
+		t.Errorf("Expecting 2m30s, received usage: %v", aSessions[0].Usage)
+	}
+	eAcntVal = 150.0
+	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
+		t.Error(err)
+	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
+		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
+	}
+	smgEv = SMGenericEvent{
+		utils.EVENT_NAME:     smgEv[utils.EVENT_NAME],
+		utils.TOR:            smgEv[utils.TOR],
+		utils.OriginIDPrefix: "12372",
+		utils.DIRECTION:      smgEv[utils.DIRECTION],
+		utils.ACCOUNT:        smgEv[utils.ACCOUNT],
+		utils.SUBJECT:        smgEv[utils.SUBJECT],
+		utils.DESTINATION:    smgEv[utils.DESTINATION],
+		utils.CATEGORY:       smgEv[utils.CATEGORY],
+		utils.TENANT:         smgEv[utils.TENANT],
+		utils.REQTYPE:        smgEv[utils.REQTYPE],
+		utils.USAGE:          "1m", // Total session usage
+	}
+	var rpl string
+	if err = smgRPC.Call("SMGenericV1.TerminateSession", smgEv, &rpl); err != nil || rpl != utils.OK {
+		t.Error(err)
+	}
+	time.Sleep(time.Duration(10) * time.Millisecond)
+	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
+		utils.ACCID: "12372-1"}, &aSessions); err == nil || err.Error() != utils.ErrNotFound.Error() {
+		t.Error(err, aSessions)
+	}
+	eAcntVal = 240
+	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
+		t.Error(err)
+	} else if acnt.BalanceMap[utils.VOICE].GetTotalValue() != eAcntVal {
+		t.Errorf("Expecting: %f, received: %f", eAcntVal, acnt.BalanceMap[utils.VOICE].GetTotalValue())
+	}
+	if err := smgRPC.Call("SMGenericV1.ProcessCDR", smgEv, &reply); err != nil {
+		t.Error(err)
+	} else if reply != utils.OK {
+		t.Errorf("Received reply: %s", reply)
+	}
+	time.Sleep(time.Duration(20) * time.Millisecond)
+	var cdrs []*engine.ExternalCDR
+	req := utils.RPCCDRsFilter{RunIDs: []string{utils.META_DEFAULT}, DestinationPrefixes: []string{smgEv.GetDestination(utils.META_DEFAULT)}}
+	if err := smgRPC.Call("ApierV2.GetCdrs", req, &cdrs); err != nil {
+		t.Error("Unexpected error: ", err.Error())
+	} else if len(cdrs) != 1 {
+		t.Error("Unexpected number of CDRs returned: ", len(cdrs))
+	} else {
+		if cdrs[0].Usage != "60" {
+			t.Errorf("Unexpected CDR Usage received, cdr: %v %+v ", cdrs[0].Usage, cdrs[0])
+		}
+	}
+
+}
+
+// ToDo: Add test for ChargeEvent with derived charging, one with debit possible and second not so we see refund and error.CreditInsufficient showing up.
+
+func TestSMGVoiceSessionStopCgrEngine(t *testing.T) {
 	if err := engine.KillEngine(100); err != nil {
 		t.Error(err)
 	}

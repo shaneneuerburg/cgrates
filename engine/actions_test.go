@@ -29,6 +29,7 @@ import (
 	"github.com/cgrates/cgrates/utils"
 )
 
+var err error
 var (
 	//referenceDate = time.Date(2013, 7, 10, 10, 30, 0, 0, time.Local)
 	//referenceDate = time.Date(2013, 12, 31, 23, 59, 59, 0, time.Local)
@@ -418,7 +419,7 @@ func TestActionPlanLogFunction(t *testing.T) {
 	at := &ActionTiming{
 		actions: []*Action{a},
 	}
-	err := at.Execute()
+	err := at.Execute(nil, nil)
 	if err != nil {
 		t.Errorf("Could not execute LOG action: %v", err)
 	}
@@ -437,7 +438,7 @@ func TestActionPlanFunctionNotAvailable(t *testing.T) {
 		Timing:     &RateInterval{},
 		actions:    []*Action{a},
 	}
-	err := at.Execute()
+	err := at.Execute(nil, nil)
 	if err != nil {
 		t.Errorf("Faild to detect wrong function type: %v", err)
 	}
@@ -499,35 +500,109 @@ func TestActionTimingPriorityListWeight(t *testing.T) {
 	}
 }
 
-/*
 func TestActionPlansRemoveMember(t *testing.T) {
-	at1 := &ActionPlan{
-		Uuid:       "some uuid",
-		Id:         "test",
-		AccountIDs: []string{"one", "two", "three"},
-		ActionsID:  "TEST_ACTIONS",
+
+	account1 := &Account{ID: "one"}
+	account2 := &Account{ID: "two"}
+
+	accountingStorage.SetAccount(account1)
+	accountingStorage.SetAccount(account2)
+
+	ap1 := &ActionPlan{
+		Id:         "TestActionPlansRemoveMember1",
+		AccountIDs: utils.StringMap{"one": true},
+		ActionTimings: []*ActionTiming{
+			&ActionTiming{
+				Uuid: "uuid1",
+				Timing: &RateInterval{
+					Timing: &RITiming{
+						Years:     utils.Years{2012},
+						Months:    utils.Months{},
+						MonthDays: utils.MonthDays{},
+						WeekDays:  utils.WeekDays{},
+						StartTime: utils.ASAP,
+					},
+				},
+				Weight:    10,
+				ActionsID: "MINI",
+			},
+		},
 	}
-	at2 := &ActionPlan{
-		Uuid:       "some uuid22",
+
+	ap2 := &ActionPlan{
 		Id:         "test2",
-		AccountIDs: []string{"three", "four"},
-		ActionsID:  "TEST_ACTIONS2",
+		AccountIDs: utils.StringMap{"two": true},
+		ActionTimings: []*ActionTiming{
+			&ActionTiming{
+				Uuid: "uuid2",
+				Timing: &RateInterval{
+					Timing: &RITiming{
+						Years:     utils.Years{2012},
+						Months:    utils.Months{},
+						MonthDays: utils.MonthDays{},
+						WeekDays:  utils.WeekDays{},
+						StartTime: utils.ASAP,
+					},
+				},
+				Weight:    10,
+				ActionsID: "MINI",
+			},
+		},
 	}
-	ats := ActionPlans{at1, at2}
-	if outAts := RemActionPlan(ats, "", "four"); len(outAts[1].AccountIds) != 1 {
-		t.Error("Expecting fewer balance ids", outAts[1].AccountIds)
+
+	if err := ratingStorage.SetActionPlan(ap1.Id, ap1, true, utils.NonTransactional); err != nil {
+		t.Error(err)
 	}
-	if ats = RemActionPlan(ats, "", "three"); len(ats) != 1 {
-		t.Error("Expecting fewer actionTimings", ats)
+	if err = ratingStorage.SetActionPlan(ap2.Id, ap2, true, utils.NonTransactional); err != nil {
+		t.Error(err)
 	}
-	if ats = RemActionPlan(ats, "some_uuid22", ""); len(ats) != 1 {
-		t.Error("Expecting fewer actionTimings members", ats)
+	if err = ratingStorage.CacheDataFromDB(utils.ACTION_PLAN_PREFIX, []string{ap1.Id, ap2.Id}, true); err != nil {
+		t.Error(err)
 	}
-	ats2 := ActionPlans{at1, at2}
-	if ats2 = RemActionPlan(ats2, "", ""); len(ats2) != 0 {
-		t.Error("Should have no members anymore", ats2)
+	if err = ratingStorage.SetAccountActionPlans(account1.ID, []string{ap1.Id}, false); err != nil {
+		t.Error(err)
 	}
-}*/
+	if err = ratingStorage.CacheDataFromDB(utils.AccountActionPlansPrefix, []string{account1.ID}, true); err != nil {
+		t.Error(err)
+	}
+	ratingStorage.GetAccountActionPlans(account1.ID, true, utils.NonTransactional) // FixMe: remove here after finishing testing of map
+	if err = ratingStorage.SetAccountActionPlans(account2.ID, []string{ap2.Id}, false); err != nil {
+		t.Error(err)
+	}
+	if err = ratingStorage.CacheDataFromDB(utils.AccountActionPlansPrefix, []string{account2.ID}, false); err != nil {
+		t.Error(err)
+	}
+
+	actions := []*Action{
+		&Action{
+			Id:         "REMOVE",
+			ActionType: REMOVE_ACCOUNT,
+		},
+	}
+
+	ratingStorage.SetActions(actions[0].Id, actions, utils.NonTransactional)
+
+	at := &ActionTiming{
+		accountIDs: utils.StringMap{account1.ID: true},
+		Timing:     &RateInterval{},
+		actions:    actions,
+	}
+
+	if err = at.Execute(nil, nil); err != nil {
+		t.Errorf("Execute Action: %v", err)
+	}
+
+	apr, err1 := ratingStorage.GetActionPlan(ap1.Id, false, utils.NonTransactional)
+
+	if err1 != nil {
+		t.Errorf("Get action plan test: %v", err1)
+	}
+
+	if _, exist := apr.AccountIDs[account1.ID]; exist {
+		t.Errorf("Account one is not deleted ")
+	}
+
+}
 
 func TestActionTriggerMatchNil(t *testing.T) {
 	at := &ActionTrigger{
@@ -1150,7 +1225,7 @@ func TestRemoveAction(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:remo": true},
 		actions:    Actions{a},
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:remo")
 	if err == nil || afterUb != nil {
 		t.Error("error removing account: ", err, afterUb)
@@ -1169,7 +1244,7 @@ func TestTopupAction(t *testing.T) {
 		actions:    Actions{a},
 	}
 
-	at.Execute()
+	at.Execute(nil, nil)
 	afterUb, _ := accountingStorage.GetAccount("vdf:minu")
 	initialValue := initialUb.BalanceMap[utils.MONETARY].GetTotalValue()
 	afterValue := afterUb.BalanceMap[utils.MONETARY].GetTotalValue()
@@ -1190,7 +1265,7 @@ func TestTopupActionLoaded(t *testing.T) {
 		actions:    Actions{a},
 	}
 
-	at.Execute()
+	at.Execute(nil, nil)
 	afterUb, _ := accountingStorage.GetAccount("vdf:minitsboy")
 	initialValue := initialUb.BalanceMap[utils.MONETARY].GetTotalValue()
 	afterValue := afterUb.BalanceMap[utils.MONETARY].GetTotalValue()
@@ -1358,7 +1433,7 @@ func TestActionTransactionFuncType(t *testing.T) {
 			},
 		},
 	}
-	err = at.Execute()
+	err = at.Execute(nil, nil)
 	acc, err := accountingStorage.GetAccount("cgrates.org:trans")
 	if err != nil || acc == nil {
 		t.Error("Error getting account: ", acc, err)
@@ -1394,7 +1469,7 @@ func TestActionTransactionBalanceType(t *testing.T) {
 			},
 		},
 	}
-	err = at.Execute()
+	err = at.Execute(nil, nil)
 	acc, err := accountingStorage.GetAccount("cgrates.org:trans")
 	if err != nil || acc == nil {
 		t.Error("Error getting account: ", acc, err)
@@ -1430,7 +1505,7 @@ func TestActionTransactionBalanceNotType(t *testing.T) {
 			},
 		},
 	}
-	err = at.Execute()
+	err = at.Execute(nil, nil)
 	acc, err := accountingStorage.GetAccount("cgrates.org:trans")
 	if err != nil || acc == nil {
 		t.Error("Error getting account: ", acc, err)
@@ -1473,7 +1548,7 @@ func TestActionWithExpireWithoutExpire(t *testing.T) {
 			},
 		},
 	}
-	err = at.Execute()
+	err = at.Execute(nil, nil)
 	acc, err := accountingStorage.GetAccount("cgrates.org:exp")
 	if err != nil || acc == nil {
 		t.Errorf("Error getting account: %+v: %v", acc, err)
@@ -1520,7 +1595,7 @@ func TestActionRemoveBalance(t *testing.T) {
 			},
 		},
 	}
-	err = at.Execute()
+	err = at.Execute(nil, nil)
 	acc, err := accountingStorage.GetAccount("cgrates.org:rembal")
 	if err != nil || acc == nil {
 		t.Errorf("Error getting account: %+v: %v", acc, err)
@@ -1569,7 +1644,7 @@ func TestActionTransferMonetaryDefault(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:trans": true},
 		actions:    Actions{a},
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:trans")
 	if err != nil {
@@ -1630,7 +1705,7 @@ func TestActionTransferMonetaryDefaultFilter(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:trans": true},
 		actions:    Actions{a},
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:trans")
 	if err != nil {
@@ -1696,7 +1771,7 @@ func TestActionConditionalTopup(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:cond": true},
 		actions:    Actions{a},
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:cond")
 	if err != nil {
@@ -1760,7 +1835,7 @@ func TestActionConditionalTopupNoMatch(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:cond": true},
 		actions:    Actions{a},
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:cond")
 	if err != nil {
@@ -1824,7 +1899,7 @@ func TestActionConditionalTopupExistingBalance(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:cond": true},
 		actions:    Actions{a},
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:cond")
 	if err != nil {
@@ -1974,7 +2049,7 @@ func TestActionConditionalDisabledIfNegative(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:af": true},
 		actions:    Actions{a1, a2, a3, a4, a5},
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:af")
 	if err != nil {
@@ -2045,7 +2120,7 @@ func TestActionSetBalance(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:setb": true},
 		actions:    Actions{a},
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:setb")
 	if err != nil {
@@ -2082,7 +2157,7 @@ func TestActionExpirationTime(t *testing.T) {
 		actions:    a,
 	}
 	for rep := 0; rep < 5; rep++ {
-		at.Execute()
+		at.Execute(nil, nil)
 		afterUb, err := accountingStorage.GetAccount("cgrates.org:expo")
 		if err != nil ||
 			len(afterUb.BalanceMap[utils.VOICE]) != rep+1 {
@@ -2105,7 +2180,7 @@ func TestActionExpNoExp(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:expnoexp": true},
 		actions:    exp,
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:expnoexp")
 	if err != nil ||
 		len(afterUb.BalanceMap[utils.VOICE]) != 2 {
@@ -2158,7 +2233,7 @@ func TestActionCdrlogBalanceValue(t *testing.T) {
 			},
 		},
 	}
-	err = at.Execute()
+	err = at.Execute(nil, nil)
 	acc, err := accountingStorage.GetAccount("cgrates.org:bv")
 	if err != nil || acc == nil {
 		t.Error("Error getting account: ", acc, err)
@@ -2246,12 +2321,110 @@ func TestValueFormulaDebit(t *testing.T) {
 		accountIDs: utils.StringMap{"cgrates.org:vf": true},
 		ActionsID:  "VF",
 	}
-	at.Execute()
+	at.Execute(nil, nil)
 	afterUb, err := accountingStorage.GetAccount("cgrates.org:vf")
 	// not an exact value, depends of month
 	v := afterUb.BalanceMap[utils.MONETARY].GetTotalValue()
-	if err != nil || v > -0.30 || v < -0.35 {
-		t.Error("error debiting account: ", err, utils.ToIJSON(afterUb))
+	if err != nil || v > -0.30 || v < -0.36 {
+		t.Error("error debiting account: ", err, utils.ToIJSON(afterUb), v)
+	}
+}
+
+func TestClonedAction(t *testing.T) {
+	a := &Action{
+		Id:         "test1",
+		ActionType: TOPUP,
+		Balance: &BalanceFilter{
+			ID:    utils.StringPointer("*default"),
+			Value: &utils.ValueFormula{Static: 1},
+			Type:  utils.StringPointer(utils.MONETARY),
+		},
+		Weight: float64(10),
+	}
+
+	clone := a.Clone()
+
+	if !reflect.DeepEqual(a, clone) {
+		t.Error("error cloning action: ", utils.ToIJSON(clone))
+	}
+}
+
+func TestClonedActions(t *testing.T) {
+	actions := Actions{
+		&Action{
+			Id:         "RECUR_FOR_V3HSILLMILLD1G",
+			ActionType: TOPUP,
+			Balance: &BalanceFilter{
+				ID:    utils.StringPointer("*default"),
+				Value: &utils.ValueFormula{Static: 1},
+				Type:  utils.StringPointer(utils.MONETARY),
+			},
+			Weight: float64(30),
+		},
+		&Action{
+			Id:         "RECUR_FOR_V3HSILLMILLD5G",
+			ActionType: DEBIT,
+			Balance: &BalanceFilter{
+				ID:    utils.StringPointer("*default"),
+				Value: &utils.ValueFormula{Static: 2},
+				Type:  utils.StringPointer(utils.MONETARY),
+			},
+			Weight: float64(20),
+		},
+	}
+
+	clone, err := actions.Clone()
+
+	if err != nil {
+		t.Error("error cloning actions: ", err)
+	}
+
+	if !reflect.DeepEqual(actions, clone) {
+		t.Error("error cloning actions: ", utils.ToIJSON(clone))
+	}
+
+}
+
+func TestCacheGetClonedActions(t *testing.T) {
+	actions := Actions{
+		&Action{
+			Id:         "RECUR_FOR_V3HSILLMILLD1G",
+			ActionType: TOPUP,
+			Balance: &BalanceFilter{
+				ID:    utils.StringPointer("*default"),
+				Value: &utils.ValueFormula{Static: 1},
+				Type:  utils.StringPointer(utils.MONETARY),
+			},
+			Weight: float64(30),
+		},
+		&Action{
+			Id:         "REACT_FOR_V3HSILLMILL",
+			ActionType: SET_BALANCE,
+			Balance: &BalanceFilter{
+				ID:    utils.StringPointer("for_v3hsillmill_sms_ill"),
+				Type:  utils.StringPointer(utils.SMS),
+				Value: &utils.ValueFormula{Static: 20000},
+				DestinationIDs: &utils.StringMap{
+					"FRANCE_NATIONAL":      true,
+					"FRANCE_NATIONAL_FREE": false,
+					"ZONE1":                false},
+				Categories: &utils.StringMap{
+					"sms_eurotarif": true,
+					"sms_france":    true},
+				Disabled: utils.BoolPointer(false),
+				Blocker:  utils.BoolPointer(false),
+			},
+			Weight: float64(10),
+		},
+	}
+	cache.Set("MYTEST", actions, true, "")
+	clned, err := cache.GetCloned("MYTEST")
+	if err != nil {
+		t.Error(err)
+	}
+	aCloned := clned.(Actions)
+	if !reflect.DeepEqual(actions, aCloned) {
+		t.Errorf("Expecting: %+v, received: %+v", actions[1].Balance, aCloned[1].Balance)
 	}
 }
 

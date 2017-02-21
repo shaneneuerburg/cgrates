@@ -86,6 +86,14 @@ func (ms *MapStorage) Flush(ignore string) error {
 	return nil
 }
 
+func (ms *MapStorage) Marshaler() Marshaler {
+	return ms.ms
+}
+
+func (ms *MapStorage) SelectDatabase(dbName string) (err error) {
+	return
+}
+
 func (ms *MapStorage) RebuildReverseForPrefix(prefix string) error {
 	// FIXME: should do transaction
 	keys, err := ms.GetKeysForPrefix(prefix)
@@ -126,13 +134,16 @@ func (ms *MapStorage) RebuildReverseForPrefix(prefix string) error {
 				return err
 			}
 		}
+	case utils.AccountActionPlansPrefix:
+		return nil
 	default:
 		return utils.ErrInvalidKey
 	}
 	return nil
 }
 
-func (ms *MapStorage) PreloadRatingCache() error {
+// FixMe
+func (ms *MapStorage) LoadRatingCache(dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs []string) error {
 	if ms.cacheCfg == nil {
 		return nil
 	}
@@ -193,7 +204,7 @@ func (ms *MapStorage) PreloadRatingCache() error {
 	return nil
 }
 
-func (ms *MapStorage) PreloadAccountingCache() error {
+func (ms *MapStorage) LoadAccountingCache(alsIDs, rvAlsIDs, rlIDs []string) error {
 	if ms.cacheCfg == nil {
 		return nil
 	}
@@ -234,6 +245,12 @@ func (ms *MapStorage) PreloadCacheForPrefix(prefix string) error {
 	}
 	cache.CommitTransaction(transID)
 	return nil
+}
+
+// CacheDataFromDB loads data to cache,
+// prefix represents the cache prefix, IDs should be nil if all available data should be loaded
+func (ms *MapStorage) CacheDataFromDB(prefix string, IDs []string, mustBeCached bool) (err error) {
+	return
 }
 
 func (ms *MapStorage) GetKeysForPrefix(prefix string) ([]string, error) {
@@ -463,11 +480,11 @@ func (ms *MapStorage) GetReverseDestination(prefix string, skipCache bool, trans
 			return nil, utils.ErrNotFound
 		}
 	}
-	if idMap, ok := ms.dict.smembers(prefix, ms.ms); ok {
-		ids = idMap.Slice()
-	} else {
+	if idMap, ok := ms.dict.smembers(prefix, ms.ms); !ok {
 		cache.Set(prefix, nil, cacheCommit(transactionID), transactionID)
 		return nil, utils.ErrNotFound
+	} else {
+		ids = idMap.Slice()
 	}
 	cache.Set(prefix, ids, cacheCommit(transactionID), transactionID)
 	return
@@ -476,7 +493,6 @@ func (ms *MapStorage) GetReverseDestination(prefix string, skipCache bool, trans
 func (ms *MapStorage) SetReverseDestination(dest *Destination, transactionID string) (err error) {
 	for _, p := range dest.Prefixes {
 		key := utils.REVERSE_DESTINATION_PREFIX + p
-
 		ms.mu.Lock()
 		ms.dict.sadd(key, dest.Id, ms.ms)
 		ms.mu.Unlock()
@@ -563,11 +579,14 @@ func (ms *MapStorage) GetActions(key string, skipCache bool, transactionID strin
 	cCommit := cacheCommit(transactionID)
 	key = utils.ACTION_PREFIX + key
 	if !skipCache {
-		if x, ok := cache.Get(key); ok {
-			if x != nil {
-				return x.(Actions), nil
+		if x, err := cache.GetCloned(key); err != nil {
+			if err.Error() != utils.ItemNotFound {
+				return nil, err
 			}
+		} else if x == nil {
 			return nil, utils.ErrNotFound
+		} else {
+			return x.(Actions), nil
 		}
 	}
 	if values, ok := ms.dict[key]; ok {
@@ -883,10 +902,6 @@ func (ms *MapStorage) RemoveAlias(key string, transactionID string) error {
 	return nil
 }
 
-func (ms *MapStorage) UpdateReverseAlias(oldAl, newAl *Alias, transactionID string) error {
-	return nil
-}
-
 func (ms *MapStorage) GetLoadHistory(limitItems int, skipCache bool, transactionID string) ([]*utils.LoadInstance, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
@@ -1000,7 +1015,6 @@ func (ms *MapStorage) GetAllActionPlans() (ats map[string]*ActionPlan, err error
 	if err != nil {
 		return nil, err
 	}
-
 	ats = make(map[string]*ActionPlan, len(keys))
 	for _, key := range keys {
 		ap, err := ms.GetActionPlan(key[len(utils.ACTION_PLAN_PREFIX):], false, utils.NonTransactional)
@@ -1009,7 +1023,81 @@ func (ms *MapStorage) GetAllActionPlans() (ats map[string]*ActionPlan, err error
 		}
 		ats[key[len(utils.ACTION_PLAN_PREFIX):]] = ap
 	}
+	return
+}
 
+func (ms *MapStorage) GetAccountActionPlans(acntID string, skipCache bool, transactionID string) (apIDs []string, err error) {
+	key := utils.AccountActionPlansPrefix + acntID
+	if !skipCache {
+		if x, ok := cache.Get(key); ok {
+			if x == nil {
+				return nil, utils.ErrNotFound
+			}
+			return x.([]string), nil
+		}
+	}
+	ms.mu.RLock()
+	values, ok := ms.dict[key]
+	ms.mu.RUnlock()
+	if !ok {
+		cache.Set(key, nil, cacheCommit(transactionID), transactionID)
+		err = utils.ErrNotFound
+		return nil, err
+	}
+	if err = ms.ms.Unmarshal(values, &apIDs); err != nil {
+		return nil, err
+	}
+	cache.Set(key, apIDs, cacheCommit(transactionID), transactionID)
+	return
+}
+
+func (ms *MapStorage) SetAccountActionPlans(acntID string, apIDs []string, overwrite bool) (err error) {
+	if !overwrite {
+		oldaPlIDs, err := ms.GetAccountActionPlans(acntID, true, utils.NonTransactional)
+		if err != nil && err != utils.ErrNotFound {
+			return err
+		} else {
+			for _, oldAPid := range oldaPlIDs {
+				if !utils.IsSliceMember(apIDs, oldAPid) {
+					apIDs = append(apIDs, oldAPid)
+				}
+			}
+		}
+	}
+
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	result, err := ms.ms.Marshal(apIDs)
+	if err != nil {
+		return err
+	}
+	ms.dict[utils.AccountActionPlansPrefix+acntID] = result
+	return
+}
+
+func (ms *MapStorage) RemAccountActionPlans(acntID string, apIDs []string) (err error) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	key := utils.AccountActionPlansPrefix + acntID
+	if len(apIDs) == 0 {
+		delete(ms.dict, key)
+		return
+	}
+	oldaPlIDs, err := ms.GetAccountActionPlans(acntID, true, utils.NonTransactional)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(oldaPlIDs); {
+		if utils.IsSliceMember(apIDs, oldaPlIDs[i]) {
+			oldaPlIDs = append(oldaPlIDs[:i], oldaPlIDs[i+1:]...)
+			continue
+		}
+		i++
+	}
+	if len(oldaPlIDs) == 0 {
+		delete(ms.dict, key)
+		return
+	}
 	return
 }
 
@@ -1249,5 +1337,17 @@ func (ms *MapStorage) MatchReqFilterIndex(dbKey, fieldValKey string) (itemIDs ut
 		itemIDs = indexes[keySplt[0]][keySplt[1]]
 	}
 	cache.Set(dbKey+fieldValKey, itemIDs, true, utils.NonTransactional)
+	return
+}
+
+func (ms *MapStorage) GetVersions(itm string) (vrs Versions, err error) {
+	return
+}
+
+func (ms *MapStorage) SetVersions(vrs Versions) (err error) {
+	return
+}
+
+func (ms *MapStorage) RemoveVersions(vrs Versions) (err error) {
 	return
 }

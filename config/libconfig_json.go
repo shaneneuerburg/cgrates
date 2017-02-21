@@ -19,12 +19,14 @@ package config
 
 // General config section
 type GeneralJsonCfg struct {
+	Instance_id          *string
+	Log_level            *int
 	Http_skip_tls_verify *bool
 	Rounding_decimals    *int
 	Dbdata_encoding      *string
 	Tpexport_dir         *string
-	Httpposter_attempts  *int
-	Http_failed_dir      *string
+	Poster_attempts      *int
+	Failed_posts_dir     *string
 	Default_request_type *string
 	Default_category     *string
 	Default_tenant       *string
@@ -36,7 +38,6 @@ type GeneralJsonCfg struct {
 	Response_cache_ttl   *string
 	Internal_ttl         *string
 	Locking_timeout      *string
-	Log_level            *int
 }
 
 // Listen config section
@@ -103,7 +104,7 @@ type CdrsJsonCfg struct {
 	Users_conns         *[]*HaPoolJsonCfg
 	Aliases_conns       *[]*HaPoolJsonCfg
 	Cdrstats_conns      *[]*HaPoolJsonCfg
-	Cdr_replication     *[]*CdrReplicationJsonCfg
+	Online_cdr_exports  *[]string
 }
 
 type CdrReplicationJsonCfg struct {
@@ -144,17 +145,17 @@ type CdrFieldJsonCfg struct {
 
 // Cdre config section
 type CdreJsonCfg struct {
-	Cdr_format                    *string
-	Field_separator               *string
-	Data_usage_multiply_factor    *float64
-	Sms_usage_multiply_factor     *float64
-	Mms_usage_multiply_factor     *float64
-	Generic_usage_multiply_factor *float64
-	Cost_multiply_factor          *float64
-	Export_directory              *string
-	Header_fields                 *[]*CdrFieldJsonCfg
-	Content_fields                *[]*CdrFieldJsonCfg
-	Trailer_fields                *[]*CdrFieldJsonCfg
+	Export_format         *string
+	Export_path           *string
+	Cdr_filter            *string
+	Synchronous           *bool
+	Attempts              *int
+	Field_separator       *string
+	Usage_multiply_factor *map[string]float64
+	Cost_multiply_factor  *float64
+	Header_fields         *[]*CdrFieldJsonCfg
+	Content_fields        *[]*CdrFieldJsonCfg
+	Trailer_fields        *[]*CdrFieldJsonCfg
 }
 
 // Cdrc config section
@@ -258,10 +259,13 @@ type CacheJsonCfg struct {
 	Cdr_stats            *CacheParamJsonCfg
 	Actions              *CacheParamJsonCfg
 	Action_plans         *CacheParamJsonCfg
+	Account_action_plans *CacheParamJsonCfg
 	Action_triggers      *CacheParamJsonCfg
 	Shared_groups        *CacheParamJsonCfg
 	Aliases              *CacheParamJsonCfg
 	Reverse_aliases      *CacheParamJsonCfg
+	Derived_chargers     *CacheParamJsonCfg
+	Resource_limits      *CacheParamJsonCfg
 }
 
 // Represents one connection instance towards FreeSWITCH

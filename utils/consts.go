@@ -17,49 +17,34 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
 package utils
 
-import (
-	"errors"
-	"fmt"
-)
-
-func NewErrMandatoryIeMissing(fields ...string) error {
-	return fmt.Errorf("MANDATORY_IE_MISSING:%v", fields)
-}
-
-func NewErrServerError(err error) error {
-	return fmt.Errorf("SERVER_ERROR: %s", err)
-}
-
 var (
-	ErrNotImplemented          = errors.New("NOT_IMPLEMENTED")
-	ErrNotFound                = errors.New("NOT_FOUND")
-	ErrTimedOut                = errors.New("TIMED_OUT")
-	ErrServerError             = errors.New("SERVER_ERROR")
-	ErrMaxRecursionDepth       = errors.New("MAX_RECURSION_DEPTH")
-	ErrMandatoryIeMissing      = errors.New("MANDATORY_IE_MISSING")
-	ErrExists                  = errors.New("EXISTS")
-	ErrBrokenReference         = errors.New("BROKEN_REFERENCE")
-	ErrParserError             = errors.New("PARSER_ERROR")
-	ErrInvalidPath             = errors.New("INVALID_PATH")
-	ErrInvalidKey              = errors.New("INVALID_KEY")
-	ErrUnauthorizedDestination = errors.New("UNAUTHORIZED_DESTINATION")
-	ErrRatingPlanNotFound      = errors.New("RATING_PLAN_NOT_FOUND")
-	ErrAccountNotFound         = errors.New("ACCOUNT_NOT_FOUND")
-	ErrAccountDisabled         = errors.New("ACCOUNT_DISABLED")
-	ErrUserNotFound            = errors.New("USER_NOT_FOUND")
-	ErrInsufficientCredit      = errors.New("INSUFFICIENT_CREDIT")
-	ErrNotConvertible          = errors.New("NOT_CONVERTIBLE")
-	ErrResourceUnavailable     = errors.New("RESOURCE_UNAVAILABLE")
-	ErrNoActiveSession         = errors.New("NO_ACTIVE_SESSION")
-
-	CdreCdrFormats   = []string{CSV, DRYRUN, CDRE_FIXED_WIDTH}
+	CDRExportFormats = []string{DRYRUN, MetaFileCSV, MetaFileFWV, MetaHTTPjsonCDR, MetaHTTPjsonMap, MetaHTTPjson, META_HTTP_POST, MetaAMQPjsonCDR, MetaAMQPjsonMap}
 	PrimaryCdrFields = []string{CGRID, CDRSOURCE, CDRHOST, ACCID, TOR, REQTYPE, DIRECTION, TENANT, CATEGORY, ACCOUNT, SUBJECT, DESTINATION, SETUP_TIME, PDD, ANSWER_TIME, USAGE,
 		SUPPLIER, DISCONNECT_CAUSE, COST, RATED, PartialField, MEDI_RUNID}
+	GitLastLog                  string // If set, it will be processed as part of versioning
+	PosterTransportContentTypes = map[string]string{
+		MetaHTTPjsonCDR: CONTENT_JSON,
+		MetaHTTPjsonMap: CONTENT_JSON,
+		MetaHTTPjson:    CONTENT_JSON,
+		META_HTTP_POST:  CONTENT_FORM,
+		MetaAMQPjsonCDR: CONTENT_JSON,
+		MetaAMQPjsonMap: CONTENT_JSON,
+	}
+	CDREFileSuffixes = map[string]string{
+		MetaHTTPjsonCDR: JSNSuffix,
+		MetaHTTPjsonMap: JSNSuffix,
+		MetaAMQPjsonCDR: JSNSuffix,
+		MetaAMQPjsonMap: JSNSuffix,
+		META_HTTP_POST:  FormSuffix,
+		MetaFileCSV:     CSVSuffix,
+		MetaFileFWV:     FWVSuffix,
+	}
 )
 
 const (
 	CGRateS                       = "CGRateS"
 	VERSION                       = "0.9.1~rc8"
+	GitLastLogFileName            = ".git_lastlog.txt"
 	DIAMETER_FIRMWARE_REVISION    = 918
 	REDIS_MAX_CONNS               = 10
 	POSTGRES                      = "postgres"
@@ -98,6 +83,7 @@ const (
 	TBLSMCosts                    = "sm_costs"
 	TBLTPResourceLimits           = "tp_resource_limits"
 	TBL_CDRS                      = "cdrs"
+	TBLVersions                   = "versions"
 	TIMINGS_CSV                   = "Timings.csv"
 	DESTINATIONS_CSV              = "Destinations.csv"
 	RATES_CSV                     = "Rates.csv"
@@ -207,6 +193,7 @@ const (
 	FILTER_REGEXP_TPL             = "$1$2$3$4$5"
 	TASKS_KEY                     = "tasks"
 	ACTION_PLAN_PREFIX            = "apl_"
+	AccountActionPlansPrefix      = "aap_"
 	ACTION_TRIGGER_PREFIX         = "atr_"
 	REVERSE_ACTION_TRIGGER_PREFIX = "rtr_"
 	RATING_PLAN_PREFIX            = "rpl_"
@@ -248,9 +235,12 @@ const (
 	META_FILLER                   = "*filler"
 	META_HANDLER                  = "*handler"
 	META_HTTP_POST                = "*http_post"
+	MetaHTTPjson                  = "*http_json"
 	MetaHTTPjsonCDR               = "*http_json_cdr"
 	META_HTTP_JSONRPC             = "*http_jsonrpc"
 	MetaHTTPjsonMap               = "*http_json_map"
+	MetaAMQPjsonCDR               = "*amqp_json_cdr"
+	MetaAMQPjsonMap               = "*amqp_json_map"
 	NANO_MULTIPLIER               = 1000000000
 	CGR_AUTHORIZE                 = "CGR_AUTHORIZE"
 	CONFIG_DIR                    = "/etc/cgrates/"
@@ -317,6 +307,7 @@ const (
 	HandlerArgSep                = "|"
 	FlagForceDuration            = "fd"
 	InstanceID                   = "InstanceID"
+	ActiveGoroutines             = "ActiveGoroutines"
 	SessionTTL                   = "SessionTTL"
 	SessionTTLLastUsed           = "SessionTTLLastUsed"
 	SessionTTLUsage              = "SessionTTLUsage"
@@ -334,4 +325,47 @@ const (
 	EVT_ACTION_TRIGGER_FIRED     = "ACTION_TRIGGER_FIRED"
 	EVT_ACTION_TIMING_FIRED      = "ACTION_TRIGGER_FIRED"
 	SMAsterisk                   = "sm_asterisk"
+	TariffPlanDB                 = "tariffplan_db"
+	DataDB                       = "data_db"
+	StorDB                       = "stor_db"
+	Cache                        = "cache"
+	NotFoundCaps                 = "NOT_FOUND"
+	ItemNotFound                 = "item not found"
+	ItemNotCloneable             = "item not cloneable"
+	NotCloneableCaps             = "NOT_CLONEABLE"
+	ServerErrorCaps              = "SERVER_ERROR"
+	MandatoryIEMissingCaps       = "MANDATORY_IE_MISSING"
+	UnsupportedCachePrefix       = "unsupported cache prefix"
+	CDRSCtx                      = "cdrs"
+	MandatoryInfoMissing         = "mandatory information missing"
+	UnsupportedServiceIDCaps     = "UNSUPPORTED_SERVICE_ID"
+	ServiceManager               = "service_manager"
+	ServiceAlreadyRunning        = "service already running"
+	ServiceNotRunning            = "service not running"
+	RunningCaps                  = "RUNNING"
+	StoppedCaps                  = "STOPPED"
+	SchedulerNotRunningCaps      = "SCHEDULLER_NOT_RUNNING"
+	MetaScheduler                = "*scheduler"
+	MetaCostDetails              = "*cost_details"
+	MetaAccounts                 = "*accounts"
+	Migrator                     = "migrator"
+	UnsupportedMigrationTask     = "unsupported migration task"
+	NoStorDBConnection           = "not connected to StorDB"
+	UndefinedVersion             = "undefined version"
+	MetaSetVersions              = "*set_versions"
+	UnsupportedDB                = "unsupported database"
+	ACCOUNT_SUMMARY              = "AccountSummary"
+	TxtSuffix                    = ".txt"
+	JSNSuffix                    = ".json"
+	FormSuffix                   = ".form"
+	CSVSuffix                    = ".csv"
+	FWVSuffix                    = ".fwv"
+	CONTENT_JSON                 = "json"
+	CONTENT_FORM                 = "form"
+	CONTENT_TEXT                 = "text"
+	FileLockPrefix               = "file_"
+	ActionsPoster                = "act"
+	CDRPoster                    = "cdr"
+	MetaFileCSV                  = "*file_csv"
+	MetaFileFWV                  = "*file_fwv"
 )
