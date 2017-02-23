@@ -88,11 +88,17 @@ var (
 )
 
 func NewMongoStorage(host, port, db, user, pass, storageType string, cdrsIndexes []string, cacheCfg *config.CacheConfig, loadHistorySize int) (ms *MongoStorage, err error) {
-	address := fmt.Sprintf("%s:%s", host, port)
-	if user != "" && pass != "" {
-		address = fmt.Sprintf("%s:%s@%s", user, pass, address)
+	url := host
+	if port != "" {
+		url += ":" + port
 	}
-	session, err := mgo.Dial(address)
+	if user != "" && pass != "" {
+		url = fmt.Sprintf("%s:%s@%s", user, pass, url)
+	}
+	if db != "" {
+		url += "/" + db
+	}
+	session, err := mgo.Dial(url)
 	if err != nil {
 		return nil, err
 	}

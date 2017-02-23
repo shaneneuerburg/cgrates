@@ -105,7 +105,7 @@ func (rsrf *RSRField) IsParsed() bool {
 func (rsrf *RSRField) ParseRules() error {
 	if newRSRFld, err := NewRSRField(rsrf.Rules); err != nil {
 		return err
-	} else {
+	} else if newRSRFld != nil {
 		rsrf.staticValue = newRSRFld.staticValue
 		rsrf.RSRules = newRSRFld.RSRules
 		rsrf.filters = newRSRFld.filters
@@ -287,4 +287,13 @@ func (flds RSRFields) Id() string {
 		return ""
 	}
 	return flds[0].Id
+}
+
+func (flds RSRFields) ParseRules() (err error) {
+	for _, rsrFld := range flds {
+		if err = rsrFld.ParseRules(); err != nil {
+			break
+		}
+	}
+	return
 }
