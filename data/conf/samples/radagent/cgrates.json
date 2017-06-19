@@ -1,0 +1,159 @@
+{
+// CGRateS Configuration file
+//
+
+"general": {
+    "log_level": 7,
+},
+
+
+"listen": {
+	"rpc_json": ":2012",				// RPC JSON listening address
+	"rpc_gob": ":2013",					// RPC GOB listening address
+	"http": ":2080",					// HTTP listening address
+},
+
+"data_db": {								// database used to store runtime data (eg: accounts, cdr stats)
+	"db_type": "mongo",					// stor database type to use: <mysql|postgres>
+	"db_port": 27017, 						// the port to reach the stordb
+	"db_name": "datadb",
+	"db_password": "",
+},
+
+"stor_db": {
+	"db_type": "mongo",					// stor database type to use: <mysql|postgres>
+	"db_port": 27017, 						// the port to reach the stordb
+	"db_name": "stordb",
+	"db_password": "",
+},
+
+"rals": {
+	"enabled": true,
+	"cdrstats_conns": [
+		{"address": "*internal"}
+	],
+	"pubsubs_conns": [
+		{"address": "*internal"}
+	],
+	"users_conns": [
+		{"address": "*internal"}
+	],
+	"aliases_conns": [
+		{"address": "*internal"}
+	],
+},
+
+"scheduler": {
+	"enabled": true,
+},
+
+"cdrs": {
+	"enabled": true,
+	"rals_conns": [
+		{"address": "*internal"}
+	],
+	"cdrstats_conns": [
+		{"address": "*internal"}
+	],
+},
+
+"cdrstats": {
+	"enabled": true,
+},
+
+"pubsubs": {
+	"enabled": true,				// starts PubSub service: <true|false>.
+},
+
+"aliases": {
+	"enabled": true,				// starts Aliases service: <true|false>.
+},
+
+"users": {
+	"enabled": true,
+	"indexes": ["SubscriberId"],
+},
+
+"sm_generic": {
+	"enabled": true,
+	"debit_interval": "10s",
+},
+
+"radius_agent": {
+	"enabled": true,
+	"sm_generic_conns": [
+		{"address": "127.0.0.1:2012", "transport": "*json"}								// connection towards SMG component for session management
+	],
+	"request_processors": [
+		{
+			"id": "KamailioAuth",
+			"request_filter": "*radReqType(*radAuthReq)",
+			"request_fields":[
+				{"tag": "RequestType", "field_id": "RequestType", "type": "*constant", 
+					"value": "*prepaid", "mandatory": true},	
+				{"tag": "OriginID", "field_id": "OriginID", "type": "*composed", 
+					"value": "Acct-Session-Id;^-;Sip-From-Tag", "mandatory": true},
+				{"tag": "Account", "field_id": "Account", "type": "*composed", 
+					"value": "User-Name", "mandatory": true},
+				{"tag": "Destination", "field_id": "Destination", "type": "*composed", 
+					"value": "Called-Station-Id", "mandatory": true},
+				{"tag": "SetupTime", "field_id": "SetupTime", "type": "*composed", 
+					"value": "Event-Timestamp", "mandatory": true},
+				{"tag": "AnswerTime", "field_id": "AnswerTime", "type": "*composed", 
+					"value": "Event-Timestamp", "mandatory": true},
+			],
+			"reply_fields":[
+				{"tag": "MaxUsage", "field_id": "SIP-AVP", "type": "*composed", 
+					"value": "^session_max_time#;~*cgrMaxUsage:s/(\\d*)\\d{9}$/$1/", "mandatory": true},
+			],
+		},
+		{
+			"id": "KamailioAccountingStart",
+			"request_filter": "*radReqType(*radAcctStart)",
+			"request_fields":[	
+				{"tag": "RequestType", "field_id": "RequestType", "type": "*constant", 
+					"value": "*prepaid", "mandatory": true},	
+				{"tag": "OriginID", "field_id": "OriginID", "type": "*composed", 
+					"value": "Acct-Session-Id;^-;Sip-From-Tag;^-;Sip-To-Tag", "mandatory": true},
+				{"tag": "OriginHost", "field_id": "OriginHost", "type": "*composed", 
+					"value": "NAS-IP-Address", "mandatory": true},
+				{"tag": "Account", "field_id": "Account", "type": "*composed", 
+					"value": "User-Name", "mandatory": true},
+				{"tag": "Destination", "field_id": "Destination", "type": "*composed", 
+					"value": "Called-Station-Id", "mandatory": true},
+				{"tag": "SetupTime", "field_id": "SetupTime", "type": "*composed", 
+					"value": "Ascend-User-Acct-Time", "mandatory": true},
+				{"tag": "AnswerTime", "field_id": "AnswerTime", "type": "*composed", 
+					"value": "Ascend-User-Acct-Time", "mandatory": true},
+			],
+			"reply_fields":[],
+		},
+		{
+			"id": "KamailioAccountingStop",
+			"request_filter": "*radReqType(*radAcctStop)",
+			"request_fields":[	
+				{"tag": "RequestType", "field_id": "RequestType", "type": "*constant", 
+					"value": "*prepaid", "mandatory": true},	
+				{"tag": "OriginID", "field_id": "OriginID", "type": "*composed", 
+					"value": "Acct-Session-Id;^-;Sip-From-Tag;^-;Sip-To-Tag", "mandatory": true},
+				{"tag": "OriginHost", "field_id": "OriginHost", "type": "*composed", 
+					"value": "NAS-IP-Address", "mandatory": true},
+				{"tag": "Account", "field_id": "Account", "type": "*composed", 
+					"value": "User-Name", "mandatory": true},
+				{"tag": "Destination", "field_id": "Destination", "type": "*composed", 
+					"value": "Called-Station-Id", "mandatory": true},
+				{"tag": "SetupTime", "field_id": "SetupTime", "type": "*composed", 
+					"value": "Ascend-User-Acct-Time", "mandatory": true},
+				{"tag": "AnswerTime", "field_id": "AnswerTime", "type": "*composed", 
+					"value": "Ascend-User-Acct-Time", "mandatory": true},
+				{"tag": "Usage", "field_id": "Usage", "type": "*handler", "handler_id": "*usage_difference", 
+					"value": "Event-Timestamp;^|;Ascend-User-Acct-Time", "mandatory": true},
+			],
+			"reply_fields":[],
+		},
+		
+	],
+
+},
+
+}

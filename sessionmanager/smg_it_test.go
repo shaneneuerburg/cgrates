@@ -213,8 +213,8 @@ func TestSMGVoiceMixedRefund(t *testing.T) {
 	if err := smgRPC.Call("ApierV2.GetAccount", attrs, &acnt); err != nil {
 		t.Error(err)
 	}
-	t.Logf("Initial monetary: %f", acnt.BalanceMap[utils.MONETARY].GetTotalValue())
-	t.Logf("Initial voice: %f", acnt.BalanceMap[utils.VOICE].GetTotalValue())
+	//t.Logf("Initial monetary: %f", acnt.BalanceMap[utils.MONETARY].GetTotalValue())
+	//t.Logf("Initial voice: %f", acnt.BalanceMap[utils.VOICE].GetTotalValue())
 	smgEv := SMGenericEvent{
 		utils.EVENT_NAME:  "TEST_EVENT",
 		utils.TOR:         utils.VOICE,
@@ -274,8 +274,8 @@ func TestSMGVoiceMixedRefund(t *testing.T) {
 		acnt.BalanceMap[utils.MONETARY].GetTotalValue() != eMoneyVal {
 		t.Errorf("Expected voice: %f, received voice : %f, expected money: %f, received money: %f", eVoiceVal, acnt.BalanceMap[utils.VOICE].GetTotalValue(), eMoneyVal, acnt.BalanceMap[utils.MONETARY].GetTotalValue())
 	}
-	t.Logf("After monetary: %f", acnt.BalanceMap[utils.MONETARY].GetTotalValue())
-	t.Logf("After voice: %f", acnt.BalanceMap[utils.VOICE].GetTotalValue())
+	//t.Logf("After monetary: %f", acnt.BalanceMap[utils.MONETARY].GetTotalValue())
+	//t.Logf("After voice: %f", acnt.BalanceMap[utils.VOICE].GetTotalValue())
 }
 
 func TestSMGVoiceLastUsed(t *testing.T) {
@@ -825,10 +825,10 @@ func TestSMGVoiceRelocateWithOriginIDPrefix(t *testing.T) {
 	if err := smgRPC.Call("SMGenericV1.InitiateSession", smgEv, &maxUsage); err != nil {
 		t.Error(err)
 	}
-	time.Sleep(time.Duration(20) * time.Millisecond)
 	if maxUsage != 120 {
 		t.Error("Bad max usage: ", maxUsage)
 	}
+	time.Sleep(time.Duration(20) * time.Millisecond)
 	var aSessions []*ActiveSession
 	if err := smgRPC.Call("SMGenericV1.GetActiveSessions", map[string]string{utils.MEDI_RUNID: utils.META_DEFAULT,
 		utils.ACCID: smgEv.GetOriginID(utils.META_DEFAULT)}, &aSessions); err != nil {

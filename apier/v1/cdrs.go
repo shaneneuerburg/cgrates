@@ -34,9 +34,10 @@ func (apier *ApierV1) GetCallCostLog(attrs utils.AttrGetCallCost, reply *engine.
 		attrs.RunId = utils.META_DEFAULT
 	}
 	if smcs, err := apier.CdrDb.GetSMCosts(attrs.CgrId, attrs.RunId, "", ""); err != nil {
-		return utils.NewErrServerError(err)
-	} else if len(smcs) == 0 {
-		return utils.ErrNotFound
+		if err != utils.ErrNotFound {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = *smcs[0]
 	}
@@ -69,7 +70,7 @@ func (apier *ApierV1) RemCdrs(attrs utils.AttrRemCdrs, reply *string) error {
 	if _, _, err := apier.CdrDb.GetCDRs(&utils.CDRsFilter{CGRIDs: attrs.CgrIds}, true); err != nil {
 		return utils.NewErrServerError(err)
 	}
-	*reply = "OK"
+	*reply = utils.OK
 	return nil
 }
 
@@ -82,7 +83,7 @@ func (apier *ApierV1) RemoveCDRs(attrs utils.RPCCDRsFilter, reply *string) error
 	if _, _, err := apier.CdrDb.GetCDRs(cdrsFilter, true); err != nil {
 		return utils.NewErrServerError(err)
 	}
-	*reply = "OK"
+	*reply = utils.OK
 	return nil
 }
 

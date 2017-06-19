@@ -32,7 +32,6 @@ import (
 	"github.com/cgrates/cgrates/agents"
 	"github.com/cgrates/cgrates/apier/v1"
 	"github.com/cgrates/cgrates/apier/v2"
-	"github.com/cgrates/cgrates/balancer2go"
 	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/cdrc"
 	"github.com/cgrates/cgrates/config"
@@ -168,14 +167,15 @@ func startSmGeneric(internalSMGChan chan *sessionmanager.SMGeneric, internalRate
 	// Register RPC handler
 	smgRpc := v1.NewSMGenericV1(sm)
 	server.RpcRegister(smgRpc)
+	server.RpcRegister(&v2.SMGenericV2{*smgRpc})
 	// Register BiRpc handlers
 	if cfg.SmGenericConfig.ListenBijson != "" {
 		smgBiRpc := v1.NewSMGenericBiRpcV1(sm)
 		for method, handler := range smgBiRpc.Handlers() {
 			server.BiRPCRegisterName(method, handler)
 		}
-		//server.BiRPCRegister(smgBiRpc)
-		go server.ServeBiJSON(cfg.SmGenericConfig.ListenBijson)
+		server.ServeBiJSON(cfg.SmGenericConfig.ListenBijson)
+		exitChan <- true
 	}
 }
 
@@ -211,7 +211,7 @@ func startSMAsterisk(internalSMGChan chan *sessionmanager.SMGeneric, exitChan ch
 }
 
 func startDiameterAgent(internalSMGChan chan *sessionmanager.SMGeneric, internalPubSubSChan chan rpcclient.RpcClientConnection, exitChan chan bool) {
-	utils.Logger.Info("Starting CGRateS DiameterAgent service.")
+	utils.Logger.Info("Starting CGRateS DiameterAgent service")
 	smgChan := make(chan rpcclient.RpcClientConnection, 1) // Use it to pass smg
 	go func(internalSMGChan chan *sessionmanager.SMGeneric, smgChan chan rpcclient.RpcClientConnection) {
 		// Need this to pass from *sessionmanager.SMGeneric to rpcclient.RpcClientConnection
@@ -251,8 +251,39 @@ func startDiameterAgent(internalSMGChan chan *sessionmanager.SMGeneric, internal
 	exitChan <- true
 }
 
+func startRadiusAgent(internalSMGChan chan *sessionmanager.SMGeneric, exitChan chan bool) {
+	utils.Logger.Info("Starting CGRateS RadiusAgent service")
+	smgChan := make(chan rpcclient.RpcClientConnection, 1) // Use it to pass smg
+	go func(internalSMGChan chan *sessionmanager.SMGeneric, smgChan chan rpcclient.RpcClientConnection) {
+		// Need this to pass from *sessionmanager.SMGeneric to rpcclient.RpcClientConnection
+		smg := <-internalSMGChan
+		internalSMGChan <- smg
+		smgChan <- smg
+	}(internalSMGChan, smgChan)
+	var smgConn *rpcclient.RpcClientPool
+	if len(cfg.RadiusAgentCfg().SMGenericConns) != 0 {
+		smgConn, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
+			cfg.RadiusAgentCfg().SMGenericConns, smgChan, cfg.InternalTtl)
+		if err != nil {
+			utils.Logger.Crit(fmt.Sprintf("<RadiusAgent> Could not connect to SMG: %s", err.Error()))
+			exitChan <- true
+			return
+		}
+	}
+	ra, err := agents.NewRadiusAgent(cfg, smgConn)
+	if err != nil {
+		utils.Logger.Err(fmt.Sprintf("<RadiusAgent> error: <%s>", err.Error()))
+		exitChan <- true
+		return
+	}
+	if err = ra.ListenAndServe(); err != nil {
+		utils.Logger.Err(fmt.Sprintf("<RadiusAgent> error: <%s>", err.Error()))
+	}
+	exitChan <- true
+}
+
 func startSmFreeSWITCH(internalRaterChan, internalCDRSChan, rlsChan chan rpcclient.RpcClientConnection, cdrDb engine.CdrStorage, exitChan chan bool) {
-	utils.Logger.Info("Starting CGRateS SMFreeSWITCH service.")
+	utils.Logger.Info("Starting CGRateS SMFreeSWITCH service")
 	var ralsConn, cdrsConn, rlsConn *rpcclient.RpcClientPool
 	if len(cfg.SmFsConfig.RALsConns) != 0 {
 		ralsConn, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
@@ -289,9 +320,9 @@ func startSmFreeSWITCH(internalRaterChan, internalCDRSChan, rlsChan chan rpcclie
 	exitChan <- true
 }
 
-func startSmKamailio(internalRaterChan, internalCDRSChan chan rpcclient.RpcClientConnection, cdrDb engine.CdrStorage, exitChan chan bool) {
+func startSmKamailio(internalRaterChan, internalCDRSChan, internalRLsChan chan rpcclient.RpcClientConnection, cdrDb engine.CdrStorage, exitChan chan bool) {
 	utils.Logger.Info("Starting CGRateS SMKamailio service.")
-	var ralsConn, cdrsConn *rpcclient.RpcClientPool
+	var ralsConn, cdrsConn, rlSConn *rpcclient.RpcClientPool
 	if len(cfg.SmKamConfig.RALsConns) != 0 {
 		ralsConn, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
 			cfg.SmKamConfig.RALsConns, internalRaterChan, cfg.InternalTtl)
@@ -305,12 +336,21 @@ func startSmKamailio(internalRaterChan, internalCDRSChan chan rpcclient.RpcClien
 		cdrsConn, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
 			cfg.SmKamConfig.CDRsConns, internalCDRSChan, cfg.InternalTtl)
 		if err != nil {
-			utils.Logger.Crit(fmt.Sprintf("<SMKamailio> Could not connect to RAL: %s", err.Error()))
+			utils.Logger.Crit(fmt.Sprintf("<SMKamailio> Could not connect to CDRs: %s", err.Error()))
 			exitChan <- true
 			return
 		}
 	}
-	sm, _ := sessionmanager.NewKamailioSessionManager(cfg.SmKamConfig, ralsConn, cdrsConn, cfg.DefaultTimezone)
+	if len(cfg.SmKamConfig.RLsConns) != 0 {
+		rlSConn, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
+			cfg.SmKamConfig.RLsConns, internalRLsChan, cfg.InternalTtl)
+		if err != nil {
+			utils.Logger.Crit(fmt.Sprintf("<SMKamailio> Could not connect to RLsConns: %s", err.Error()))
+			exitChan <- true
+			return
+		}
+	}
+	sm, _ := sessionmanager.NewKamailioSessionManager(cfg.SmKamConfig, ralsConn, cdrsConn, rlSConn, cfg.DefaultTimezone)
 	smRpc.SMs = append(smRpc.SMs, sm)
 	if err = sm.Connect(); err != nil {
 		utils.Logger.Err(fmt.Sprintf("<SMKamailio> error: %s!", err))
@@ -347,7 +387,7 @@ func startSmOpenSIPS(internalRaterChan, internalCDRSChan chan rpcclient.RpcClien
 	exitChan <- true
 }
 
-func startCDRS(internalCdrSChan chan rpcclient.RpcClientConnection, cdrDb engine.CdrStorage, dataDB engine.AccountingStorage,
+func startCDRS(internalCdrSChan chan rpcclient.RpcClientConnection, cdrDb engine.CdrStorage, dataDB engine.DataDB,
 	internalRaterChan chan rpcclient.RpcClientConnection, internalPubSubSChan chan rpcclient.RpcClientConnection,
 	internalUserSChan chan rpcclient.RpcClientConnection, internalAliaseSChan chan rpcclient.RpcClientConnection,
 	internalCdrStatSChan chan rpcclient.RpcClientConnection, server *utils.Server, exitChan chan bool) {
@@ -412,20 +452,20 @@ func startCDRS(internalCdrSChan chan rpcclient.RpcClientConnection, cdrDb engine
 	internalCdrSChan <- cdrServer // Signal that cdrS is operational
 }
 
-func startScheduler(internalSchedulerChan chan *scheduler.Scheduler, cacheDoneChan chan struct{}, ratingDB engine.RatingStorage, exitChan chan bool) {
+func startScheduler(internalSchedulerChan chan *scheduler.Scheduler, cacheDoneChan chan struct{}, dataDB engine.DataDB, exitChan chan bool) {
 	// Wait for cache to load data before starting
 	cacheDone := <-cacheDoneChan
 	cacheDoneChan <- cacheDone
 	utils.Logger.Info("Starting CGRateS Scheduler.")
-	sched := scheduler.NewScheduler(ratingDB)
+	sched := scheduler.NewScheduler(dataDB)
 	internalSchedulerChan <- sched
 
 	sched.Loop()
 	exitChan <- true // Should not get out of loop though
 }
 
-func startCdrStats(internalCdrStatSChan chan rpcclient.RpcClientConnection, ratingDB engine.RatingStorage, accountDb engine.AccountingStorage, server *utils.Server) {
-	cdrStats := engine.NewStats(ratingDB, accountDb, cfg.CDRStatsSaveInterval)
+func startCdrStats(internalCdrStatSChan chan rpcclient.RpcClientConnection, dataDB engine.DataDB, server *utils.Server) {
+	cdrStats := engine.NewStats(dataDB, cfg.CDRStatsSaveInterval)
 	server.RpcRegister(cdrStats)
 	server.RpcRegister(&v1.CDRStatsV1{CdrStats: cdrStats}) // Public APIs
 	internalCdrStatSChan <- cdrStats
@@ -442,8 +482,8 @@ func startHistoryServer(internalHistorySChan chan rpcclient.RpcClientConnection,
 	internalHistorySChan <- scribeServer
 }
 
-func startPubSubServer(internalPubSubSChan chan rpcclient.RpcClientConnection, accountDb engine.AccountingStorage, server *utils.Server, exitChan chan bool) {
-	pubSubServer, err := engine.NewPubSub(accountDb, cfg.HttpSkipTlsVerify)
+func startPubSubServer(internalPubSubSChan chan rpcclient.RpcClientConnection, dataDB engine.DataDB, server *utils.Server, exitChan chan bool) {
+	pubSubServer, err := engine.NewPubSub(dataDB, cfg.HttpSkipTlsVerify)
 	if err != nil {
 		utils.Logger.Crit(fmt.Sprintf("<PubSubS> Could not start, error: %s", err.Error()))
 		exitChan <- true
@@ -454,10 +494,10 @@ func startPubSubServer(internalPubSubSChan chan rpcclient.RpcClientConnection, a
 }
 
 // ToDo: Make sure we are caching before starting this one
-func startAliasesServer(internalAliaseSChan chan rpcclient.RpcClientConnection, accountDb engine.AccountingStorage, server *utils.Server, exitChan chan bool) {
-	aliasesServer := engine.NewAliasHandler(accountDb)
+func startAliasesServer(internalAliaseSChan chan rpcclient.RpcClientConnection, dataDB engine.DataDB, server *utils.Server, exitChan chan bool) {
+	aliasesServer := engine.NewAliasHandler(dataDB)
 	server.RpcRegisterName("AliasesV1", aliasesServer)
-	loadHist, err := accountDb.GetLoadHistory(1, true, utils.NonTransactional)
+	loadHist, err := dataDB.GetLoadHistory(1, true, utils.NonTransactional)
 	if err != nil || len(loadHist) == 0 {
 		utils.Logger.Info(fmt.Sprintf("could not get load history: %v (%v)", loadHist, err))
 		internalAliaseSChan <- aliasesServer
@@ -466,8 +506,8 @@ func startAliasesServer(internalAliaseSChan chan rpcclient.RpcClientConnection, 
 	internalAliaseSChan <- aliasesServer
 }
 
-func startUsersServer(internalUserSChan chan rpcclient.RpcClientConnection, accountDb engine.AccountingStorage, server *utils.Server, exitChan chan bool) {
-	userServer, err := engine.NewUserMap(accountDb, cfg.UserServerIndexes)
+func startUsersServer(internalUserSChan chan rpcclient.RpcClientConnection, dataDB engine.DataDB, server *utils.Server, exitChan chan bool) {
+	userServer, err := engine.NewUserMap(dataDB, cfg.UserServerIndexes)
 	if err != nil {
 		utils.Logger.Crit(fmt.Sprintf("<UsersService> Could not start, error: %s", err.Error()))
 		exitChan <- true
@@ -478,7 +518,7 @@ func startUsersServer(internalUserSChan chan rpcclient.RpcClientConnection, acco
 }
 
 func startResourceLimiterService(internalRLSChan, internalCdrStatSChan chan rpcclient.RpcClientConnection, cfg *config.CGRConfig,
-	accountDb engine.AccountingStorage, server *utils.Server, exitChan chan bool) {
+	dataDB engine.DataDB, server *utils.Server, exitChan chan bool) {
 	var statsConn *rpcclient.RpcClientPool
 	if len(cfg.ResourceLimiterCfg().CDRStatConns) != 0 { // Stats connection init
 		statsConn, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
@@ -489,7 +529,7 @@ func startResourceLimiterService(internalRLSChan, internalCdrStatSChan chan rpcc
 			return
 		}
 	}
-	rls, err := engine.NewResourceLimiterService(cfg, accountDb, statsConn)
+	rls, err := engine.NewResourceLimiterService(cfg, dataDB, statsConn)
 	if err != nil {
 		utils.Logger.Crit(fmt.Sprintf("<RLs> Could not init, error: %s", err.Error()))
 		exitChan <- true
@@ -501,13 +541,14 @@ func startResourceLimiterService(internalRLSChan, internalCdrStatSChan chan rpcc
 		exitChan <- true
 		return
 	}
-	server.RpcRegisterName("RLsV1", rls)
-	internalRLSChan <- rls
+	rlsV1 := v1.NewRLsV1(rls)
+	server.RpcRegister(rlsV1)
+	internalRLSChan <- rlsV1
 }
 
 func startRpc(server *utils.Server, internalRaterChan,
 	internalCdrSChan, internalCdrStatSChan, internalHistorySChan, internalPubSubSChan, internalUserSChan,
-	internalAliaseSChan chan rpcclient.RpcClientConnection, internalSMGChan chan *sessionmanager.SMGeneric) {
+	internalAliaseSChan, internalRLsChan chan rpcclient.RpcClientConnection, internalSMGChan chan *sessionmanager.SMGeneric) {
 	select { // Any of the rpc methods will unlock listening to rpc requests
 	case resp := <-internalRaterChan:
 		internalRaterChan <- resp
@@ -525,6 +566,8 @@ func startRpc(server *utils.Server, internalRaterChan,
 		internalAliaseSChan <- aliases
 	case smg := <-internalSMGChan:
 		internalSMGChan <- smg
+	case rls := <-internalRLsChan:
+		internalRLsChan <- rls
 	}
 	go server.ServeJSON(cfg.RPCJSONListen)
 	go server.ServeGOB(cfg.RPCGOBListen)
@@ -614,29 +657,19 @@ func main() {
 	// Init cache
 	cache.NewCache(cfg.CacheConfig)
 
-	var ratingDB engine.RatingStorage
-	var accountDb engine.AccountingStorage
+	var dataDB engine.DataDB
 	var loadDb engine.LoadStorage
 	var cdrDb engine.CdrStorage
-	if cfg.RALsEnabled || cfg.SchedulerEnabled || cfg.CDRStatsEnabled { // Only connect to dataDb if necessary
-		ratingDB, err = engine.ConfigureRatingStorage(cfg.TpDbType, cfg.TpDbHost, cfg.TpDbPort,
-			cfg.TpDbName, cfg.TpDbUser, cfg.TpDbPass, cfg.DBDataEncoding, cfg.CacheConfig, cfg.LoadHistorySize)
-		if err != nil { // Cannot configure getter database, show stopper
-			utils.Logger.Crit(fmt.Sprintf("Could not configure dataDb: %s exiting!", err))
-			return
-		}
-		defer ratingDB.Close()
-		engine.SetRatingStorage(ratingDB)
-	}
-	if cfg.RALsEnabled || cfg.CDRStatsEnabled || cfg.PubSubServerEnabled || cfg.AliasesServerEnabled || cfg.UserServerEnabled {
-		accountDb, err = engine.ConfigureAccountingStorage(cfg.DataDbType, cfg.DataDbHost, cfg.DataDbPort,
+
+	if cfg.RALsEnabled || cfg.CDRStatsEnabled || cfg.PubSubServerEnabled || cfg.AliasesServerEnabled || cfg.UserServerEnabled || cfg.SchedulerEnabled {
+		dataDB, err = engine.ConfigureDataStorage(cfg.DataDbType, cfg.DataDbHost, cfg.DataDbPort,
 			cfg.DataDbName, cfg.DataDbUser, cfg.DataDbPass, cfg.DBDataEncoding, cfg.CacheConfig, cfg.LoadHistorySize)
 		if err != nil { // Cannot configure getter database, show stopper
 			utils.Logger.Crit(fmt.Sprintf("Could not configure dataDb: %s exiting!", err))
 			return
 		}
-		defer accountDb.Close()
-		engine.SetAccountingStorage(accountDb)
+		defer dataDB.Close()
+		engine.SetDataStorage(dataDB)
 		if err := engine.CheckVersion(nil); err != nil {
 			fmt.Println(err.Error())
 			return
@@ -667,7 +700,6 @@ func main() {
 	// Async starts here, will follow cgrates.json start order
 
 	// Define internal connections via channels
-	internalBalancerChan := make(chan *balancer2go.Balancer, 1)
 	internalRaterChan := make(chan rpcclient.RpcClientConnection, 1)
 	cacheDoneChan := make(chan struct{}, 1)
 	internalCdrSChan := make(chan rpcclient.RpcClientConnection, 1)
@@ -680,17 +712,12 @@ func main() {
 	internalRLSChan := make(chan rpcclient.RpcClientConnection, 1)
 
 	// Start ServiceManager
-	srvManager := servmanager.NewServiceManager(cfg, ratingDB, exitChan, cacheDoneChan)
-
-	// Start balancer service
-	if cfg.BalancerEnabled {
-		go startBalancer(internalBalancerChan, &stopHandled, exitChan) // Not really needed async here but to cope with uniformity
-	}
+	srvManager := servmanager.NewServiceManager(cfg, dataDB, exitChan, cacheDoneChan)
 
 	// Start rater service
 	if cfg.RALsEnabled {
-		go startRater(internalRaterChan, cacheDoneChan, internalBalancerChan, internalCdrStatSChan, internalHistorySChan, internalPubSubSChan, internalUserSChan, internalAliaseSChan,
-			srvManager, server, ratingDB, accountDb, loadDb, cdrDb, &stopHandled, exitChan)
+		go startRater(internalRaterChan, cacheDoneChan, internalCdrStatSChan, internalHistorySChan, internalPubSubSChan, internalUserSChan, internalAliaseSChan,
+			srvManager, server, dataDB, loadDb, cdrDb, &stopHandled, exitChan)
 	}
 
 	// Start Scheduler
@@ -700,13 +727,13 @@ func main() {
 
 	// Start CDR Server
 	if cfg.CDRSEnabled {
-		go startCDRS(internalCdrSChan, cdrDb, accountDb,
+		go startCDRS(internalCdrSChan, cdrDb, dataDB,
 			internalRaterChan, internalPubSubSChan, internalUserSChan, internalAliaseSChan, internalCdrStatSChan, server, exitChan)
 	}
 
 	// Start CDR Stats server
 	if cfg.CDRStatsEnabled {
-		go startCdrStats(internalCdrStatSChan, ratingDB, accountDb, server)
+		go startCdrStats(internalCdrStatSChan, dataDB, server)
 	}
 
 	// Start CDRC components if necessary
@@ -725,7 +752,7 @@ func main() {
 
 	// Start SM-Kamailio
 	if cfg.SmKamConfig.Enabled {
-		go startSmKamailio(internalRaterChan, internalCdrSChan, cdrDb, exitChan)
+		go startSmKamailio(internalRaterChan, internalCdrSChan, internalRLSChan, cdrDb, exitChan)
 	}
 
 	// Start SM-OpenSIPS
@@ -747,6 +774,10 @@ func main() {
 		go startDiameterAgent(internalSMGChan, internalPubSubSChan, exitChan)
 	}
 
+	if cfg.RadiusAgentCfg().Enabled {
+		go startRadiusAgent(internalSMGChan, exitChan)
+	}
+
 	// Start HistoryS service
 	if cfg.HistoryServerEnabled {
 		go startHistoryServer(internalHistorySChan, server, exitChan)
@@ -754,27 +785,27 @@ func main() {
 
 	// Start PubSubS service
 	if cfg.PubSubServerEnabled {
-		go startPubSubServer(internalPubSubSChan, accountDb, server, exitChan)
+		go startPubSubServer(internalPubSubSChan, dataDB, server, exitChan)
 	}
 
 	// Start Aliases service
 	if cfg.AliasesServerEnabled {
-		go startAliasesServer(internalAliaseSChan, accountDb, server, exitChan)
+		go startAliasesServer(internalAliaseSChan, dataDB, server, exitChan)
 	}
 
 	// Start users service
 	if cfg.UserServerEnabled {
-		go startUsersServer(internalUserSChan, accountDb, server, exitChan)
+		go startUsersServer(internalUserSChan, dataDB, server, exitChan)
 	}
 
 	// Start RL service
 	if cfg.ResourceLimiterCfg().Enabled {
-		go startResourceLimiterService(internalRLSChan, internalCdrStatSChan, cfg, accountDb, server, exitChan)
+		go startResourceLimiterService(internalRLSChan, internalCdrStatSChan, cfg, dataDB, server, exitChan)
 	}
 
 	// Serve rpc connections
 	go startRpc(server, internalRaterChan, internalCdrSChan, internalCdrStatSChan, internalHistorySChan,
-		internalPubSubSChan, internalUserSChan, internalAliaseSChan, internalSMGChan)
+		internalPubSubSChan, internalUserSChan, internalAliaseSChan, internalRLSChan, internalSMGChan)
 	<-exitChan
 
 	if *pidFile != "" {

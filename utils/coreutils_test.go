@@ -20,6 +20,7 @@ package utils
 import (
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -428,14 +429,14 @@ func TestConvertIfaceToString(t *testing.T) {
 }
 
 func TestMandatory(t *testing.T) {
-	_, err := FmtFieldWidth("", 0, "", "", true)
+	_, err := FmtFieldWidth("", "", 0, "", "", true)
 	if err == nil {
 		t.Errorf("Failed to detect mandatory value")
 	}
 }
 
 func TestMaxLen(t *testing.T) {
-	result, err := FmtFieldWidth("test", 4, "", "", false)
+	result, err := FmtFieldWidth("", "test", 4, "", "", false)
 	expected := "test"
 	if err != nil || result != expected {
 		t.Errorf("Expected \"test\" was \"%s\"", result)
@@ -443,7 +444,7 @@ func TestMaxLen(t *testing.T) {
 }
 
 func TestRPadding(t *testing.T) {
-	result, err := FmtFieldWidth("test", 8, "", "right", false)
+	result, err := FmtFieldWidth("", "test", 8, "", "right", false)
 	expected := "test    "
 	if err != nil || result != expected {
 		t.Errorf("Expected \"%s \" was \"%s\"", expected, result)
@@ -451,7 +452,7 @@ func TestRPadding(t *testing.T) {
 }
 
 func TestPaddingFiller(t *testing.T) {
-	result, err := FmtFieldWidth("", 8, "", "right", false)
+	result, err := FmtFieldWidth("", "", 8, "", "right", false)
 	expected := "        "
 	if err != nil || result != expected {
 		t.Errorf("Expected \"%s \" was \"%s\"", expected, result)
@@ -459,7 +460,7 @@ func TestPaddingFiller(t *testing.T) {
 }
 
 func TestLPadding(t *testing.T) {
-	result, err := FmtFieldWidth("test", 8, "", "left", false)
+	result, err := FmtFieldWidth("", "test", 8, "", "left", false)
 	expected := "    test"
 	if err != nil || result != expected {
 		t.Errorf("Expected \"%s \" was \"%s\"", expected, result)
@@ -467,7 +468,7 @@ func TestLPadding(t *testing.T) {
 }
 
 func TestZeroLPadding(t *testing.T) {
-	result, err := FmtFieldWidth("test", 8, "", "zeroleft", false)
+	result, err := FmtFieldWidth("", "test", 8, "", "zeroleft", false)
 	expected := "0000test"
 	if err != nil || result != expected {
 		t.Errorf("Expected \"%s \" was \"%s\"", expected, result)
@@ -475,7 +476,7 @@ func TestZeroLPadding(t *testing.T) {
 }
 
 func TestRStrip(t *testing.T) {
-	result, err := FmtFieldWidth("test", 2, "right", "", false)
+	result, err := FmtFieldWidth("", "test", 2, "right", "", false)
 	expected := "te"
 	if err != nil || result != expected {
 		t.Errorf("Expected \"%s \" was \"%s\"", expected, result)
@@ -483,7 +484,7 @@ func TestRStrip(t *testing.T) {
 }
 
 func TestXRStrip(t *testing.T) {
-	result, err := FmtFieldWidth("test", 3, "xright", "", false)
+	result, err := FmtFieldWidth("", "test", 3, "xright", "", false)
 	expected := "tex"
 	if err != nil || result != expected {
 		t.Errorf("Expected \"%s \" was \"%s\"", expected, result)
@@ -491,7 +492,7 @@ func TestXRStrip(t *testing.T) {
 }
 
 func TestLStrip(t *testing.T) {
-	result, err := FmtFieldWidth("test", 2, "left", "", false)
+	result, err := FmtFieldWidth("", "test", 2, "left", "", false)
 	expected := "st"
 	if err != nil || result != expected {
 		t.Errorf("Expected \"%s \" was \"%s\"", expected, result)
@@ -499,7 +500,7 @@ func TestLStrip(t *testing.T) {
 }
 
 func TestXLStrip(t *testing.T) {
-	result, err := FmtFieldWidth("test", 3, "xleft", "", false)
+	result, err := FmtFieldWidth("", "test", 3, "xleft", "", false)
 	expected := "xst"
 	if err != nil || result != expected {
 		t.Errorf("Expected \"%s \" was \"%s\"", expected, result)
@@ -507,14 +508,14 @@ func TestXLStrip(t *testing.T) {
 }
 
 func TestStripNotAllowed(t *testing.T) {
-	_, err := FmtFieldWidth("test", 3, "", "", false)
+	_, err := FmtFieldWidth("", "test", 3, "", "", false)
 	if err == nil {
 		t.Error("Expected error")
 	}
 }
 
 func TestPaddingNotAllowed(t *testing.T) {
-	_, err := FmtFieldWidth("test", 5, "", "", false)
+	_, err := FmtFieldWidth("", "test", 5, "", "", false)
 	if err == nil {
 		t.Error("Expected error")
 	}
@@ -757,5 +758,60 @@ Date:   Fri Dec 30 19:48:09 2016 +0100
 	eVers := "CGRateS 0.9.1~rc8 git+73014da (2016-12-30T19:48:09+01:00)"
 	if vers := GetCGRVersion(); vers != eVers {
 		t.Errorf("Expecting: <%s>, received: <%s>", eVers, vers)
+	}
+}
+
+func TestCounter(t *testing.T) {
+	var cmax int64 = 10000
+	var i int64
+	cnter := NewCounter(0, cmax)
+	for i = 1; i <= cmax; i++ {
+		if i != cnter.Next() {
+			t.Error("Counter has unexpected value")
+		}
+	}
+	if cnter.Next() != 0 {
+		t.Error("Counter did not reset")
+	}
+}
+
+func TestCounterConcurrent(t *testing.T) {
+	var nmax int64 = 10000
+	ch := make(chan int64, nmax)
+	wg := new(sync.WaitGroup)
+	cnter := NewCounter(0, nmax-1)
+	var i int64
+	for i = 1; i <= nmax; i++ {
+		wg.Add(1)
+		go func() {
+			ch <- cnter.Next()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	m := make(map[int64]bool)
+	for i = 1; i <= nmax; i++ {
+		m[<-ch] = true
+	}
+	for i = 1; i <= nmax-1; i++ {
+		if !m[i] {
+			t.Errorf("Missing value: %d", i)
+		}
+	}
+	if cnter.Value() != 0 {
+		t.Error("Counter was not reseted to 0")
+	}
+}
+
+func TestGZIPGUnZIP(t *testing.T) {
+	src := []byte("CGRateS.org")
+	gzipped, err := GZIPContent(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dst, err := GUnZIPContent(gzipped); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(src, dst) {
+		t.Error("not matching initial source")
 	}
 }

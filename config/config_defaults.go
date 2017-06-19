@@ -54,7 +54,7 @@ const CGRATES_CFG_JSON = `
 	"reverse_destinations": {"limit": 10000, "ttl":"0s", "precache": false},	// control reverse destinations index caching
 	"rating_plans": {"limit": 10000, "ttl":"0s","precache": true},				// control rating plans caching
 	"rating_profiles": {"limit": 10000, "ttl":"0s", "precache": false},			// control rating profiles caching
-	"lcr": {"limit": 10000, "ttl":"0s", "precache": false},						// control lcr rules caching					
+	"lcr": {"limit": 10000, "ttl":"0s", "precache": false},						// control lcr rules caching
 	"cdr_stats": {"limit": 10000, "ttl":"0s", "precache": false},				// control cdr stats queues caching
 	"actions": {"limit": 10000, "ttl":"0s", "precache": false},					// control actions caching
 	"action_plans": {"limit": 10000, "ttl":"0s", "precache": false},			// control action plans caching
@@ -83,22 +83,12 @@ const CGRATES_CFG_JSON = `
 },
 
 
-"tariffplan_db": {							// database used to store active tariff plan configuration
-	"db_type": "redis",						// tariffplan_db type: <redis|mongo>
-	"db_host": "127.0.0.1",					// tariffplan_db host address
-	"db_port": 6379, 						// port to reach the tariffplan_db
-	"db_name": "10", 						// tariffplan_db name to connect to
-	"db_user": "", 							// sername to use when connecting to tariffplan_db
-	"db_password": "", 						// password to use when connecting to tariffplan_db
-},
-
-
 "data_db": {								// database used to store runtime data (eg: accounts, cdr stats)
 	"db_type": "redis",						// data_db type: <redis|mongo>
 	"db_host": "127.0.0.1",					// data_db host address
 	"db_port": 6379, 						// data_db port to reach the database
-	"db_name": "11", 						// data_db database name to connect to
-	"db_user": "", 							// username to use when connecting to data_db
+	"db_name": "10", 						// data_db database name to connect to
+	"db_user": "cgrates", 					// username to use when connecting to data_db
 	"db_password": "", 						// password to use when connecting to data_db
 	"load_history_size": 10,				// Number of records in the load history
 },
@@ -110,21 +100,14 @@ const CGRATES_CFG_JSON = `
 	"db_port": 3306,						// the port to reach the stordb
 	"db_name": "cgrates",					// stor database name
 	"db_user": "cgrates",					// username to use when connecting to stordb
-	"db_password": "CGRateS.org",			// password to use when connecting to stordb
+	"db_password": "",						// password to use when connecting to stordb
 	"max_open_conns": 100,					// maximum database connections opened
 	"max_idle_conns": 10,					// maximum database connections idle
 	"cdrs_indexes": [],						// indexes on cdrs table to speed up queries, used only in case of mongo
 },
 
-
-"balancer": {
-	"enabled": false,						// start Balancer service: <true|false>
-},
-
-
 "rals": {
 	"enabled": false,						// enable Rater service: <true|false>
-	"balancer": "",							// register to balancer as worker: <""|*internal|x.y.z.y:1234>
 	"cdrstats_conns": [],					// address where to reach the cdrstats service, empty to disable stats functionality: <""|*internal|x.y.z.y:1234>
 	"historys_conns": [],					// address where to reach the history service, empty to disable history functionality: <""|*internal|x.y.z.y:1234>
 	"pubsubs_conns": [],					// address where to reach the pubusb service, empty to disable pubsub functionality: <""|*internal|x.y.z.y:1234>
@@ -152,7 +135,7 @@ const CGRATES_CFG_JSON = `
 	"pubsubs_conns": [],					// address where to reach the pubusb service, empty to disable pubsub functionality: <""|*internal|x.y.z.y:1234>
 	"users_conns": [],						// address where to reach the user service, empty to disable user profile functionality: <""|*internal|x.y.z.y:1234>
 	"aliases_conns": [],					// address where to reach the aliases service, empty to disable aliases functionality: <""|*internal|x.y.z.y:1234>
-	"cdrstats_conns": [],					// address where to reach the cdrstats service, empty to disable stats functionality<""|*internal|x.y.z.y:1234>
+	"cdrstats_conns": [],					// address where to reach the cdrstats service, empty to disable stats functionality: <""|*internal|x.y.z.y:1234>
 	"online_cdr_exports":[],				// list of CDRE profiles to use for real-time CDR exports
 },
 
@@ -272,6 +255,7 @@ const CGRATES_CFG_JSON = `
 	"min_call_duration": "0s",				// only authorize calls with allowed duration higher than this
 	"max_call_duration": "3h",				// maximum call duration a prepaid call can last
 	"session_ttl": "0s",					// time after a session with no updates is terminated, not defined by default
+	//"session_ttl_max_delay": "",			// activates session_ttl randomization and limits the maximum possible delay
 	//"session_ttl_last_used": "",			// tweak LastUsed for sessions timing-out, not defined by default
 	//"session_ttl_usage": "",				// tweak Usage for sessions timing-out, not defined by default
 	"session_indexes": [],					// index sessions based on these fields for GetActiveSessions API
@@ -295,7 +279,7 @@ const CGRATES_CFG_JSON = `
 	"cdrs_conns": [
 		{"address": "*internal"}			// address where to reach CDR Server, empty to disable CDR capturing <*internal|x.y.z.y:1234>
 	],
-	"rls_conns": [],						// address where to reach the ResourceLimiter service, empty to disable stats functionality: <""|*internal|x.y.z.y:1234>
+	"rls_conns": [],						// address where to reach the ResourceLimiter service, empty to disable functionality: <""|*internal|x.y.z.y:1234>
 	"create_cdr": false,					// create CDR out of events and sends them to CDRS component
 	"extra_fields": [],						// extra fields to store in auth/CDRs when creating them
 	"debit_interval": "10s",				// interval to perform debits on.
@@ -322,6 +306,7 @@ const CGRATES_CFG_JSON = `
 	"cdrs_conns": [
 		{"address": "*internal"}			// address where to reach CDR Server, empty to disable CDR capturing <*internal|x.y.z.y:1234>
 	],
+	"rls_conns": [],						// address where to reach the ResourceLimiter service, empty to disable functionality: <""|*internal|x.y.z.y:1234>
 	"create_cdr": false,					// create CDR out of events and sends them to CDRS component
 	"debit_interval": "10s",				// interval to perform debits on.
 	"min_call_duration": "0s",				// only authorize calls with allowed duration higher than this
@@ -366,35 +351,28 @@ const CGRATES_CFG_JSON = `
 	"origin_realm": "cgrates.org",								// diameter Origin-Realm AVP used in replies
 	"vendor_id": 0,												// diameter Vendor-Id AVP used in replies
 	"product_name": "CGRateS",									// diameter Product-Name AVP used in replies
-	"request_processors": [
-		{
-			"id": "*default",												// formal identifier of this processor
-			"dry_run": false,												// do not send the events to SMG, just log them
-			"publish_event": false,											// if enabled, it will publish internal event to pubsub
-			"request_filter": "Subscription-Id>Subscription-Id-Type(0)",	// filter requests processed by this processor
-			"flags": [],													// flags to influence processing behavior
-			"continue_on_success": false,				// continue to the next template if executed
-			"append_cca": true,						// when continuing will append cca fields to the previous ones
-			"ccr_fields":[							// import content_fields template, tag will match internally CDR field, in case of .csv value will be represented by index of the field value
-				{"tag": "TOR", "field_id": "ToR", "type": "*composed", "value": "^*voice", "mandatory": true},
-				{"tag": "OriginID", "field_id": "OriginID", "type": "*composed", "value": "Session-Id", "mandatory": true},
-				{"tag": "RequestType", "field_id": "RequestType", "type": "*composed", "value": "^*users", "mandatory": true},
-				{"tag": "Direction", "field_id": "Direction", "type": "*composed", "value": "^*out", "mandatory": true},
-				{"tag": "Tenant", "field_id": "Tenant", "type": "*composed", "value": "^*users", "mandatory": true},
-				{"tag": "Category", "field_id": "Category", "type": "*composed", "value": "^call", "mandatory": true},
-				{"tag": "Account", "field_id": "Account", "type": "*composed", "value": "^*users", "mandatory": true},
-				{"tag": "Subject", "field_id": "Subject", "type": "*composed", "value": "^*users", "mandatory": true},
-				{"tag": "Destination", "field_id": "Destination", "type": "*composed", "value": "Service-Information>IN-Information>Real-Called-Number", "mandatory": true},
-				{"tag": "SetupTime", "field_id": "SetupTime", "type": "*composed", "value": "Event-Timestamp", "mandatory": true},
-				{"tag": "AnswerTime", "field_id": "AnswerTime", "type": "*composed", "value": "Event-Timestamp", "mandatory": true},
-				{"tag": "Usage", "field_id": "Usage", "type": "*handler", "handler_id": "*ccr_usage", "mandatory": true},
-				{"tag": "SubscriberID", "field_id": "SubscriberId", "type": "*composed", "value": "Subscription-Id>Subscription-Id-Data", "mandatory": true},
-			],
-			"cca_fields":[								// fields returned in CCA
-				{"tag": "GrantedUnits", "field_id": "Granted-Service-Unit>CC-Time", "type": "*handler", "handler_id": "*cca_usage", "mandatory": true},
-			],
-		},
+	"request_processors": [],
+},
+
+
+"radius_agent": {
+	"enabled": false,											// enables the radius agent: <true|false>
+	"listen_net": "udp",										// network to listen on <udp|tcp>
+	"listen_auth": "127.0.0.1:1812",							// address where to listen for radius authentication requests <x.y.z.y:1234>
+	"listen_acct": "127.0.0.1:1813",							// address where to listen for radius accounting requests <x.y.z.y:1234>
+	"client_secrets": {											// hash containing secrets for clients connecting here <*default|$client_ip>
+		"*default": "CGRateS.org"
+	},				
+	"client_dictionaries": {									// per client path towards directory holding additional dictionaries to load (extra to RFC)
+		"*default": "/usr/share/cgrates/radius/dict/",			// key represents the client IP or catch-all <*default|$client_ip>
+	},
+	"sm_generic_conns": [
+		{"address": "*internal"}								// connection towards SMG component for session management
 	],
+	"create_cdr": true,											// create CDR out of Accounting-Stop and send it to SMG component
+	"cdr_requires_session": false,								// only create CDR if there is an active session at terminate
+	"timezone": "",												// timezone for timestamps where not specified, empty for general defaults <""|UTC|Local|$IANA_TZ_DB>
+	"request_processors": [],
 },
 
 
@@ -425,7 +403,6 @@ const CGRATES_CFG_JSON = `
 	"enabled": false,						// starts ResourceLimiter service: <true|false>.
 	"cdrstats_conns": [],					// address where to reach the cdrstats service, empty to disable stats functionality: <""|*internal|x.y.z.y:1234>
 	"cache_dump_interval": "0s",			// dump cache regularly to dataDB, 0 - dump at start/shutdown: <""|*never|$dur>
-	"usage_ttl": "3h",						// expire usage records if older than this duration <""|*never|$dur>
 },
 
 

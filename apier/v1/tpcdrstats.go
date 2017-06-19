@@ -18,52 +18,37 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package v1
 
 import (
-	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/utils"
 )
 
 // Creates a new CdrStats profile within a tariff plan
 func (self *ApierV1) SetTPCdrStats(attrs utils.TPCdrStats, reply *string) error {
-	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "CdrStatsId", "CdrStats"}); len(missing) != 0 {
+	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "ID", "CdrStats"}); len(missing) != 0 {
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-	/*for _, action := range attrs.CdrStats {
-		requiredFields := []string{"Identifier", "Weight"}
-		if action.BalanceType != "" { // Add some inter-dependent parameters - if balanceType then we are not talking about simply calling actions
-			requiredFields = append(requiredFields, "Direction", "Units")
-		}
-		if missing := utils.MissingStructFields(action, requiredFields); len(missing) != 0 {
-			return fmt.Errorf("%s:CdrStat:%s:%v", utils.ERR_MANDATORY_IE_MISSING, action.Identifier, missing)
-		}
-	}*/
-	cs := engine.APItoModelCdrStat(&attrs)
-	if err := self.StorDb.SetTpCdrStats(cs); err != nil {
+	if err := self.StorDb.SetTPCdrStats([]*utils.TPCdrStats{&attrs}); err != nil {
 		return utils.NewErrServerError(err)
 	}
-	*reply = "OK"
+	*reply = utils.OK
 	return nil
 }
 
 type AttrGetTPCdrStats struct {
-	TPid       string // Tariff plan id
-	CdrStatsId string // CdrStat id
+	TPid string // Tariff plan id
+	ID   string // CdrStat id
 }
 
 // Queries specific CdrStat on tariff plan
 func (self *ApierV1) GetTPCdrStats(attrs AttrGetTPCdrStats, reply *utils.TPCdrStats) error {
-	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "CdrStatsId"}); len(missing) != 0 { //Params missing
+	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "ID"}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-	if sgs, err := self.StorDb.GetTpCdrStats(attrs.TPid, attrs.CdrStatsId); err != nil {
+	if css, err := self.StorDb.GetTPCdrStats(attrs.TPid, attrs.ID); err != nil {
 		return utils.NewErrServerError(err)
-	} else if len(sgs) == 0 {
+	} else if len(css) == 0 {
 		return utils.ErrNotFound
 	} else {
-		csMap, err := engine.TpCdrStats(sgs).GetCdrStats()
-		if err != nil {
-			return err
-		}
-		*reply = utils.TPCdrStats{TPid: attrs.TPid, CdrStatsId: attrs.CdrStatsId, CdrStats: csMap[attrs.CdrStatsId]}
+		*reply = *css[0]
 	}
 	return nil
 }
@@ -78,7 +63,7 @@ func (self *ApierV1) GetTPCdrStatsIds(attrs AttrGetTPCdrStatIds, reply *[]string
 	if missing := utils.MissingStructFields(&attrs, []string{"TPid"}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-	if ids, err := self.StorDb.GetTpTableIds(attrs.TPid, utils.TBL_TP_CDR_STATS, utils.TPDistinctIds{"tag"}, nil, &attrs.Paginator); err != nil {
+	if ids, err := self.StorDb.GetTpTableIds(attrs.TPid, utils.TBLTPCdrStats, utils.TPDistinctIds{"tag"}, nil, &attrs.Paginator); err != nil {
 		return utils.NewErrServerError(err)
 	} else if ids == nil {
 		return utils.ErrNotFound
@@ -90,13 +75,13 @@ func (self *ApierV1) GetTPCdrStatsIds(attrs AttrGetTPCdrStatIds, reply *[]string
 
 // Removes specific CdrStats on Tariff plan
 func (self *ApierV1) RemTPCdrStats(attrs AttrGetTPCdrStats, reply *string) error {
-	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "CdrStatsId"}); len(missing) != 0 { //Params missing
+	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "ID"}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-	if err := self.StorDb.RemTpData(utils.TBL_TP_SHARED_GROUPS, attrs.TPid, map[string]string{"tag": attrs.CdrStatsId}); err != nil {
+	if err := self.StorDb.RemTpData(utils.TBLTPSharedGroups, attrs.TPid, map[string]string{"tag": attrs.ID}); err != nil {
 		return utils.NewErrServerError(err)
 	} else {
-		*reply = "OK"
+		*reply = utils.OK
 	}
 	return nil
 }

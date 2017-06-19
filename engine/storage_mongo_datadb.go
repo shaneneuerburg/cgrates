@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"strings"
+	"time"
 
 	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/config"
@@ -112,17 +113,19 @@ func NewMongoStorage(host, port, db, user, pass, storageType string, cdrsIndexes
 			return nil, err
 		}
 	}
+	ms.cnter = utils.NewCounter(time.Now().UnixNano(), 0)
 	return
 }
 
 type MongoStorage struct {
 	session         *mgo.Session
 	db              string
-	storageType     string // tariffplandb, datadb, stordb
+	storageType     string // datadb, stordb
 	ms              Marshaler
 	cacheCfg        *config.CacheConfig
 	loadHistorySize int
 	cdrsIndexes     []string
+	cnter           *utils.Counter
 }
 
 func (ms *MongoStorage) conn(col string) (*mgo.Session, *mgo.Collection) {
@@ -143,10 +146,8 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 		Sparse:     false, // Only index documents containing the Key fields
 	}
 	var colectNames []string // collection names containing this index
-	if ms.storageType == utils.TariffPlanDB {
-		colectNames = []string{colAct, colApl, colAAp, colAtr, colDcs, colRls, colRpl, colLcr, colDst, colRds}
-	} else if ms.storageType == utils.DataDB {
-		colectNames = []string{colAls, colUsr, colLht}
+	if ms.storageType == utils.DataDB {
+		colectNames = []string{colAct, colApl, colAAp, colAtr, colDcs, colRls, colRpl, colLcr, colDst, colRds, colAls, colUsr, colLht}
 	}
 	for _, col := range colectNames {
 		if err = db.C(col).EnsureIndex(idx); err != nil {
@@ -160,10 +161,8 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 		Background: false,
 		Sparse:     false,
 	}
-	if ms.storageType == utils.TariffPlanDB {
-		colectNames = []string{colRpf, colShg, colCrs}
-	} else if ms.storageType == utils.DataDB {
-		colectNames = []string{colAcc}
+	if ms.storageType == utils.DataDB {
+		colectNames = []string{colRpf, colShg, colCrs, colAcc}
 	}
 	for _, col := range colectNames {
 		if err = db.C(col).EnsureIndex(idx); err != nil {
@@ -172,14 +171,14 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 	}
 	if ms.storageType == utils.StorDB {
 		idx = mgo.Index{
-			Key:        []string{"tpid", "tag"},
+			Key:        []string{"tpid", "id"},
 			Unique:     true,
 			DropDups:   false,
 			Background: false,
 			Sparse:     false,
 		}
-		for _, col := range []string{utils.TBL_TP_TIMINGS, utils.TBL_TP_DESTINATIONS, utils.TBL_TP_DESTINATION_RATES, utils.TBL_TP_RATING_PLANS,
-			utils.TBL_TP_SHARED_GROUPS, utils.TBL_TP_CDR_STATS, utils.TBL_TP_ACTIONS, utils.TBL_TP_ACTION_PLANS, utils.TBL_TP_ACTION_TRIGGERS} {
+		for _, col := range []string{utils.TBLTPTimings, utils.TBLTPDestinations, utils.TBLTPDestinationRates, utils.TBLTPRatingPlans,
+			utils.TBLTPSharedGroups, utils.TBLTPCdrStats, utils.TBLTPActions, utils.TBLTPActionPlans, utils.TBLTPActionTriggers} {
 			if err = db.C(col).EnsureIndex(idx); err != nil {
 				return
 			}
@@ -191,7 +190,7 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 			Background: false,
 			Sparse:     false,
 		}
-		if err = db.C(utils.TBL_TP_RATE_PROFILES).EnsureIndex(idx); err != nil {
+		if err = db.C(utils.TBLTPRateProfiles).EnsureIndex(idx); err != nil {
 			return
 		}
 		idx = mgo.Index{
@@ -201,7 +200,7 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 			Background: false,
 			Sparse:     false,
 		}
-		if err = db.C(utils.TBL_TP_LCRS).EnsureIndex(idx); err != nil {
+		if err = db.C(utils.TBLTPLcrs).EnsureIndex(idx); err != nil {
 			return
 		}
 		idx = mgo.Index{
@@ -211,7 +210,7 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 			Background: false,
 			Sparse:     false,
 		}
-		if err = db.C(utils.TBL_TP_USERS).EnsureIndex(idx); err != nil {
+		if err = db.C(utils.TBLTPUsers).EnsureIndex(idx); err != nil {
 			return
 		}
 		idx = mgo.Index{
@@ -221,7 +220,7 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 			Background: false,
 			Sparse:     false,
 		}
-		if err = db.C(utils.TBL_TP_LCRS).EnsureIndex(idx); err != nil {
+		if err = db.C(utils.TBLTPLcrs).EnsureIndex(idx); err != nil {
 			return
 		}
 		idx = mgo.Index{
@@ -231,7 +230,7 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 			Background: false,
 			Sparse:     false,
 		}
-		if err = db.C(utils.TBL_TP_DERIVED_CHARGERS).EnsureIndex(idx); err != nil {
+		if err = db.C(utils.TBLTPDerivedChargers).EnsureIndex(idx); err != nil {
 			return
 		}
 		idx = mgo.Index{
@@ -241,7 +240,7 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 			Background: false,
 			Sparse:     false,
 		}
-		if err = db.C(utils.TBL_TP_DERIVED_CHARGERS).EnsureIndex(idx); err != nil {
+		if err = db.C(utils.TBLTPDerivedChargers).EnsureIndex(idx); err != nil {
 			return
 		}
 		idx = mgo.Index{
@@ -251,7 +250,7 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 			Background: false,
 			Sparse:     false,
 		}
-		if err = db.C(utils.TBL_CDRS).EnsureIndex(idx); err != nil {
+		if err = db.C(utils.TBLCDRs).EnsureIndex(idx); err != nil {
 			return
 		}
 		for _, idxKey := range ms.cdrsIndexes {
@@ -262,7 +261,7 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 				Background: false,
 				Sparse:     false,
 			}
-			if err = db.C(utils.TBL_CDRS).EnsureIndex(idx); err != nil {
+			if err = db.C(utils.TBLCDRs).EnsureIndex(idx); err != nil {
 				return
 			}
 		}
@@ -278,6 +277,16 @@ func (ms *MongoStorage) EnsureIndexes() (err error) {
 		}
 		idx = mgo.Index{
 			Key:        []string{OriginHostLow, OriginIDLow},
+			Unique:     false,
+			DropDups:   false,
+			Background: false,
+			Sparse:     false,
+		}
+		if err = db.C(utils.TBLSMCosts).EnsureIndex(idx); err != nil {
+			return
+		}
+		idx = mgo.Index{
+			Key:        []string{RunIDLow, OriginIDLow},
 			Unique:     false,
 			DropDups:   false,
 			Background: false,
@@ -332,9 +341,9 @@ func (ms *MongoStorage) Marshaler() Marshaler {
 	return ms.ms
 }
 
-// CloneSession returns a clone of the existing session so we can perform queries from outside of engine package
-func (ms *MongoStorage) CloneSession() *mgo.Session {
-	return ms.session.Copy()
+// DB returnes a database object with cloned session inside
+func (ms *MongoStorage) DB() *mgo.Database {
+	return ms.session.Copy().DB(ms.db)
 }
 
 func (ms *MongoStorage) SelectDatabase(dbName string) (err error) {
@@ -639,6 +648,11 @@ func (ms *MongoStorage) GetKeysForPrefix(prefix string) (result []string, err er
 		iter := db.C(colRL).Find(bson.M{"id": bson.M{"$regex": bson.RegEx{Pattern: subject}}}).Select(bson.M{"id": 1}).Iter()
 		for iter.Next(&idResult) {
 			result = append(result, utils.ResourceLimitsPrefix+idResult.Id)
+		}
+	case utils.AccountActionPlansPrefix:
+		iter := db.C(colRL).Find(bson.M{"key": bson.M{"$regex": bson.RegEx{Pattern: subject}}}).Select(bson.M{"id": 1}).Iter()
+		for iter.Next(&idResult) {
+			result = append(result, utils.AccountActionPlansPrefix+keyResult.Key)
 		}
 	default:
 		err = fmt.Errorf("unsupported prefix in GetKeysForPrefix: %s", prefix)

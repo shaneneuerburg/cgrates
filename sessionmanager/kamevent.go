@@ -37,6 +37,8 @@ const (
 	CGR_SESSION_DISCONNECT = "CGR_SESSION_DISCONNECT"
 	CGR_CALL_START         = "CGR_CALL_START"
 	CGR_CALL_END           = "CGR_CALL_END"
+	CGR_RL_REQUEST         = "CGR_RL_REQUEST"
+	CGR_RL_REPLY           = "CGR_RL_REPLY"
 	CGR_SETUPTIME          = "cgr_setuptime"
 	CGR_ANSWERTIME         = "cgr_answertime"
 	CGR_STOPTIME           = "cgr_stoptime"
@@ -53,12 +55,14 @@ var primaryFields = []string{EVENT, CALLID, FROM_TAG, HASH_ENTRY, HASH_ID, CGR_A
 	CGR_CATEGORY, CGR_TENANT, CGR_REQTYPE, CGR_ANSWERTIME, CGR_SETUPTIME, CGR_STOPTIME, CGR_DURATION, CGR_PDD, utils.CGR_SUPPLIER, utils.CGR_DISCONNECT_CAUSE}
 
 type KamAuthReply struct {
-	Event            string // Kamailio will use this to differentiate between requests and replies
-	TransactionIndex int    // Original transaction index
-	TransactionLabel int    // Original transaction label
-	MaxSessionTime   int    // Maximum session time in case of success, -1 for unlimited
-	Suppliers        string // List of suppliers, comma separated
-	Error            string // Reply in case of error
+	Event             string // Kamailio will use this to differentiate between requests and replies
+	TransactionIndex  int    // Original transaction index
+	TransactionLabel  int    // Original transaction label
+	MaxSessionTime    int    // Maximum session time in case of success, -1 for unlimited
+	Suppliers         string // List of suppliers, comma separated
+	ResourceAllocated bool
+	AllocationMessage string
+	Error             string // Reply in case of error
 }
 
 func (self *KamAuthReply) String() string {
@@ -346,11 +350,12 @@ func (kev KamEvent) String() string {
 	return string(mrsh)
 }
 
-func (kev KamEvent) AsKamAuthReply(maxSessionTime float64, suppliers string, resErr error) (*KamAuthReply, error) {
-	var err error
-	kar := &KamAuthReply{Event: CGR_AUTH_REPLY, Suppliers: suppliers}
-	if resErr != nil {
-		kar.Error = resErr.Error()
+func (kev KamEvent) AsKamAuthReply(maxSessionTime float64, suppliers string,
+	resAllocated bool, allocationMessage string, rplyErr error) (kar *KamAuthReply, err error) {
+	kar = &KamAuthReply{Event: CGR_AUTH_REPLY, Suppliers: suppliers,
+		ResourceAllocated: resAllocated, AllocationMessage: allocationMessage}
+	if rplyErr != nil {
+		kar.Error = rplyErr.Error()
 	}
 	if _, hasIt := kev[KAM_TR_INDEX]; !hasIt {
 		return nil, utils.NewErrMandatoryIeMissing(KAM_TR_INDEX, "")
@@ -369,6 +374,7 @@ func (kev KamEvent) AsKamAuthReply(maxSessionTime float64, suppliers string, res
 		maxSessionTime = maxSessionDur.Seconds()
 	}
 	kar.MaxSessionTime = int(utils.Round(maxSessionTime, 0, utils.ROUNDING_MIDDLE))
+
 	return kar, nil
 }
 
@@ -395,6 +401,10 @@ func (kev KamEvent) ComputeLcr() bool {
 	}
 }
 
-func (kev KamEvent) AsMapStringIface() (map[string]interface{}, error) {
-	return nil, utils.ErrNotImplemented
+func (kev KamEvent) AsMapStringIface() (mp map[string]interface{}, err error) {
+	mp = make(map[string]interface{}, len(kev))
+	for k, v := range kev {
+		mp[k] = v
+	}
+	return
 }

@@ -69,15 +69,9 @@ type DbJsonCfg struct {
 	Cdrs_indexes      *[]string
 }
 
-// Balancer config section
-type BalancerJsonCfg struct {
-	Enabled *bool
-}
-
 // Rater config section
 type RalsJsonCfg struct {
 	Enabled                     *bool
-	Balancer                    *string
 	Cdrstats_conns              *[]*HaPoolJsonCfg
 	Historys_conns              *[]*HaPoolJsonCfg
 	Pubsubs_conns               *[]*HaPoolJsonCfg
@@ -141,6 +135,7 @@ type CdrFieldJsonCfg struct {
 	Timezone             *string
 	Mask_destinationd_id *string
 	Mask_length          *int
+	Break_on_success     *bool
 }
 
 // Cdre config section
@@ -196,6 +191,7 @@ type SmGenericJsonCfg struct {
 	Min_call_duration     *string
 	Max_call_duration     *string
 	Session_ttl           *string
+	Session_ttl_max_delay *string
 	Session_ttl_last_used *string
 	Session_ttl_usage     *string
 	Session_indexes       *[]string
@@ -280,6 +276,7 @@ type SmKamJsonCfg struct {
 	Enabled           *bool
 	Rals_conns        *[]*HaPoolJsonCfg
 	Cdrs_conns        *[]*HaPoolJsonCfg
+	Rls_conns         *[]*HaPoolJsonCfg
 	Create_cdr        *bool
 	Debit_interval    *string
 	Min_call_duration *string
@@ -344,6 +341,32 @@ type DARequestProcessorJsnCfg struct {
 	CCA_fields          *[]*CdrFieldJsonCfg
 }
 
+// Radius Agent configuration section
+type RadiusAgentJsonCfg struct {
+	Enabled              *bool
+	Listen_net           *string
+	Listen_auth          *string
+	Listen_acct          *string
+	Client_secrets       *map[string]string
+	Client_dictionaries  *map[string]string
+	Sm_generic_conns     *[]*HaPoolJsonCfg
+	Create_cdr           *bool
+	Cdr_requires_session *bool
+	Timezone             *string
+	Request_processors   *[]*RAReqProcessorJsnCfg
+}
+
+type RAReqProcessorJsnCfg struct {
+	Id                  *string
+	Dry_run             *bool
+	Request_filter      *string
+	Flags               *[]string
+	Continue_on_success *bool
+	Append_reply        *bool
+	Request_fields      *[]*CdrFieldJsonCfg
+	Reply_fields        *[]*CdrFieldJsonCfg
+}
+
 // History server config section
 type HistServJsonCfg struct {
 	Enabled       *bool
@@ -372,7 +395,6 @@ type ResourceLimiterServJsonCfg struct {
 	Enabled             *bool
 	Cdrstats_conns      *[]*HaPoolJsonCfg
 	Cache_dump_interval *string
-	Usage_ttl           *string
 }
 
 // Mailer config section

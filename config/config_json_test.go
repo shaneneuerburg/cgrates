@@ -119,24 +119,11 @@ func TestDfListenJsonCfg(t *testing.T) {
 
 func TestDfDbJsonCfg(t *testing.T) {
 	eCfg := &DbJsonCfg{
-		Db_type:     utils.StringPointer("redis"),
-		Db_host:     utils.StringPointer("127.0.0.1"),
-		Db_port:     utils.IntPointer(6379),
-		Db_name:     utils.StringPointer("10"),
-		Db_user:     utils.StringPointer(""),
-		Db_password: utils.StringPointer(""),
-	}
-	if cfg, err := dfCgrJsonCfg.DbJsonCfg(TPDB_JSN); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Error("Received: ", cfg)
-	}
-	eCfg = &DbJsonCfg{
 		Db_type:           utils.StringPointer("redis"),
 		Db_host:           utils.StringPointer("127.0.0.1"),
 		Db_port:           utils.IntPointer(6379),
-		Db_name:           utils.StringPointer("11"),
-		Db_user:           utils.StringPointer(""),
+		Db_name:           utils.StringPointer("10"),
+		Db_user:           utils.StringPointer("cgrates"),
 		Db_password:       utils.StringPointer(""),
 		Load_history_size: utils.IntPointer(10),
 	}
@@ -151,7 +138,7 @@ func TestDfDbJsonCfg(t *testing.T) {
 		Db_port:        utils.IntPointer(3306),
 		Db_name:        utils.StringPointer("cgrates"),
 		Db_user:        utils.StringPointer("cgrates"),
-		Db_password:    utils.StringPointer("CGRateS.org"),
+		Db_password:    utils.StringPointer(""),
 		Max_open_conns: utils.IntPointer(100),
 		Max_idle_conns: utils.IntPointer(10),
 		Cdrs_indexes:   utils.StringSlicePointer([]string{}),
@@ -163,17 +150,8 @@ func TestDfDbJsonCfg(t *testing.T) {
 	}
 }
 
-func TestDfBalancerJsonCfg(t *testing.T) {
-	eCfg := &BalancerJsonCfg{Enabled: utils.BoolPointer(false)}
-	if cfg, err := dfCgrJsonCfg.BalancerJsonCfg(); err != nil {
-		t.Error(err)
-	} else if !reflect.DeepEqual(eCfg, cfg) {
-		t.Error("Received: ", cfg)
-	}
-}
-
 func TestDfRalsJsonCfg(t *testing.T) {
-	eCfg := &RalsJsonCfg{Enabled: utils.BoolPointer(false), Balancer: utils.StringPointer(""), Cdrstats_conns: &[]*HaPoolJsonCfg{},
+	eCfg := &RalsJsonCfg{Enabled: utils.BoolPointer(false), Cdrstats_conns: &[]*HaPoolJsonCfg{},
 		Historys_conns: &[]*HaPoolJsonCfg{}, Pubsubs_conns: &[]*HaPoolJsonCfg{}, Users_conns: &[]*HaPoolJsonCfg{}, Aliases_conns: &[]*HaPoolJsonCfg{},
 		Rp_subject_prefix_matching: utils.BoolPointer(false), Lcr_subject_prefix_matching: utils.BoolPointer(false)}
 	if cfg, err := dfCgrJsonCfg.RalsJsonCfg(); err != nil {
@@ -300,7 +278,7 @@ func TestDfCdreJsonCfgs(t *testing.T) {
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		expect, _ := json.Marshal(eCfg)
 		received, _ := json.Marshal(cfg)
-		t.Errorf("Expecting: %s, received: %s", string(expect), string(received))
+		t.Errorf("Expecting:\n%s\nReceived:\n%s", string(expect), string(received))
 	}
 }
 
@@ -492,6 +470,7 @@ func TestSmKamJsonCfg(t *testing.T) {
 			&HaPoolJsonCfg{
 				Address: utils.StringPointer(utils.MetaInternal),
 			}},
+		Rls_conns:         &[]*HaPoolJsonCfg{},
 		Create_cdr:        utils.BoolPointer(false),
 		Debit_interval:    utils.StringPointer("10s"),
 		Min_call_duration: utils.StringPointer("0s"),
@@ -575,55 +554,42 @@ func TestDiameterAgentJsonCfg(t *testing.T) {
 		Origin_realm:         utils.StringPointer("cgrates.org"),
 		Vendor_id:            utils.IntPointer(0),
 		Product_name:         utils.StringPointer("CGRateS"),
-		Request_processors: &[]*DARequestProcessorJsnCfg{
-			&DARequestProcessorJsnCfg{
-				Id:                  utils.StringPointer("*default"),
-				Dry_run:             utils.BoolPointer(false),
-				Publish_event:       utils.BoolPointer(false),
-				Request_filter:      utils.StringPointer("Subscription-Id>Subscription-Id-Type(0)"),
-				Flags:               utils.StringSlicePointer([]string{}),
-				Continue_on_success: utils.BoolPointer(false),
-				Append_cca:          utils.BoolPointer(true),
-				CCR_fields: &[]*CdrFieldJsonCfg{
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("TOR"), Field_id: utils.StringPointer(utils.TOR), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("^*voice"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("OriginID"), Field_id: utils.StringPointer(utils.ACCID), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("Session-Id"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("RequestType"), Field_id: utils.StringPointer(utils.REQTYPE), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("^*users"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("Direction"), Field_id: utils.StringPointer(utils.DIRECTION), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("^*out"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("Tenant"), Field_id: utils.StringPointer(utils.TENANT), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("^*users"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("Category"), Field_id: utils.StringPointer(utils.CATEGORY), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("^call"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("Account"), Field_id: utils.StringPointer(utils.ACCOUNT), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("^*users"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("Subject"), Field_id: utils.StringPointer(utils.SUBJECT), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("^*users"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("Destination"), Field_id: utils.StringPointer(utils.DESTINATION), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("Service-Information>IN-Information>Real-Called-Number"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("SetupTime"), Field_id: utils.StringPointer(utils.SETUP_TIME), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("Event-Timestamp"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("AnswerTime"), Field_id: utils.StringPointer(utils.ANSWER_TIME), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("Event-Timestamp"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("Usage"), Field_id: utils.StringPointer(utils.USAGE), Type: utils.StringPointer(utils.META_HANDLER),
-						Handler_id: utils.StringPointer("*ccr_usage"), Mandatory: utils.BoolPointer(true)},
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("SubscriberID"), Field_id: utils.StringPointer("SubscriberId"), Type: utils.StringPointer(utils.META_COMPOSED),
-						Value: utils.StringPointer("Subscription-Id>Subscription-Id-Data"), Mandatory: utils.BoolPointer(true)},
-				},
-				CCA_fields: &[]*CdrFieldJsonCfg{
-					&CdrFieldJsonCfg{Tag: utils.StringPointer("GrantedUnits"), Type: utils.StringPointer(utils.META_HANDLER), Handler_id: utils.StringPointer("*cca_usage"),
-						Field_id: utils.StringPointer("Granted-Service-Unit>CC-Time"), Mandatory: utils.BoolPointer(true)},
-				},
-			},
-		},
+		Request_processors:   &[]*DARequestProcessorJsnCfg{},
 	}
 	if cfg, err := dfCgrJsonCfg.DiameterAgentJsonCfg(); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eCfg, cfg) {
 		rcv := *cfg.Request_processors
 		t.Errorf("Received: %+v", rcv[0].CCA_fields)
+	}
+}
+
+func TestRadiusAgentJsonCfg(t *testing.T) {
+	eCfg := &RadiusAgentJsonCfg{
+		Enabled:     utils.BoolPointer(false),
+		Listen_net:  utils.StringPointer("udp"),
+		Listen_auth: utils.StringPointer("127.0.0.1:1812"),
+		Listen_acct: utils.StringPointer("127.0.0.1:1813"),
+		Client_secrets: utils.MapStringStringPointer(map[string]string{
+			utils.META_DEFAULT: "CGRateS.org",
+		}),
+		Client_dictionaries: utils.MapStringStringPointer(map[string]string{
+			utils.META_DEFAULT: "/usr/share/cgrates/radius/dict/",
+		}),
+		Sm_generic_conns: &[]*HaPoolJsonCfg{
+			&HaPoolJsonCfg{
+				Address: utils.StringPointer(utils.MetaInternal),
+			}},
+		Create_cdr:           utils.BoolPointer(true),
+		Cdr_requires_session: utils.BoolPointer(false),
+		Timezone:             utils.StringPointer(""),
+		Request_processors:   &[]*RAReqProcessorJsnCfg{},
+	}
+	if cfg, err := dfCgrJsonCfg.RadiusAgentJsonCfg(); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(eCfg, cfg) {
+		rcv := *cfg.Request_processors
+		t.Errorf("Received: %+v", rcv)
 	}
 }
 
@@ -679,7 +645,6 @@ func TestDfResourceLimiterSJsonCfg(t *testing.T) {
 		Enabled:             utils.BoolPointer(false),
 		Cdrstats_conns:      &[]*HaPoolJsonCfg{},
 		Cache_dump_interval: utils.StringPointer("0s"),
-		Usage_ttl:           utils.StringPointer("3h"),
 	}
 	if cfg, err := dfCgrJsonCfg.ResourceLimiterJsonCfg(); err != nil {
 		t.Error(err)

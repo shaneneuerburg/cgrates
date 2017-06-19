@@ -13,7 +13,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>
+along with this program. If not, see <http://www.gnu.org/licenses/>
 */
 package engine
 
@@ -53,11 +53,8 @@ func (ms *MongoStorage) GetTpIds() ([]string, error) {
 	}
 	return tpids, nil
 }
+
 func (ms *MongoStorage) GetTpTableIds(tpid, table string, distinct utils.TPDistinctIds, filter map[string]string, pag *utils.Paginator) ([]string, error) {
-	selectors := bson.M{}
-	for _, d := range distinct {
-		selectors[d] = 1
-	}
 	findMap := make(map[string]interface{})
 	if tpid != "" {
 		findMap["tpid"] = tpid
@@ -75,8 +72,10 @@ func (ms *MongoStorage) GetTpTableIds(tpid, table string, distinct utils.TPDisti
 		}
 		findMap["$and"] = []bson.M{bson.M{"$or": searchItems}}
 	}
+
 	session, col := ms.conn(table)
 	defer session.Close()
+
 	q := col.Find(findMap)
 	if pag != nil {
 		if pag.Limit != nil {
@@ -87,11 +86,18 @@ func (ms *MongoStorage) GetTpTableIds(tpid, table string, distinct utils.TPDisti
 		}
 	}
 
+	selectors := bson.M{"_id": 0}
+	for i, d := range distinct {
+		if d == "tag" { // convert the tag used in SQL into id used here
+			distinct[i] = "id"
+		}
+		selectors[distinct[i]] = 1
+	}
 	iter := q.Select(selectors).Iter()
-	distinctIds := make(map[string]bool)
+	distinctIds := make(utils.StringMap)
 	item := make(map[string]string)
 	for iter.Next(item) {
-		id := ""
+		var id string
 		last := len(distinct) - 1
 		for i, d := range distinct {
 			if distinctValue, ok := item[d]; ok {
@@ -103,67 +109,80 @@ func (ms *MongoStorage) GetTpTableIds(tpid, table string, distinct utils.TPDisti
 		}
 		distinctIds[id] = true
 	}
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
 	if err := iter.Close(); err != nil {
 		return nil, err
 	}
-	var results []string
-	for id := range distinctIds {
-		results = append(results, id)
-	}
-	return results, nil
+	return distinctIds.Slice(), nil
 }
 
-func (ms *MongoStorage) GetTpTimings(tpid, tag string) ([]TpTiming, error) {
+func (ms *MongoStorage) GetTPTimings(tpid, id string) ([]*utils.ApierTPTiming, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpTiming
-	session, col := ms.conn(utils.TBL_TP_TIMINGS)
+	var results []*utils.ApierTPTiming
+	session, col := ms.conn(utils.TBLTPTimings)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTPDestinations(tpid, tag string) ([]*utils.TPDestination, error) {
+func (ms *MongoStorage) GetTPDestinations(tpid, id string) ([]*utils.TPDestination, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
 	var results []*utils.TPDestination
-	session, col := ms.conn(utils.TBL_TP_DESTINATIONS)
+	session, col := ms.conn(utils.TBLTPDestinations)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpRates(tpid, tag string) ([]TpRate, error) {
+func (ms *MongoStorage) GetTPRates(tpid, id string) ([]*utils.TPRate, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpRate
-	session, col := ms.conn(utils.TBL_TP_RATES)
+	var results []*utils.TPRate
+	session, col := ms.conn(utils.TBLTPRates)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
+	for _, r := range results {
+		for _, rs := range r.RateSlots {
+			rs.SetDurations()
+		}
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpDestinationRates(tpid, tag string, pag *utils.Paginator) ([]TpDestinationRate, error) {
+func (ms *MongoStorage) GetTPDestinationRates(tpid, id string, pag *utils.Paginator) ([]*utils.TPDestinationRate, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpDestinationRate
-	session, col := ms.conn(utils.TBL_TP_DESTINATION_RATES)
+	var results []*utils.TPDestinationRate
+	session, col := ms.conn(utils.TBLTPDestinationRates)
 	defer session.Close()
 	q := col.Find(filter)
 	if pag != nil {
@@ -175,18 +194,21 @@ func (ms *MongoStorage) GetTpDestinationRates(tpid, tag string, pag *utils.Pagin
 		}
 	}
 	err := q.All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpRatingPlans(tpid, tag string, pag *utils.Paginator) ([]TpRatingPlan, error) {
+func (ms *MongoStorage) GetTPRatingPlans(tpid, id string, pag *utils.Paginator) ([]*utils.TPRatingPlan, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpRatingPlan
-	session, col := ms.conn(utils.TBL_TP_RATING_PLANS)
+	var results []*utils.TPRatingPlan
+	session, col := ms.conn(utils.TBLTPRatingPlans)
 	defer session.Close()
 	q := col.Find(filter)
 	if pag != nil {
@@ -198,11 +220,14 @@ func (ms *MongoStorage) GetTpRatingPlans(tpid, tag string, pag *utils.Paginator)
 		}
 	}
 	err := q.All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpRatingProfiles(tp *TpRatingProfile) ([]TpRatingProfile, error) {
-	filter := bson.M{"tpid": tp.Tpid}
+func (ms *MongoStorage) GetTPRatingProfiles(tp *utils.TPRatingProfile) ([]*utils.TPRatingProfile, error) {
+	filter := bson.M{"tpid": tp.TPid}
 	if tp.Direction != "" {
 		filter["direction"] = tp.Direction
 	}
@@ -215,45 +240,55 @@ func (ms *MongoStorage) GetTpRatingProfiles(tp *TpRatingProfile) ([]TpRatingProf
 	if tp.Subject != "" {
 		filter["subject"] = tp.Subject
 	}
-	if tp.Loadid != "" {
-		filter["loadid"] = tp.Loadid
+	if tp.LoadId != "" {
+		filter["loadid"] = tp.LoadId
 	}
-	var results []TpRatingProfile
-	session, col := ms.conn(utils.TBL_TP_RATE_PROFILES)
+	var results []*utils.TPRatingProfile
+	session, col := ms.conn(utils.TBLTPRateProfiles)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpSharedGroups(tpid, tag string) ([]TpSharedGroup, error) {
+func (ms *MongoStorage) GetTPSharedGroups(tpid, id string) ([]*utils.TPSharedGroups, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpSharedGroup
-	session, col := ms.conn(utils.TBL_TP_SHARED_GROUPS)
+	var results []*utils.TPSharedGroups
+	session, col := ms.conn(utils.TBLTPSharedGroups)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpCdrStats(tpid, tag string) ([]TpCdrstat, error) {
+func (ms *MongoStorage) GetTPCdrStats(tpid, id string) ([]*utils.TPCdrStats, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpCdrstat
-	session, col := ms.conn(utils.TBL_TP_CDR_STATS)
+	var results []*utils.TPCdrStats
+	session, col := ms.conn(utils.TBLTPCdrStats)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
-func (ms *MongoStorage) GetTpLCRs(tp *TpLcrRule) ([]TpLcrRule, error) {
-	filter := bson.M{"tpid": tp.Tpid}
+
+func (ms *MongoStorage) GetTPLCRs(tp *utils.TPLcrRules) ([]*utils.TPLcrRules, error) {
+	filter := bson.M{"tpid": tp.TPid}
 	if tp.Direction != "" {
 		filter["direction"] = tp.Direction
 	}
@@ -269,30 +304,36 @@ func (ms *MongoStorage) GetTpLCRs(tp *TpLcrRule) ([]TpLcrRule, error) {
 	if tp.Subject != "" {
 		filter["subject"] = tp.Subject
 	}
-	var results []TpLcrRule
-	session, col := ms.conn(utils.TBL_TP_LCRS)
+	var results []*utils.TPLcrRules
+	session, col := ms.conn(utils.TBLTPLcrs)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpUsers(tp *TpUser) ([]TpUser, error) {
-	filter := bson.M{"tpid": tp.Tpid}
+func (ms *MongoStorage) GetTPUsers(tp *utils.TPUsers) ([]*utils.TPUsers, error) {
+	filter := bson.M{"tpid": tp.TPid}
 	if tp.Tenant != "" {
 		filter["tenant"] = tp.Tenant
 	}
 	if tp.UserName != "" {
 		filter["username"] = tp.UserName
 	}
-	var results []TpUser
-	session, col := ms.conn(utils.TBL_TP_USERS)
+	var results []*utils.TPUsers
+	session, col := ms.conn(utils.TBLTPUsers)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpAliases(tp *TpAlias) ([]TpAlias, error) {
-	filter := bson.M{"tpid": tp.Tpid}
+func (ms *MongoStorage) GetTPAliases(tp *utils.TPAliases) ([]*utils.TPAliases, error) {
+	filter := bson.M{"tpid": tp.TPid}
 	if tp.Direction != "" {
 		filter["direction"] = tp.Direction
 	}
@@ -311,19 +352,35 @@ func (ms *MongoStorage) GetTpAliases(tp *TpAlias) ([]TpAlias, error) {
 	if tp.Context != "" {
 		filter["context"] = tp.Context
 	}
-	var results []TpAlias
-	session, col := ms.conn(utils.TBL_TP_ALIASES)
+	var results []*utils.TPAliases
+	session, col := ms.conn(utils.TBLTPAliases)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpResourceLimits(tpid, tag string) (TpResourceLimits, error) {
-	return nil, nil
+func (ms *MongoStorage) GetTPResourceLimits(tpid, id string) ([]*utils.TPResourceLimit, error) {
+	filter := bson.M{
+		"tpid": tpid,
+	}
+	if id != "" {
+		filter["id"] = id
+	}
+	var results []*utils.TPResourceLimit
+	session, col := ms.conn(utils.TBLTPResourceLimits)
+	defer session.Close()
+	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
+	return results, err
 }
 
-func (ms *MongoStorage) GetTpDerivedChargers(tp *TpDerivedCharger) ([]TpDerivedCharger, error) {
-	filter := bson.M{"tpid": tp.Tpid}
+func (ms *MongoStorage) GetTPDerivedChargers(tp *utils.TPDerivedChargers) ([]*utils.TPDerivedChargers, error) {
+	filter := bson.M{"tpid": tp.TPid}
 	if tp.Direction != "" {
 		filter["direction"] = tp.Direction
 	}
@@ -339,73 +396,88 @@ func (ms *MongoStorage) GetTpDerivedChargers(tp *TpDerivedCharger) ([]TpDerivedC
 	if tp.Account != "" {
 		filter["account"] = tp.Account
 	}
-	if tp.Loadid != "" {
-		filter["loadid"] = tp.Loadid
+	if tp.LoadId != "" {
+		filter["loadid"] = tp.LoadId
 	}
-	var results []TpDerivedCharger
-	session, col := ms.conn(utils.TBL_TP_DERIVED_CHARGERS)
+	var results []*utils.TPDerivedChargers
+	session, col := ms.conn(utils.TBLTPDerivedChargers)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpActions(tpid, tag string) ([]TpAction, error) {
+func (ms *MongoStorage) GetTPActions(tpid, id string) ([]*utils.TPActions, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpAction
-	session, col := ms.conn(utils.TBL_TP_ACTIONS)
+	var results []*utils.TPActions
+	session, col := ms.conn(utils.TBLTPActions)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpActionPlans(tpid, tag string) ([]TpActionPlan, error) {
+func (ms *MongoStorage) GetTPActionPlans(tpid, id string) ([]*utils.TPActionPlan, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpActionPlan
-	session, col := ms.conn(utils.TBL_TP_ACTION_PLANS)
+	var results []*utils.TPActionPlan
+	session, col := ms.conn(utils.TBLTPActionPlans)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpActionTriggers(tpid, tag string) ([]TpActionTrigger, error) {
+func (ms *MongoStorage) GetTPActionTriggers(tpid, id string) ([]*utils.TPActionTriggers, error) {
 	filter := bson.M{
 		"tpid": tpid,
 	}
-	if tag != "" {
-		filter["tag"] = tag
+	if id != "" {
+		filter["id"] = id
 	}
-	var results []TpActionTrigger
-	session, col := ms.conn(utils.TBL_TP_ACTION_TRIGGERS)
+	var results []*utils.TPActionTriggers
+	session, col := ms.conn(utils.TBLTPActionTriggers)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
-func (ms *MongoStorage) GetTpAccountActions(tp *TpAccountAction) ([]TpAccountAction, error) {
-	filter := bson.M{"tpid": tp.Tpid}
+func (ms *MongoStorage) GetTPAccountActions(tp *utils.TPAccountActions) ([]*utils.TPAccountActions, error) {
+	filter := bson.M{"tpid": tp.TPid}
 	if tp.Tenant != "" {
 		filter["tenant"] = tp.Tenant
 	}
 	if tp.Account != "" {
 		filter["account"] = tp.Account
 	}
-	if tp.Loadid != "" {
-		filter["loadid"] = tp.Loadid
+	if tp.LoadId != "" {
+		filter["loadid"] = tp.LoadId
 	}
-	var results []TpAccountAction
-	session, col := ms.conn(utils.TBL_TP_ACCOUNT_ACTIONS)
+	var results []*utils.TPAccountActions
+	session, col := ms.conn(utils.TBLTPAccountActions)
 	defer session.Close()
 	err := col.Find(filter).All(&results)
+	if len(results) == 0 {
+		return results, utils.ErrNotFound
+	}
 	return results, err
 }
 
@@ -431,23 +503,25 @@ func (ms *MongoStorage) RemTpData(table, tpid string, args map[string]string) er
 	if args == nil {
 		args = make(map[string]string)
 	}
-	args["tpid"] = tpid
+	if _, has := args["tag"]; has { // API uses tag to be compatible with SQL models, fix it here
+		args["id"] = args["tag"]
+		delete(args, "tag")
+	}
+	if tpid != "" {
+		args["tpid"] = tpid
+	}
 	return db.C(table).Remove(args)
 }
 
-func (ms *MongoStorage) SetTpTimings(tps []TpTiming) error {
+func (ms *MongoStorage) SetTPTimings(tps []*utils.ApierTPTiming) error {
 	if len(tps) == 0 {
 		return nil
 	}
-	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_TIMINGS)
+	session, col := ms.conn(utils.TBLTPTimings)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
-		}
+		tx.Upsert(bson.M{"tpid": tp.TPid, "id": tp.ID}, tp)
 	}
 	_, err := tx.Run()
 	return err
@@ -457,312 +531,347 @@ func (ms *MongoStorage) SetTPDestinations(tpDsts []*utils.TPDestination) (err er
 	if len(tpDsts) == 0 {
 		return
 	}
-	session, col := ms.conn(utils.TBL_TP_DESTINATIONS)
+	session, col := ms.conn(utils.TBLTPDestinations)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tpDsts {
-		tx.Upsert(bson.M{"tpid": tp.TPid, "tag": tp.Tag}, tp)
+		tx.Upsert(bson.M{"tpid": tp.TPid, "id": tp.ID}, tp)
 	}
 	_, err = tx.Run()
 	return
 }
 
-func (ms *MongoStorage) SetTpRates(tps []TpRate) error {
+func (ms *MongoStorage) SetTPRates(tps []*utils.TPRate) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_RATES)
+	session, col := ms.conn(utils.TBLTPRates)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
+		if found, _ := m[tp.ID]; !found {
+			m[tp.ID] = true
+			tx.RemoveAll(bson.M{"tpid": tp.TPid, "id": tp.ID})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpDestinationRates(tps []TpDestinationRate) error {
+func (ms *MongoStorage) SetTPDestinationRates(tps []*utils.TPDestinationRate) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_DESTINATION_RATES)
+	session, col := ms.conn(utils.TBLTPDestinationRates)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
+		if found, _ := m[tp.ID]; !found {
+			m[tp.ID] = true
+			tx.RemoveAll(bson.M{"tpid": tp.TPid, "id": tp.ID})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpRatingPlans(tps []TpRatingPlan) error {
+func (ms *MongoStorage) SetTPRatingPlans(tps []*utils.TPRatingPlan) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_RATING_PLANS)
+	session, col := ms.conn(utils.TBLTPRatingPlans)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
+		if found, _ := m[tp.ID]; !found {
+			m[tp.ID] = true
+			tx.RemoveAll(bson.M{"tpid": tp.TPid, "id": tp.ID})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpRatingProfiles(tps []TpRatingProfile) error {
+func (ms *MongoStorage) SetTPRatingProfiles(tps []*utils.TPRatingProfile) error {
 	if len(tps) == 0 {
 		return nil
 	}
-	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_RATE_PROFILES)
+	session, col := ms.conn(utils.TBLTPRateProfiles)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.GetRatingProfileId()]; !found {
-			m[tp.GetRatingProfileId()] = true
-			tx.Upsert(bson.M{
-				"tpid":      tp.Tpid,
-				"loadid":    tp.Loadid,
-				"direction": tp.Direction,
-				"tenant":    tp.Tenant,
-				"category":  tp.Category,
-				"subject":   tp.Subject,
-			}, tp)
-		}
+		tx.Upsert(bson.M{
+			"tpid":      tp.TPid,
+			"loadid":    tp.LoadId,
+			"direction": tp.Direction,
+			"tenant":    tp.Tenant,
+			"category":  tp.Category,
+			"subject":   tp.Subject,
+		}, tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpSharedGroups(tps []TpSharedGroup) error {
+func (ms *MongoStorage) SetTPSharedGroups(tps []*utils.TPSharedGroups) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_SHARED_GROUPS)
+	session, col := ms.conn(utils.TBLTPSharedGroups)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
+		if found, _ := m[tp.ID]; !found {
+			m[tp.ID] = true
+			tx.RemoveAll(bson.M{"tpid": tp.TPid, "id": tp.ID})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpCdrStats(tps []TpCdrstat) error {
+func (ms *MongoStorage) SetTPCdrStats(tps []*utils.TPCdrStats) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_CDR_STATS)
+	session, col := ms.conn(utils.TBLTPCdrStats)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
+		if found, _ := m[tp.ID]; !found {
+			m[tp.ID] = true
+			tx.RemoveAll(bson.M{"tpid": tp.TPid, "id": tp.ID})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpUsers(tps []TpUser) error {
+func (ms *MongoStorage) SetTPUsers(tps []*utils.TPUsers) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_USERS)
+	session, col := ms.conn(utils.TBLTPUsers)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
 		if found, _ := m[tp.GetId()]; !found {
 			m[tp.GetId()] = true
-			tx.Upsert(bson.M{
-				"tpid":     tp.Tpid,
+			tx.RemoveAll(bson.M{
+				"tpid":     tp.TPid,
 				"tenant":   tp.Tenant,
 				"username": tp.UserName,
-			}, tp)
+			})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpAliases(tps []TpAlias) error {
+func (ms *MongoStorage) SetTPAliases(tps []*utils.TPAliases) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_ALIASES)
+	session, col := ms.conn(utils.TBLTPAliases)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.GetId()]; !found {
-			m[tp.GetId()] = true
-			tx.Upsert(bson.M{
-				"tpid":      tp.Tpid,
+		if found, _ := m[tp.Direction]; !found {
+			m[tp.Direction] = true
+			tx.RemoveAll(bson.M{
+				"tpid":      tp.TPid,
 				"direction": tp.Direction,
 				"tenant":    tp.Tenant,
 				"category":  tp.Category,
 				"account":   tp.Account,
 				"subject":   tp.Subject,
-				"context":   tp.Context}, tp)
+				"context":   tp.Context})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpDerivedChargers(tps []TpDerivedCharger) error {
+func (ms *MongoStorage) SetTPDerivedChargers(tps []*utils.TPDerivedChargers) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_DERIVED_CHARGERS)
+	session, col := ms.conn(utils.TBLTPDerivedChargers)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.GetDerivedChargersId()]; !found {
-			m[tp.GetDerivedChargersId()] = true
-			tx.Upsert(bson.M{
-				"tpid":      tp.Tpid,
+		if found, _ := m[tp.Direction]; !found {
+			m[tp.Direction] = true
+			tx.RemoveAll(bson.M{
+				"tpid":      tp.TPid,
 				"direction": tp.Direction,
 				"tenant":    tp.Tenant,
 				"category":  tp.Category,
 				"account":   tp.Account,
-				"subject":   tp.Subject}, tp)
+				"subject":   tp.Subject})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpLCRs(tps []TpLcrRule) error {
+func (ms *MongoStorage) SetTPLCRs(tps []*utils.TPLcrRules) error {
 	if len(tps) == 0 {
 		return nil
 	}
-	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_LCRS)
+	session, col := ms.conn(utils.TBLTPLcrs)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.GetLcrRuleId()]; !found {
-			m[tp.GetLcrRuleId()] = true
-			tx.Upsert(bson.M{
-				"tpid":      tp.Tpid,
-				"direction": tp.Direction,
-				"tenant":    tp.Tenant,
-				"category":  tp.Category,
-				"account":   tp.Account,
-				"subject":   tp.Subject}, tp)
-		}
+		tx.Upsert(bson.M{
+			"tpid":      tp.TPid,
+			"direction": tp.Direction,
+			"tenant":    tp.Tenant,
+			"category":  tp.Category,
+			"account":   tp.Account,
+			"subject":   tp.Subject}, tp)
+
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpActions(tps []TpAction) error {
+func (ms *MongoStorage) SetTPActions(tps []*utils.TPActions) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_ACTIONS)
+	session, col := ms.conn(utils.TBLTPActions)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
+		if found, _ := m[tp.ID]; !found {
+			m[tp.ID] = true
+			tx.RemoveAll(bson.M{"tpid": tp.TPid, "id": tp.ID})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpActionPlans(tps []TpActionPlan) error {
+func (ms *MongoStorage) SetTPActionPlans(tps []*utils.TPActionPlan) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_ACTION_PLANS)
+	session, col := ms.conn(utils.TBLTPActionPlans)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
+		if found, _ := m[tp.ID]; !found {
+			m[tp.ID] = true
+			tx.RemoveAll(bson.M{"tpid": tp.TPid, "id": tp.ID})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpActionTriggers(tps []TpActionTrigger) error {
+func (ms *MongoStorage) SetTPActionTriggers(tps []*utils.TPActionTriggers) error {
 	if len(tps) == 0 {
 		return nil
 	}
 	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_ACTION_TRIGGERS)
+	session, col := ms.conn(utils.TBLTPActionTriggers)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.Tag]; !found {
-			m[tp.Tag] = true
-			tx.Upsert(bson.M{"tpid": tp.Tpid, "tag": tp.Tag}, tp)
+		if found, _ := m[tp.ID]; !found {
+			m[tp.ID] = true
+			tx.RemoveAll(bson.M{"tpid": tp.TPid, "id": tp.ID})
 		}
+		tx.Insert(tp)
 	}
 	_, err := tx.Run()
 	return err
 }
 
-func (ms *MongoStorage) SetTpAccountActions(tps []TpAccountAction) error {
+func (ms *MongoStorage) SetTPAccountActions(tps []*utils.TPAccountActions) error {
 	if len(tps) == 0 {
 		return nil
 	}
-	m := make(map[string]bool)
-	session, col := ms.conn(utils.TBL_TP_ACCOUNT_ACTIONS)
+	session, col := ms.conn(utils.TBLTPAccountActions)
 	defer session.Close()
 	tx := col.Bulk()
 	for _, tp := range tps {
-		if found, _ := m[tp.GetAccountActionId()]; !found {
-			m[tp.GetAccountActionId()] = true
-			tx.Upsert(bson.M{
-				"tpid":    tp.Tpid,
-				"loadid":  tp.Loadid,
-				"tenant":  tp.Tenant,
-				"account": tp.Account}, tp)
-		}
+		tx.Upsert(bson.M{
+			"tpid":    tp.TPid,
+			"loadid":  tp.LoadId,
+			"tenant":  tp.Tenant,
+			"account": tp.Account}, tp)
 	}
 	_, err := tx.Run()
 	return err
+}
+
+func (ms *MongoStorage) SetTPResourceLimits(tpRLs []*utils.TPResourceLimit) (err error) {
+	if len(tpRLs) == 0 {
+		return
+	}
+	session, col := ms.conn(utils.TBLTPResourceLimits)
+	defer session.Close()
+	tx := col.Bulk()
+	for _, tp := range tpRLs {
+		tx.Upsert(bson.M{"tpid": tp.TPid, "id": tp.ID}, tp)
+	}
+	_, err = tx.Run()
+	return
 }
 
 func (ms *MongoStorage) SetSMCost(smc *SMCost) error {
+	if smc.CostDetails == nil {
+		return nil
+	}
 	session, col := ms.conn(utils.TBLSMCosts)
 	defer session.Close()
 	return col.Insert(smc)
 }
 
+func (ms *MongoStorage) RemoveSMCost(smc *SMCost) error {
+	session, col := ms.conn(utils.TBLSMCosts)
+	defer session.Close()
+	tx := col.Bulk()
+	tx.Remove(bson.M{"cgrid": smc.CGRID, "runid": smc.RunID}, smc)
+	_, err := tx.Run()
+	return err
+}
+
 func (ms *MongoStorage) GetSMCosts(cgrid, runid, originHost, originIDPrefix string) (smcs []*SMCost, err error) {
-	filter := bson.M{CGRIDLow: cgrid, RunIDLow: runid}
+	filter := bson.M{}
+	if cgrid != "" {
+		filter[CGRIDLow] = cgrid
+	}
+	if runid != "" {
+		filter[RunIDLow] = runid
+	}
+	if originHost != "" {
+		filter[OriginHostLow] = originHost
+	}
 	if originIDPrefix != "" {
-		filter = bson.M{OriginIDLow: bson.M{"$regex": bson.RegEx{Pattern: fmt.Sprintf("^%s", originIDPrefix)}}, OriginHostLow: originHost, RunIDLow: runid}
+		filter[OriginIDLow] = bson.M{"$regex": bson.RegEx{Pattern: fmt.Sprintf("^%s", originIDPrefix)}}
 	}
 	// Execute query
 	session, col := ms.conn(utils.TBLSMCosts)
@@ -770,19 +879,23 @@ func (ms *MongoStorage) GetSMCosts(cgrid, runid, originHost, originIDPrefix stri
 	iter := col.Find(filter).Iter()
 	var smCost SMCost
 	for iter.Next(&smCost) {
-		smcs = append(smcs, &smCost)
+		clone := smCost
+		smcs = append(smcs, &clone)
 	}
 	if err := iter.Err(); err != nil {
 		return nil, err
+	}
+	if len(smcs) == 0 {
+		return smcs, utils.ErrNotFound
 	}
 	return smcs, nil
 }
 
 func (ms *MongoStorage) SetCDR(cdr *CDR, allowUpdate bool) (err error) {
 	if cdr.OrderID == 0 {
-		cdr.OrderID = time.Now().UnixNano()
+		cdr.OrderID = ms.cnter.Next()
 	}
-	session, col := ms.conn(utils.TBL_CDRS)
+	session, col := ms.conn(utils.TBLCDRs)
 	defer session.Close()
 	if allowUpdate {
 		_, err = col.Upsert(bson.M{CGRIDLow: cdr.CGRID, RunIDLow: cdr.RunID}, cdr)
@@ -824,7 +937,7 @@ func (ms *MongoStorage) cleanEmptyFilters(filters bson.M) {
 	}
 }
 
-//  _, err := col(utils.TBL_CDRS).UpdateAll(bson.M{CGRIDLow: bson.M{"$in": cgrIds}}, bson.M{"$set": bson.M{"deleted_at": time.Now()}})
+//  _, err := col(utils.TBLCDRs).UpdateAll(bson.M{CGRIDLow: bson.M{"$in": cgrIds}}, bson.M{"$set": bson.M{"deleted_at": time.Now()}})
 func (ms *MongoStorage) GetCDRs(qryFltr *utils.CDRsFilter, remove bool) ([]*CDR, int64, error) {
 	var minPDD, maxPDD, minUsage, maxUsage *time.Duration
 	if len(qryFltr.MinPDD) != 0 {
@@ -914,17 +1027,26 @@ func (ms *MongoStorage) GetCDRs(qryFltr *utils.CDRsFilter, remove bool) ([]*CDR,
 	if len(qryFltr.ExtraFields) != 0 {
 		var extrafields []bson.M
 		for field, value := range qryFltr.ExtraFields {
-			extrafields = append(extrafields, bson.M{"extrafields." + field: value})
+			if value == utils.MetaExists {
+				extrafields = append(extrafields, bson.M{"extrafields." + field: bson.M{"$exists": true}})
+			} else {
+				extrafields = append(extrafields, bson.M{"extrafields." + field: value})
+			}
 		}
-		filters["$or"] = extrafields
+		filters["$and"] = extrafields
 	}
 
 	if len(qryFltr.NotExtraFields) != 0 {
 		var extrafields []bson.M
-		for field, value := range qryFltr.ExtraFields {
-			extrafields = append(extrafields, bson.M{"extrafields." + field: value})
+		for field, value := range qryFltr.NotExtraFields {
+			if value == utils.MetaExists {
+				extrafields = append(extrafields, bson.M{"extrafields." + field: bson.M{"$exists": false}})
+			} else {
+				extrafields = append(extrafields, bson.M{"extrafields." + field: bson.M{"$ne": value}})
+			}
+
 		}
-		filters["$not"] = bson.M{"$or": extrafields}
+		filters["$and"] = extrafields
 	}
 
 	if qryFltr.MinCost != nil {
@@ -946,7 +1068,7 @@ func (ms *MongoStorage) GetCDRs(qryFltr *utils.CDRsFilter, remove bool) ([]*CDR,
 	}
 	//file.WriteString(fmt.Sprintf("AFTER: %v\n", utils.ToIJSON(filters)))
 	//file.Close()
-	session, col := ms.conn(utils.TBL_CDRS)
+	session, col := ms.conn(utils.TBLCDRs)
 	defer session.Close()
 	if remove {
 		if chgd, err := col.RemoveAll(filters); err != nil {
@@ -977,6 +1099,9 @@ func (ms *MongoStorage) GetCDRs(qryFltr *utils.CDRsFilter, remove bool) ([]*CDR,
 		clone := cdr
 		cdrs = append(cdrs, &clone)
 	}
+	if len(cdrs) == 0 {
+		return cdrs, 0, utils.ErrNotFound
+	}
 	return cdrs, 0, nil
 }
 
@@ -984,7 +1109,7 @@ func (ms *MongoStorage) GetVersions(itm string) (vrs Versions, err error) {
 	return
 }
 
-func (ms *MongoStorage) SetVersions(vrs Versions) (err error) {
+func (ms *MongoStorage) SetVersions(vrs Versions, overwrite bool) (err error) {
 	return
 }
 

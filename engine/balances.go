@@ -194,7 +194,7 @@ func (b *Balance) Clone() *Balance {
 func (b *Balance) getMatchingPrefixAndDestID(dest string) (prefix, destId string) {
 	if len(b.DestinationIDs) != 0 && b.DestinationIDs[utils.ANY] == false {
 		for _, p := range utils.SplitPrefix(dest, MIN_PREFIX_MATCH) {
-			if destIDs, err := ratingStorage.GetReverseDestination(p, false, utils.NonTransactional); err == nil {
+			if destIDs, err := dataStorage.GetReverseDestination(p, false, utils.NonTransactional); err == nil {
 				for _, dID := range destIDs {
 					if b.DestinationIDs[dID] == true {
 						return p, dID
@@ -679,7 +679,7 @@ func (b *Balance) debitMoney(cd *CallDescriptor, ub *Account, moneyBalances Bala
 
 // Converts the balance towards compressed information to be displayed
 func (b *Balance) AsBalanceSummary(typ string) *BalanceSummary {
-	bd := &BalanceSummary{ID: b.ID, Type: typ, Value: b.Value, Disabled: b.Disabled}
+	bd := &BalanceSummary{UUID: b.Uuid, ID: b.ID, Type: typ, Value: b.Value, Disabled: b.Disabled}
 	if bd.ID == "" {
 		bd.ID = b.Uuid
 	}
@@ -793,7 +793,7 @@ func (bc Balances) SaveDirtyBalances(acc *Account) {
 			}
 		}
 		if b.account != nil && b.account != acc && b.dirty && savedAccounts[b.account.ID] == false {
-			accountingStorage.SetAccount(b.account)
+			dataStorage.SetAccount(b.account)
 			savedAccounts[b.account.ID] = true
 		}
 	}
@@ -810,7 +810,8 @@ func (f ValueFactor) GetValue(tor string) float64 {
 
 // BalanceDigest represents compressed information about a balance
 type BalanceSummary struct {
-	ID       string // ID or UUID if not defined
+	UUID     string // Balance UUID
+	ID       string // Balance ID  if not defined
 	Type     string // *voice, *data, etc
 	Value    float64
 	Disabled bool

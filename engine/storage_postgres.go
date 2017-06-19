@@ -20,15 +20,13 @@ package engine
 import (
 	"fmt"
 
+	"github.com/cgrates/cgrates/utils"
+
 	"github.com/jinzhu/gorm"
 	_ "github.com/lib/pq"
 )
 
-type PostgresStorage struct {
-	*SQLStorage
-}
-
-func NewPostgresStorage(host, port, name, user, password string, maxConn, maxIdleConn int) (*PostgresStorage, error) {
+func NewPostgresStorage(host, port, name, user, password string, maxConn, maxIdleConn int) (*SQLStorage, error) {
 	connectString := fmt.Sprintf("host=%s port=%s dbname=%s user=%s password=%s sslmode=disable", host, port, name, user, password)
 	db, err := gorm.Open("postgres", connectString)
 	if err != nil {
@@ -41,6 +39,51 @@ func NewPostgresStorage(host, port, name, user, password string, maxConn, maxIdl
 	db.DB().SetMaxIdleConns(maxIdleConn)
 	db.DB().SetMaxOpenConns(maxConn)
 	//db.LogMode(true)
+	postgressStorage := new(PostgresStorage)
+	postgressStorage.db = db
+	postgressStorage.Db = db.DB()
+	return &SQLStorage{db.DB(), db, postgressStorage, postgressStorage}, nil
+}
 
-	return &PostgresStorage{&SQLStorage{Db: db.DB(), db: db}}, nil
+type PostgresStorage struct {
+	SQLStorage
+}
+
+func (self *PostgresStorage) SetVersions(vrs Versions, overwrite bool) (err error) {
+	tx := self.db.Begin()
+	if overwrite {
+		tx.Table(utils.TBLVersions).Delete(nil)
+	}
+	for key, val := range vrs {
+		vrModel := &TBLVersion{Item: key, Version: val}
+		if !overwrite {
+			if err = tx.Model(&TBLVersion{}).Where(
+				TBLVersion{Item: vrModel.Item}).Delete(TBLVersion{Version: val}).Error; err != nil {
+				tx.Rollback()
+				return
+			}
+		}
+		if err = tx.Save(vrModel).Error; err != nil {
+			tx.Rollback()
+			return
+		}
+	}
+	tx.Commit()
+	return
+}
+
+func (self *PostgresStorage) extraFieldsExistsQry(field string) string {
+	return fmt.Sprintf(" extra_fields ?'%s'", field)
+}
+
+func (self *PostgresStorage) extraFieldsValueQry(field, value string) string {
+	return fmt.Sprintf(" (extra_fields ->> '%s') = '%s'", field, value)
+}
+
+func (self *PostgresStorage) notExtraFieldsExistsQry(field string) string {
+	return fmt.Sprintf(" NOT extra_fields ?'%s'", field)
+}
+
+func (self *PostgresStorage) notExtraFieldsValueQry(field, value string) string {
+	return fmt.Sprintf(" NOT (extra_fields ?'%s' AND (extra_fields ->> '%s') = '%s')", field, field, value)
 }

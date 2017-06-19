@@ -158,7 +158,6 @@ SG1,*any,*lowest,
 SG2,*any,*lowest,one
 SG3,*any,*lowest,
 `
-
 	lcrs = `
 *in,cgrates.org,call,*any,*any,EU_LANDLINE,LCR_STANDARD,*static,ivo;dan;rif,2012-01-01T00:00:00Z,10
 *in,cgrates.org,call,*any,*any,*any,LCR_STANDARD,*lowest_cost,,2012-01-01T00:00:00Z,20
@@ -268,19 +267,18 @@ cgrates.org,mas,true,another,value,10
 `
 
 	resLimits = `
-#Id,FilterType,FilterFieldName,FilterValues,ActivationTime,Weight,Limit,ActionTriggers
-ResGroup1,*string,Account,1001;1002,2014-07-29T15:00:00Z,10,2,
-ResGroup1,*string_prefix,Destination,10;20,2014-07-29T15:00:00Z,10,,
-ResGroup1,*cdr_stats,,CDRST1:*min_ASR:34;CDRST_1001:*min_ASR:20,,,,
-ResGroup1,*rsr_fields,,Subject(~^1.*1$);Destination(1002),,,,
-ResGroup2,*destinations,Destination,DST_FS,2014-07-29T15:00:00Z,10,2,
+#Id,FilterType,FilterFieldName,FilterFieldValues,ActivationInterval,TTL,Limit,AllocationMessage,Weight,ActionTriggers
+ResGroup21,*string,HdrAccount,1001;1002,2014-07-29T15:00:00Z,1s,2,call,10,
+ResGroup21,*string_prefix,HdrDestination,10;20,,,,,,
+ResGroup21,*rsr_fields,,HdrSubject(~^1.*1$);HdrDestination(1002),,,,,,
+ResGroup22,*destinations,HdrDestination,DST_FS,2014-07-29T15:00:00Z,3600s,2,premium_call,10,
 `
 )
 
 var csvr *TpReader
 
 func init() {
-	csvr = NewTpReader(ratingStorage, accountingStorage, NewStringCSVStorage(',', destinations, timings, rates, destinationRates, ratingPlans, ratingProfiles,
+	csvr = NewTpReader(dataStorage, NewStringCSVStorage(',', destinations, timings, rates, destinationRates, ratingPlans, ratingProfiles,
 		sharedGroups, lcrs, actions, actionPlans, actionTriggers, accountActions, derivedCharges, cdrStats, users, aliases, resLimits), testTPID, "")
 	if err := csvr.LoadDestinations(); err != nil {
 		log.Print("error in LoadDestinations:", err)
@@ -331,12 +329,11 @@ func init() {
 		log.Print("error in LoadAliases:", err)
 	}
 	if err := csvr.LoadResourceLimits(); err != nil {
-		log.Print("error in LoadResourceLimits:", err)
 	}
 	csvr.WriteToDatabase(false, false, false)
 	cache.Flush()
-	ratingStorage.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	accountingStorage.LoadAccountingCache(nil, nil, nil)
+	dataStorage.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	dataStorage.LoadAccountingCache(nil, nil, nil)
 }
 
 func TestLoadDestinations(t *testing.T) {
@@ -415,7 +412,7 @@ func TestLoadTimimgs(t *testing.T) {
 	}
 	timing := csvr.timings["WORKDAYS_00"]
 	if !reflect.DeepEqual(timing, &utils.TPTiming{
-		TimingId:  "WORKDAYS_00",
+		ID:        "WORKDAYS_00",
 		Years:     utils.Years{},
 		Months:    utils.Months{},
 		MonthDays: utils.MonthDays{},
@@ -426,7 +423,7 @@ func TestLoadTimimgs(t *testing.T) {
 	}
 	timing = csvr.timings["WORKDAYS_18"]
 	if !reflect.DeepEqual(timing, &utils.TPTiming{
-		TimingId:  "WORKDAYS_18",
+		ID:        "WORKDAYS_18",
 		Years:     utils.Years{},
 		Months:    utils.Months{},
 		MonthDays: utils.MonthDays{},
@@ -437,7 +434,7 @@ func TestLoadTimimgs(t *testing.T) {
 	}
 	timing = csvr.timings["WEEKENDS"]
 	if !reflect.DeepEqual(timing, &utils.TPTiming{
-		TimingId:  "WEEKENDS",
+		ID:        "WEEKENDS",
 		Years:     utils.Years{},
 		Months:    utils.Months{},
 		MonthDays: utils.MonthDays{},
@@ -448,7 +445,7 @@ func TestLoadTimimgs(t *testing.T) {
 	}
 	timing = csvr.timings["ONE_TIME_RUN"]
 	if !reflect.DeepEqual(timing, &utils.TPTiming{
-		TimingId:  "ONE_TIME_RUN",
+		ID:        "ONE_TIME_RUN",
 		Years:     utils.Years{2012},
 		Months:    utils.Months{},
 		MonthDays: utils.MonthDays{},
@@ -535,8 +532,8 @@ func TestLoadDestinationRates(t *testing.T) {
 	}
 	drs := csvr.destinationRates["RT_STANDARD"]
 	dr := &utils.TPDestinationRate{
-		TPid:              testTPID,
-		DestinationRateId: "RT_STANDARD",
+		TPid: testTPID,
+		ID:   "RT_STANDARD",
 		DestinationRates: []*utils.DestinationRate{
 			&utils.DestinationRate{
 				DestinationId:    "GERMANY",
@@ -566,8 +563,8 @@ func TestLoadDestinationRates(t *testing.T) {
 	}
 	drs = csvr.destinationRates["RT_DEFAULT"]
 	if !reflect.DeepEqual(drs, &utils.TPDestinationRate{
-		TPid:              testTPID,
-		DestinationRateId: "RT_DEFAULT",
+		TPid: testTPID,
+		ID:   "RT_DEFAULT",
 		DestinationRates: []*utils.DestinationRate{
 			&utils.DestinationRate{
 				DestinationId:    "ALL",
@@ -582,8 +579,8 @@ func TestLoadDestinationRates(t *testing.T) {
 	}
 	drs = csvr.destinationRates["RT_STD_WEEKEND"]
 	if !reflect.DeepEqual(drs, &utils.TPDestinationRate{
-		TPid:              testTPID,
-		DestinationRateId: "RT_STD_WEEKEND",
+		TPid: testTPID,
+		ID:   "RT_STD_WEEKEND",
 		DestinationRates: []*utils.DestinationRate{
 			&utils.DestinationRate{
 				DestinationId:    "GERMANY",
@@ -605,8 +602,8 @@ func TestLoadDestinationRates(t *testing.T) {
 	}
 	drs = csvr.destinationRates["P1"]
 	if !reflect.DeepEqual(drs, &utils.TPDestinationRate{
-		TPid:              testTPID,
-		DestinationRateId: "P1",
+		TPid: testTPID,
+		ID:   "P1",
 		DestinationRates: []*utils.DestinationRate{
 			&utils.DestinationRate{
 				DestinationId:    "NAT",
@@ -621,8 +618,8 @@ func TestLoadDestinationRates(t *testing.T) {
 	}
 	drs = csvr.destinationRates["P2"]
 	if !reflect.DeepEqual(drs, &utils.TPDestinationRate{
-		TPid:              testTPID,
-		DestinationRateId: "P2",
+		TPid: testTPID,
+		ID:   "P2",
 		DestinationRates: []*utils.DestinationRate{
 			&utils.DestinationRate{
 				DestinationId:    "NAT",
@@ -637,8 +634,8 @@ func TestLoadDestinationRates(t *testing.T) {
 	}
 	drs = csvr.destinationRates["T1"]
 	if !reflect.DeepEqual(drs, &utils.TPDestinationRate{
-		TPid:              testTPID,
-		DestinationRateId: "T1",
+		TPid: testTPID,
+		ID:   "T1",
 		DestinationRates: []*utils.DestinationRate{
 			&utils.DestinationRate{
 				DestinationId:    "NAT",
@@ -653,8 +650,8 @@ func TestLoadDestinationRates(t *testing.T) {
 	}
 	drs = csvr.destinationRates["T2"]
 	if !reflect.DeepEqual(drs, &utils.TPDestinationRate{
-		TPid:              testTPID,
-		DestinationRateId: "T2",
+		TPid: testTPID,
+		ID:   "T2",
 		DestinationRates: []*utils.DestinationRate{
 			&utils.DestinationRate{
 				DestinationId:    "GERMANY",
@@ -837,7 +834,7 @@ func TestLoadRatingPlans(t *testing.T) {
 		/*for tag, key := range rplan.Ratings {
 			log.Print(tag, key)
 		}*/
-		t.Errorf("Expecting: %s, received: %s", utils.ToIJSON(expected.Ratings), utils.ToIJSON(rplan.Ratings))
+		t.Errorf("Expecting:\n%s\nReceived:\n%s", utils.ToIJSON(expected.Ratings), utils.ToIJSON(rplan.Ratings))
 	}
 	anyTiming := &RITiming{
 		Years:      utils.Years{},
@@ -1029,7 +1026,7 @@ func TestLoadSharedGroups(t *testing.T) {
 	if !reflect.DeepEqual(sg2, expected) {
 		t.Error("Error loading shared group: ", sg2.AccountParameters)
 	}
-	/*sg, _ := accountingStorage.GetSharedGroup("SG1", false)
+	/*sg, _ := dataStorage.GetSharedGroup("SG1", false)
 	  if len(sg.Members) != 0 {
 	      t.Errorf("Memebers should be empty: %+v", sg)
 	  }
@@ -1039,7 +1036,7 @@ func TestLoadSharedGroups(t *testing.T) {
 	  atm.Execute()
 	  atm.actions, atm.stCache = nil, time.Time{}
 
-	  sg, _ = accountingStorage.GetSharedGroup("SG1", false)
+	  sg, _ = dataStorage.GetSharedGroup("SG1", false)
 	  if len(sg.Members) != 1 {
 	      t.Errorf("Memebers should not be empty: %+v", sg)
 	  }*/
@@ -1220,12 +1217,12 @@ func TestLoadAccountActions(t *testing.T) {
 		t.Errorf("Error loading account action: %+v", utils.ToIJSON(aa.UnitCounters[utils.VOICE][0].Counters[0].Filter))
 	}
 	// test that it does not overwrite balances
-	existing, err := accountingStorage.GetAccount(aa.ID)
+	existing, err := dataStorage.GetAccount(aa.ID)
 	if err != nil || len(existing.BalanceMap) != 2 {
 		t.Errorf("The account was not set before load: %+v", existing)
 	}
-	accountingStorage.SetAccount(aa)
-	existing, err = accountingStorage.GetAccount(aa.ID)
+	dataStorage.SetAccount(aa)
+	existing, err = dataStorage.GetAccount(aa.ID)
 	if err != nil || len(existing.BalanceMap) != 2 {
 		t.Errorf("The set account altered the balances: %+v", existing)
 	}
@@ -1378,35 +1375,41 @@ func TestLoadReverseAliases(t *testing.T) {
 
 func TestLoadResourceLimits(t *testing.T) {
 	eResLimits := map[string]*utils.TPResourceLimit{
-		"ResGroup1": &utils.TPResourceLimit{
-			TPID: testTPID,
-			ID:   "ResGroup1",
+		"ResGroup21": &utils.TPResourceLimit{
+			TPid: testTPID,
+			ID:   "ResGroup21",
 			Filters: []*utils.TPRequestFilter{
-				&utils.TPRequestFilter{Type: MetaString, FieldName: "Account", Values: []string{"1001", "1002"}},
-				&utils.TPRequestFilter{Type: MetaStringPrefix, FieldName: "Destination", Values: []string{"10", "20"}},
-				&utils.TPRequestFilter{Type: MetaCDRStats, Values: []string{"CDRST1:*min_ASR:34", "CDRST_1001:*min_ASR:20"}},
-				&utils.TPRequestFilter{Type: MetaRSRFields, Values: []string{"Subject(~^1.*1$)", "Destination(1002)"}},
+				&utils.TPRequestFilter{Type: MetaString, FieldName: "HdrAccount", Values: []string{"1001", "1002"}},
+				&utils.TPRequestFilter{Type: MetaStringPrefix, FieldName: "HdrDestination", Values: []string{"10", "20"}},
+				&utils.TPRequestFilter{Type: MetaRSRFields, Values: []string{"HdrSubject(~^1.*1$)", "HdrDestination(1002)"}},
 			},
-			ActivationTime: "2014-07-29T15:00:00Z",
-			Weight:         10,
-			Limit:          "2",
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+			UsageTTL:          "1s",
+			AllocationMessage: "call",
+			Weight:            10,
+			Limit:             "2",
 		},
-		"ResGroup2": &utils.TPResourceLimit{
-			TPID: testTPID,
-			ID:   "ResGroup2",
+		"ResGroup22": &utils.TPResourceLimit{
+			TPid: testTPID,
+			ID:   "ResGroup22",
 			Filters: []*utils.TPRequestFilter{
-				&utils.TPRequestFilter{Type: MetaDestinations, FieldName: "Destination", Values: []string{"DST_FS"}},
+				&utils.TPRequestFilter{Type: MetaDestinations, FieldName: "HdrDestination", Values: []string{"DST_FS"}},
 			},
-			ActivationTime: "2014-07-29T15:00:00Z",
-			Weight:         10,
-			Limit:          "2",
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+			UsageTTL:          "3600s",
+			AllocationMessage: "premium_call",
+			Weight:            10,
+			Limit:             "2",
 		},
 	}
 	if len(csvr.resLimits) != len(eResLimits) {
 		t.Error("Failed to load resourcelimits: ", len(csvr.resLimits))
-	}
-	if !reflect.DeepEqual(eResLimits, csvr.resLimits) {
-		t.Errorf("Expecting: %+v, received: %+v", eResLimits, csvr.resLimits)
+	} else if !reflect.DeepEqual(eResLimits["ResGroup22"], csvr.resLimits["ResGroup22"]) {
+		t.Errorf("Expecting: %+v, received: %+v", eResLimits["ResGroup22"], csvr.resLimits["ResGroup22"])
 	}
 
 }

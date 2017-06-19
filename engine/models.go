@@ -330,7 +330,7 @@ type TpCdrstat struct {
 }
 
 func (t TpCdrstat) TableName() string {
-	return utils.TBL_TP_CDR_STATS
+	return utils.TBLTPCdrStats
 }
 
 type TpUser struct {
@@ -376,7 +376,7 @@ type TpAlias struct {
 }
 
 func (ta *TpAlias) TableName() string {
-	return utils.TBL_TP_ALIASES
+	return utils.TBLTPAliases
 }
 
 func (ta *TpAlias) SetId(id string) error {
@@ -430,7 +430,7 @@ type TBLCDRs struct {
 }
 
 func (t TBLCDRs) TableName() string {
-	return utils.TBL_CDRS
+	return utils.TBLCDRs
 }
 
 type TBLSMCosts struct {
@@ -451,17 +451,19 @@ func (t TBLSMCosts) TableName() string {
 }
 
 type TpResourceLimit struct {
-	ID               int64
-	Tpid             string
-	Tag              string  `index:"0" re:""`
-	FilterType       string  `index:"1" re:"^\*[A-Za-z].*"`
-	FilterFieldName  string  `index:"2" re:""`
-	FilterValues     string  `index:"3" re:""`
-	ActivationTime   string  `index:"4" re:""`
-	Weight           float64 `index:"5" re:"\d+\.?\d*"`
-	Limit            string  `index:"6" re:""`
-	ActionTriggerIds string  `index:"7" re:""`
-	CreatedAt        time.Time
+	ID                 int64
+	Tpid               string
+	Tag                string  `index:"0" re:""`
+	FilterType         string  `index:"1" re:"^\*[A-Za-z].*"`
+	FilterFieldName    string  `index:"2" re:""`
+	FilterFieldValues  string  `index:"3" re:""`
+	ActivationInterval string  `index:"4" re:""`
+	UsageTTL           string  `index:"5" re:""`
+	Limit              string  `index:"6" re:""`
+	AllocationMessage  string  `index:"7" re:""`
+	Weight             float64 `index:"8" re:"\d+\.?\d*"`
+	ActionTriggerIds   string  `index:"9" re:""`
+	CreatedAt          time.Time
 }
 
 type TBLVersion struct {

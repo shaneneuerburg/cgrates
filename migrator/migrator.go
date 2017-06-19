@@ -24,16 +24,23 @@ import (
 	"github.com/cgrates/cgrates/utils"
 )
 
-func NewMigrator(tpDB engine.RatingStorage, dataDB engine.AccountingStorage, dataDBType string, storDB engine.Storage, storDBType string) *Migrator {
-	return &Migrator{tpDB: tpDB, dataDB: dataDB, dataDBType: dataDBType, storDB: storDB, storDBType: storDBType}
+func NewMigrator(dataDB engine.DataDB, dataDBType, dataDBEncoding string, storDB engine.Storage, storDBType string) *Migrator {
+	var mrshlr engine.Marshaler
+	if dataDBEncoding == utils.MSGPACK {
+		mrshlr = engine.NewCodecMsgpackMarshaler()
+	} else if dataDBEncoding == utils.JSON {
+		mrshlr = new(engine.JSONMarshaler)
+	}
+	return &Migrator{dataDB: dataDB, dataDBType: dataDBType,
+		storDB: storDB, storDBType: storDBType, mrshlr: mrshlr}
 }
 
 type Migrator struct {
-	tpDB       engine.RatingStorage // ToDo: unify the databases when ready
-	dataDB     engine.AccountingStorage
+	dataDB     engine.DataDB
 	dataDBType string
 	storDB     engine.Storage
 	storDBType string
+	mrshlr     engine.Marshaler
 }
 
 // Migrate implements the tasks to migrate, used as a dispatcher to the individual methods
@@ -45,7 +52,7 @@ func (m *Migrator) Migrate(taskID string) (err error) {
 			utils.UnsupportedMigrationTask,
 			fmt.Sprintf("task <%s> is not a supported migration task", taskID))
 	case utils.MetaSetVersions:
-		if err := m.storDB.SetVersions(engine.CurrentStorDBVersions()); err != nil {
+		if err := m.storDB.SetVersions(engine.CurrentStorDBVersions(), false); err != nil {
 			return utils.NewCGRError(utils.Migrator,
 				utils.ServerErrorCaps,
 				err.Error(),
@@ -55,6 +62,15 @@ func (m *Migrator) Migrate(taskID string) (err error) {
 		err = m.migrateCostDetails()
 	case utils.MetaAccounts:
 		err = m.migrateAccounts()
+	case "migrateActionPlans":
+		err = m.migrateActionPlans()
+	case "migrateActionTriggers":
+		err = m.migrateActionTriggers()
+	case "migrateActions":
+		err = m.migrateActions()
+	case "migrateSharedGroups":
+		err = m.migrateSharedGroups()
 	}
+
 	return
 }

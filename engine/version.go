@@ -24,16 +24,16 @@ import (
 	"github.com/cgrates/cgrates/utils"
 )
 
-func CheckVersion(acntDB AccountingStorage) error {
+func CheckVersion(dataDB DataDB) error {
 	// get current db version
-	if acntDB == nil {
-		acntDB = accountingStorage
+	if dataDB == nil {
+		dataDB = dataStorage
 	}
-	dbVersion, err := acntDB.GetStructVersion()
+	dbVersion, err := dataDB.GetStructVersion()
 	if err != nil {
-		if lhList, err := acntDB.GetLoadHistory(1, true, utils.NonTransactional); err != nil || len(lhList) == 0 {
+		if lhList, err := dataDB.GetLoadHistory(1, true, utils.NonTransactional); err != nil || len(lhList) == 0 {
 			// no data, write version
-			if err := acntDB.SetStructVersion(CurrentVersion); err != nil {
+			if err := dataDB.SetStructVersion(CurrentVersion); err != nil {
 				utils.Logger.Warning(fmt.Sprintf("Could not write current version to db: %v", err))
 			}
 		} else {
@@ -240,7 +240,7 @@ func (sv *StructVersion) CompareAndMigrate(dbVer *StructVersion) []*MigrationInf
 }
 
 func CurrentStorDBVersions() Versions {
-	return Versions{utils.COST_DETAILS: 2}
+	return Versions{utils.COST_DETAILS: 2, utils.Accounts: 2}
 }
 
 // Versions will keep trac of various item versions

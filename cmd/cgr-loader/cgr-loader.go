@@ -21,7 +21,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/rpc"
 	"path"
 	"strconv"
 	"strings"
@@ -39,12 +38,6 @@ var (
 	cgrConfig, _ = config.NewDefaultCGRConfig()
 	migrateRC8   = flag.String("migrate_rc8", "", "Migrate Accounts, Actions, ActionTriggers, DerivedChargers, ActionPlans and SharedGroups to RC8 structures, possible values: *all,*enforce,acc,atr,act,dcs,apl,shg")
 	migrate      = flag.String("migrate", "", "Fire up automatic migration <*cost_details|*set_versions>")
-	tpdb_type    = flag.String("tpdb_type", cgrConfig.TpDbType, "The type of the TariffPlan database <redis>")
-	tpdb_host    = flag.String("tpdb_host", cgrConfig.TpDbHost, "The TariffPlan host to connect to.")
-	tpdb_port    = flag.String("tpdb_port", cgrConfig.TpDbPort, "The TariffPlan port to bind to.")
-	tpdb_name    = flag.String("tpdb_name", cgrConfig.TpDbName, "The name/number of the TariffPlan to connect to.")
-	tpdb_user    = flag.String("tpdb_user", cgrConfig.TpDbUser, "The TariffPlan user to sign in as.")
-	tpdb_pass    = flag.String("tpdb_passwd", cgrConfig.TpDbPass, "The TariffPlan user's password.")
 
 	datadb_type = flag.String("datadb_type", cgrConfig.DataDbType, "The type of the DataDb database <redis>")
 	datadb_host = flag.String("datadb_host", cgrConfig.DataDbHost, "The DataDb host to connect to.")
@@ -72,10 +65,11 @@ var (
 	stats           = flag.Bool("stats", false, "Generates statsistics about given data.")
 	fromStorDb      = flag.Bool("from_stordb", false, "Load the tariff plan from storDb to dataDb")
 	toStorDb        = flag.Bool("to_stordb", false, "Import the tariff plan from files to storDb")
-	historyServer   = flag.String("history_server", cgrConfig.RPCGOBListen, "The history server address:port, empty to disable automatic history archiving")
-	raterAddress    = flag.String("rater_address", cgrConfig.RPCGOBListen, "Rater service to contact for cache reloads, empty to disable automatic cache reloads")
-	cdrstatsAddress = flag.String("cdrstats_address", cgrConfig.RPCGOBListen, "CDRStats service to contact for data reloads, empty to disable automatic data reloads")
-	usersAddress    = flag.String("users_address", cgrConfig.RPCGOBListen, "Users service to contact for data reloads, empty to disable automatic data reloads")
+	rpcEncoding     = flag.String("rpc_encoding", "json", "RPC encoding used <gob|json>")
+	historyServer   = flag.String("historys", cgrConfig.RPCJSONListen, "The history server address:port, empty to disable automatic history archiving")
+	ralsAddress     = flag.String("rals", cgrConfig.RPCJSONListen, "Rater service to contact for cache reloads, empty to disable automatic cache reloads")
+	cdrstatsAddress = flag.String("cdrstats", cgrConfig.RPCJSONListen, "CDRStats service to contact for data reloads, empty to disable automatic data reloads")
+	usersAddress    = flag.String("users", cgrConfig.RPCJSONListen, "Users service to contact for data reloads, empty to disable automatic data reloads")
 	runId           = flag.String("runid", "", "Uniquely identify an import/load, postpended to some automatic fields")
 	loadHistorySize = flag.Int("load_history_size", cgrConfig.LoadHistorySize, "Limit the number of records in the load history")
 	timezone        = flag.String("timezone", cgrConfig.DefaultTimezone, `Timezone for timestamps where not specified <""|UTC|Local|$IANA_TZ_DB>`)
@@ -88,14 +82,13 @@ func main() {
 		fmt.Println(utils.GetCGRVersion())
 		return
 	}
-	var errRatingDb, errAccDb, errStorDb, err error
-	var ratingDb engine.RatingStorage
-	var accountDb engine.AccountingStorage
+	var errDataDB, errStorDb, err error
+	var dataDB engine.DataDB
 	var storDb engine.LoadStorage
-	var rater, cdrstats, users *rpc.Client
+	var rater, cdrstats, users rpcclient.RpcClientConnection
 	var loader engine.LoadReader
 	if *migrateRC8 != "" {
-		if *datadb_type == "redis" && *tpdb_type == "redis" {
+		if *datadb_type == "redis" {
 			var db_nb int
 			db_nb, err = strconv.Atoi(*datadb_name)
 			if err != nil {
@@ -106,101 +99,81 @@ func main() {
 			if *datadb_port != "" {
 				host += ":" + *datadb_port
 			}
-			migratorRC8acc, err := NewMigratorRC8(host, db_nb, *datadb_pass, *dbdata_encoding)
+			migratorRC8dat, err := NewMigratorRC8(host, db_nb, *datadb_pass, *dbdata_encoding)
 			if err != nil {
 				log.Print(err.Error())
 				return
 			}
 			if strings.Contains(*migrateRC8, "acc") || strings.Contains(*migrateRC8, "*all") {
-				if err := migratorRC8acc.migrateAccounts(); err != nil {
+				if err := migratorRC8dat.migrateAccounts(); err != nil {
 					log.Print(err.Error())
 				}
 			}
-
-			db_nb, err = strconv.Atoi(*tpdb_name)
-			if err != nil {
-				log.Print("Redis db name must be an integer!")
-				return
-			}
-			host = *tpdb_host
-			if *tpdb_port != "" {
-				host += ":" + *tpdb_port
-			}
-			migratorRC8rat, err := NewMigratorRC8(host, db_nb, *tpdb_pass, *dbdata_encoding)
-			if err != nil {
-				log.Print(err.Error())
-				return
-			}
 			if strings.Contains(*migrateRC8, "atr") || strings.Contains(*migrateRC8, "*all") {
-				if err := migratorRC8rat.migrateActionTriggers(); err != nil {
+				if err := migratorRC8dat.migrateActionTriggers(); err != nil {
 					log.Print(err.Error())
 				}
 			}
 			if strings.Contains(*migrateRC8, "act") || strings.Contains(*migrateRC8, "*all") {
-				if err := migratorRC8rat.migrateActions(); err != nil {
+				if err := migratorRC8dat.migrateActions(); err != nil {
 					log.Print(err.Error())
 				}
 			}
 			if strings.Contains(*migrateRC8, "dcs") || strings.Contains(*migrateRC8, "*all") {
-				if err := migratorRC8rat.migrateDerivedChargers(); err != nil {
+				if err := migratorRC8dat.migrateDerivedChargers(); err != nil {
 					log.Print(err.Error())
 				}
 			}
 			if strings.Contains(*migrateRC8, "apl") || strings.Contains(*migrateRC8, "*all") {
-				if err := migratorRC8rat.migrateActionPlans(); err != nil {
+				if err := migratorRC8dat.migrateActionPlans(); err != nil {
 					log.Print(err.Error())
 				}
 			}
 			if strings.Contains(*migrateRC8, "shg") || strings.Contains(*migrateRC8, "*all") {
-				if err := migratorRC8rat.migrateSharedGroups(); err != nil {
+				if err := migratorRC8dat.migrateSharedGroups(); err != nil {
 					log.Print(err.Error())
 				}
 			}
 			if strings.Contains(*migrateRC8, "int") {
-				if err := migratorRC8acc.migrateAccountsInt(); err != nil {
+				if err := migratorRC8dat.migrateAccountsInt(); err != nil {
 					log.Print(err.Error())
 				}
-				if err := migratorRC8rat.migrateActionTriggersInt(); err != nil {
+				if err := migratorRC8dat.migrateActionTriggersInt(); err != nil {
 					log.Print(err.Error())
 				}
-				if err := migratorRC8rat.migrateActionsInt(); err != nil {
+				if err := migratorRC8dat.migrateActionsInt(); err != nil {
 					log.Print(err.Error())
 				}
 			}
 			if strings.Contains(*migrateRC8, "vf") {
-				if err := migratorRC8rat.migrateActionsInt2(); err != nil {
+				if err := migratorRC8dat.migrateActionsInt2(); err != nil {
 					log.Print(err.Error())
 				}
-				if err := migratorRC8acc.writeVersion(); err != nil {
+				if err := migratorRC8dat.writeVersion(); err != nil {
 					log.Print(err.Error())
 				}
 			}
 			if *migrateRC8 == "*enforce" { // Ignore previous data, enforce to latest version information
-				if err := migratorRC8acc.writeVersion(); err != nil {
+				if err := migratorRC8dat.writeVersion(); err != nil {
 					log.Print(err.Error())
 				}
 			}
-		} else if *datadb_type == "mongo" && *tpdb_type == "mongo" {
-			mongoMigratorAcc, err := NewMongoMigrator(*datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass)
-			if err != nil {
-				log.Print(err.Error())
-				return
-			}
-			mongoMigratorRat, err := NewMongoMigrator(*tpdb_host, *tpdb_port, *tpdb_name, *tpdb_user, *tpdb_pass)
+		} else if *datadb_type == "mongo" {
+			mongoMigratorDat, err := NewMongoMigrator(*datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass)
 			if err != nil {
 				log.Print(err.Error())
 				return
 			}
 			if strings.Contains(*migrateRC8, "vf") {
-				if err := mongoMigratorRat.migrateActions(); err != nil {
+				if err := mongoMigratorDat.migrateActions(); err != nil {
 					log.Print(err.Error())
 				}
-				if err := mongoMigratorAcc.writeVersion(); err != nil {
+				if err := mongoMigratorDat.writeVersion(); err != nil {
 					log.Print(err.Error())
 				}
 			}
 			if *migrateRC8 == "*enforce" {
-				if err := mongoMigratorAcc.writeVersion(); err != nil {
+				if err := mongoMigratorDat.writeVersion(); err != nil {
 					log.Print(err.Error())
 				}
 			}
@@ -210,12 +183,7 @@ func main() {
 		return
 	}
 	if migrate != nil && *migrate != "" { // Run migrator
-		ratingDb, err := engine.ConfigureRatingStorage(*tpdb_type, *tpdb_host, *tpdb_port, *tpdb_name,
-			*tpdb_user, *tpdb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
-		if err != nil {
-			log.Fatal(err)
-		}
-		accountDb, err := engine.ConfigureAccountingStorage(*datadb_type, *datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
+		dataDB, err := engine.ConfigureDataStorage(*datadb_type, *datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -224,7 +192,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if err := migrator.NewMigrator(ratingDb, accountDb, *datadb_type, storDB, *stor_db_type).Migrate(*migrate); err != nil {
+		if err := migrator.NewMigrator(dataDB, *datadb_type, *dbdata_encoding, storDB, *stor_db_type).Migrate(*migrate); err != nil {
 			log.Fatal(err)
 		}
 		log.Print("Done migrating!")
@@ -233,27 +201,23 @@ func main() {
 	// Init necessary db connections, only if not already
 	if !*dryRun { // make sure we do not need db connections on dry run, also not importing into any stordb
 		if *fromStorDb {
-			ratingDb, errRatingDb = engine.ConfigureRatingStorage(*tpdb_type, *tpdb_host, *tpdb_port, *tpdb_name,
-				*tpdb_user, *tpdb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
-			accountDb, errAccDb = engine.ConfigureAccountingStorage(*datadb_type, *datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
+			dataDB, errDataDB = engine.ConfigureDataStorage(*datadb_type, *datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
 			storDb, errStorDb = engine.ConfigureLoadStorage(*stor_db_type, *stor_db_host, *stor_db_port, *stor_db_name, *stor_db_user, *stor_db_pass, *dbdata_encoding,
 				cgrConfig.StorDBMaxOpenConns, cgrConfig.StorDBMaxIdleConns, cgrConfig.StorDBCDRSIndexes)
 		} else if *toStorDb { // Import from csv files to storDb
 			storDb, errStorDb = engine.ConfigureLoadStorage(*stor_db_type, *stor_db_host, *stor_db_port, *stor_db_name, *stor_db_user, *stor_db_pass, *dbdata_encoding,
 				cgrConfig.StorDBMaxOpenConns, cgrConfig.StorDBMaxIdleConns, cgrConfig.StorDBCDRSIndexes)
 		} else { // Default load from csv files to dataDb
-			ratingDb, errRatingDb = engine.ConfigureRatingStorage(*tpdb_type, *tpdb_host, *tpdb_port, *tpdb_name,
-				*tpdb_user, *tpdb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
-			accountDb, errAccDb = engine.ConfigureAccountingStorage(*datadb_type, *datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
+			dataDB, errDataDB = engine.ConfigureDataStorage(*datadb_type, *datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
 		}
 		// Defer databases opened to be closed when we are done
-		for _, db := range []engine.Storage{ratingDb, accountDb, storDb} {
+		for _, db := range []engine.Storage{dataDB, storDb} {
 			if db != nil {
 				defer db.Close()
 			}
 		}
 		// Stop on db errors
-		for _, err = range []error{errRatingDb, errAccDb, errStorDb} {
+		for _, err = range []error{errDataDB, errDataDB, errStorDb} {
 			if err != nil {
 				log.Fatalf("Could not open database connection: %v", err)
 			}
@@ -305,7 +269,7 @@ func main() {
 			path.Join(*dataPath, utils.ResourceLimitsCsv),
 		)
 	}
-	tpReader := engine.NewTpReader(ratingDb, accountDb, loader, *tpid, *timezone)
+	tpReader := engine.NewTpReader(dataDB, loader, *tpid, *timezone)
 	err = tpReader.LoadAll()
 	if err != nil {
 		log.Fatal(err)
@@ -323,7 +287,7 @@ func main() {
 	}
 	if *historyServer != "" { // Init scribeAgent so we can store the differences
 		if scribeAgent, err := rpcclient.NewRpcClient("tcp", *historyServer, 3, 3,
-			time.Duration(1*time.Second), time.Duration(5*time.Minute), utils.GOB, nil, false); err != nil {
+			time.Duration(1*time.Second), time.Duration(5*time.Minute), *rpcEncoding, nil, false); err != nil {
 			log.Fatalf("Could not connect to history server, error: %s. Make sure you have properly configured it via -history_server flag.", err.Error())
 			return
 		} else {
@@ -333,22 +297,22 @@ func main() {
 	} else {
 		log.Print("WARNING: Rates history archiving is disabled!")
 	}
-	if *raterAddress != "" { // Init connection to rater so we can reload it's data
-		rater, err = rpc.Dial("tcp", *raterAddress)
-		if err != nil {
-			log.Fatalf("Could not connect to rater: %s", err.Error())
+	if *ralsAddress != "" { // Init connection to rater so we can reload it's data
+		if rater, err = rpcclient.NewRpcClient("tcp", *ralsAddress, 3, 3,
+			time.Duration(1*time.Second), time.Duration(5*time.Minute), *rpcEncoding, nil, false); err != nil {
+			log.Fatalf("Could not connect to RALs: %s", err.Error())
 			return
 		}
 	} else {
 		log.Print("WARNING: Rates automatic cache reloading is disabled!")
 	}
 	if *cdrstatsAddress != "" { // Init connection to rater so we can reload it's data
-		if *cdrstatsAddress == *raterAddress {
+		if *cdrstatsAddress == *ralsAddress {
 			cdrstats = rater
 		} else {
-			cdrstats, err = rpc.Dial("tcp", *cdrstatsAddress)
-			if err != nil {
-				log.Fatalf("Could not connect to CDRStats API: %s", err.Error())
+			if cdrstats, err = rpcclient.NewRpcClient("tcp", *cdrstatsAddress, 3, 3,
+				time.Duration(1*time.Second), time.Duration(5*time.Minute), *rpcEncoding, nil, false); err != nil {
+				log.Fatalf("Could not connect to CDRStatS API: %s", err.Error())
 				return
 			}
 		}
@@ -356,12 +320,12 @@ func main() {
 		log.Print("WARNING: CDRStats automatic data reload is disabled!")
 	}
 	if *usersAddress != "" { // Init connection to rater so we can reload it's data
-		if *usersAddress == *raterAddress {
+		if *usersAddress == *ralsAddress {
 			users = rater
 		} else {
-			users, err = rpc.Dial("tcp", *usersAddress)
-			if err != nil {
-				log.Fatalf("Could not connect to Users API: %s", err.Error())
+			if users, err = rpcclient.NewRpcClient("tcp", *usersAddress, 3, 3,
+				time.Duration(1*time.Second), time.Duration(5*time.Minute), *rpcEncoding, nil, false); err != nil {
+				log.Fatalf("Could not connect to UserS API: %s", err.Error())
 				return
 			}
 		}
@@ -376,17 +340,21 @@ func main() {
 	if len(*historyServer) != 0 && *verbose {
 		log.Print("Wrote history.")
 	}
-	var dstIds, rplIds, rpfIds, actIds, shgIds, alsIds, lcrIds, dcsIds, rlIDs []string
+	var dstIds, revDstIDs, rplIds, rpfIds, actIds, aapIDs, shgIds, alsIds, lcrIds, dcsIds, rlIDs, aatIDs, ralsIDs []string
 	if rater != nil {
 		dstIds, _ = tpReader.GetLoadedIds(utils.DESTINATION_PREFIX)
+		revDstIDs, _ = tpReader.GetLoadedIds(utils.REVERSE_DESTINATION_PREFIX)
 		rplIds, _ = tpReader.GetLoadedIds(utils.RATING_PLAN_PREFIX)
 		rpfIds, _ = tpReader.GetLoadedIds(utils.RATING_PROFILE_PREFIX)
 		actIds, _ = tpReader.GetLoadedIds(utils.ACTION_PREFIX)
+		aapIDs, _ = tpReader.GetLoadedIds(utils.AccountActionPlansPrefix)
 		shgIds, _ = tpReader.GetLoadedIds(utils.SHARED_GROUP_PREFIX)
 		alsIds, _ = tpReader.GetLoadedIds(utils.ALIASES_PREFIX)
 		lcrIds, _ = tpReader.GetLoadedIds(utils.LCR_PREFIX)
 		dcsIds, _ = tpReader.GetLoadedIds(utils.DERIVEDCHARGERS_PREFIX)
 		rlIDs, _ = tpReader.GetLoadedIds(utils.ResourceLimitsPrefix)
+		aatIDs, _ = tpReader.GetLoadedIds(utils.ACTION_TRIGGER_PREFIX)
+		ralsIDs, _ = tpReader.GetLoadedIds(utils.REVERSE_ALIASES_PREFIX)
 	}
 	aps, _ := tpReader.GetLoadedIds(utils.ACTION_PLAN_PREFIX)
 	var statsQueueIds []string
@@ -408,21 +376,23 @@ func main() {
 		if *verbose {
 			log.Print("Reloading cache")
 		}
-		if *flush {
-			dstIds, rplIds, rpfIds, actIds, shgIds, alsIds, lcrIds, dcsIds, rlIDs, aps = nil, nil, nil, nil, nil, nil, nil, nil, nil, nil // Should reload all these on flush
-		}
 		if err = rater.Call("ApierV1.ReloadCache", utils.AttrReloadCache{ArgsCache: utils.ArgsCache{
-			DestinationIDs:    &dstIds,
-			RatingPlanIDs:     &rplIds,
-			RatingProfileIDs:  &rpfIds,
-			ActionIDs:         &actIds,
-			ActionPlanIDs:     &aps,
-			SharedGroupIDs:    &shgIds,
-			AliasIDs:          &alsIds,
-			LCRids:            &lcrIds,
-			DerivedChargerIDs: &dcsIds,
-			ResourceLimitIDs:  &rlIDs,
-		}}, &reply); err != nil {
+			DestinationIDs:        &dstIds,
+			ReverseDestinationIDs: &revDstIDs,
+			RatingPlanIDs:         &rplIds,
+			RatingProfileIDs:      &rpfIds,
+			ActionIDs:             &actIds,
+			ActionPlanIDs:         &aps,
+			AccountActionPlanIDs:  &aapIDs,
+			ActionTriggerIDs:      &aatIDs,
+			SharedGroupIDs:        &shgIds,
+			LCRids:                &lcrIds,
+			DerivedChargerIDs:     &dcsIds,
+			AliasIDs:              &alsIds,
+			ReverseAliasIDs:       &ralsIDs,
+			ResourceLimitIDs:      &rlIDs},
+			FlushAll: *flush,
+		}, &reply); err != nil {
 			log.Printf("WARNING: Got error on cache reload: %s\n", err.Error())
 		}
 

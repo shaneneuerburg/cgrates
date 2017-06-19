@@ -89,8 +89,8 @@ func (m *Migrator) migrateCostDetails() (err error) {
 		v1CC := &v1CallCost{Direction: ccDirection.String, Category: ccCategory.String, Tenant: ccTenant.String,
 			Subject: ccSubject.String, Account: ccAccount.String, Destination: ccDestination.String, TOR: ccTor.String,
 			Cost: ccCost.Float64, Timespans: v1tmsps}
-		cc, err := v1CC.AsCallCost()
-		if err != nil {
+		cc := v1CC.AsCallCost()
+		if cc == nil {
 			utils.Logger.Warning(
 				fmt.Sprintf("<Migrator> Error: <%s> when converting into CallCost CDR with id: <%d>", err.Error(), id))
 			continue
@@ -103,7 +103,7 @@ func (m *Migrator) migrateCostDetails() (err error) {
 	}
 	// All done, update version wtih current one
 	vrs = engine.Versions{utils.COST_DETAILS: engine.CurrentStorDBVersions()[utils.COST_DETAILS]}
-	if err := m.storDB.SetVersions(vrs); err != nil {
+	if err := m.storDB.SetVersions(vrs, false); err != nil {
 		return utils.NewCGRError(utils.Migrator,
 			utils.ServerErrorCaps,
 			err.Error(),
@@ -152,7 +152,7 @@ type v1UnitInfo struct {
 	TOR           string
 }
 
-func (v1cc *v1CallCost) AsCallCost() (cc *engine.CallCost, err error) {
+func (v1cc *v1CallCost) AsCallCost() (cc *engine.CallCost) {
 	cc = new(engine.CallCost)
 	cc.Direction = v1cc.Direction
 	cc.Category = v1cc.Category

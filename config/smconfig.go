@@ -97,6 +97,7 @@ type SmGenericConfig struct {
 	MinCallDuration     time.Duration
 	MaxCallDuration     time.Duration
 	SessionTTL          time.Duration
+	SessionTTLMaxDelay  *time.Duration
 	SessionTTLLastUsed  *time.Duration
 	SessionTTLUsage     *time.Duration
 	SessionIndexes      utils.StringMap
@@ -152,6 +153,13 @@ func (self *SmGenericConfig) loadFromJsonCfg(jsnCfg *SmGenericJsonCfg) error {
 	if jsnCfg.Session_ttl != nil {
 		if self.SessionTTL, err = utils.ParseDurationWithSecs(*jsnCfg.Session_ttl); err != nil {
 			return err
+		}
+	}
+	if jsnCfg.Session_ttl_max_delay != nil {
+		if maxTTLDelay, err := utils.ParseDurationWithSecs(*jsnCfg.Session_ttl_max_delay); err != nil {
+			return err
+		} else {
+			self.SessionTTLMaxDelay = &maxTTLDelay
 		}
 	}
 	if jsnCfg.Session_ttl_last_used != nil {
@@ -309,6 +317,7 @@ type SmKamConfig struct {
 	Enabled         bool
 	RALsConns       []*HaPoolConfig
 	CDRsConns       []*HaPoolConfig
+	RLsConns        []*HaPoolConfig
 	CreateCdr       bool
 	DebitInterval   time.Duration
 	MinCallDuration time.Duration
@@ -336,6 +345,13 @@ func (self *SmKamConfig) loadFromJsonCfg(jsnCfg *SmKamJsonCfg) error {
 		for idx, jsnHaCfg := range *jsnCfg.Cdrs_conns {
 			self.CDRsConns[idx] = NewDfltHaPoolConfig()
 			self.CDRsConns[idx].loadFromJsonCfg(jsnHaCfg)
+		}
+	}
+	if jsnCfg.Rls_conns != nil {
+		self.RLsConns = make([]*HaPoolConfig, len(*jsnCfg.Rls_conns))
+		for idx, jsnHaCfg := range *jsnCfg.Rls_conns {
+			self.RLsConns[idx] = NewDfltHaPoolConfig()
+			self.RLsConns[idx].loadFromJsonCfg(jsnHaCfg)
 		}
 	}
 	if jsnCfg.Create_cdr != nil {

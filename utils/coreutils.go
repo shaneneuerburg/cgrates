@@ -20,6 +20,7 @@ package utils
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/gob"
@@ -27,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -36,8 +38,37 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+func NewCounter(start, limit int64) *Counter {
+	return &Counter{
+		value: start,
+		limit: limit,
+	}
+}
+
+type Counter struct {
+	value, limit int64
+	sync.Mutex
+}
+
+func (c *Counter) Next() int64 {
+	c.Lock()
+	defer c.Unlock()
+	c.value += 1
+	if c.limit > 0 && c.value > c.limit {
+		c.value = 0
+	}
+	return c.value
+}
+
+func (c *Counter) Value() int64 {
+	c.Lock()
+	defer c.Unlock()
+	return c.value
+}
 
 // Returns first non empty string out of vals. Useful to extract defaults
 func FirstNonEmpty(vals ...string) string {
@@ -61,19 +92,6 @@ func NewTPid() string {
 	return Sha1(GenUUID())
 }
 
-/*func GenUUID() string {
-	uuid := make([]byte, 16)
-	n, err := rand.Read(uuid)
-	if n != len(uuid) || err != nil {
-		return strconv.FormatInt(time.Now().UnixNano(), 10)
-	}
-	// TODO: verify the two lines implement RFC 4122 correctly
-	uuid[8] = 0x80 // variant bits see page 5
-	uuid[4] = 0x40 // version 4 Pseudo Random, see page 7
-
-	return hex.EncodeToString(uuid)
-}*/
-
 // helper function for uuid generation
 func GenUUID() string {
 	b := make([]byte, 16)
@@ -85,6 +103,12 @@ func GenUUID() string {
 	b[8] = (b[8] &^ 0x40) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10],
 		b[10:])
+}
+
+// UUIDSha1Prefix generates a prefix of the sha1 applied to an UUID
+// prefix 8 is chosen since the probability of colision starts being minimal after 7 characters (see git commits)
+func UUIDSha1Prefix() string {
+	return Sha1(GenUUID())[:7]
 }
 
 // Round return rounded version of x with prec precision.
@@ -332,12 +356,37 @@ func Unzip(src, dest string) error {
 	return nil
 }
 
+// ZIPContent compresses src into zipped slice of bytes
+func GZIPContent(src []byte) (dst []byte, err error) {
+	var b bytes.Buffer
+	gz := gzip.NewWriter(&b)
+	if _, err = gz.Write(src); err != nil {
+		return
+	}
+	if err = gz.Flush(); err != nil {
+		return
+	}
+	if err = gz.Close(); err != nil {
+		return
+	}
+	return b.Bytes(), nil
+}
+
+func GUnZIPContent(src []byte) (dst []byte, err error) {
+	rdata := bytes.NewReader(src)
+	var r *gzip.Reader
+	if r, err = gzip.NewReader(rdata); err != nil {
+		return
+	}
+	return ioutil.ReadAll(r)
+}
+
 // successive Fibonacci numbers.
-func Fib() func() time.Duration {
+func Fib() func() int {
 	a, b := 0, 1
-	return func() time.Duration {
+	return func() int {
 		a, b = b, a+b
-		return time.Duration(a) * time.Second
+		return a
 	}
 }
 
@@ -378,8 +427,16 @@ func StringMapPointer(sm StringMap) *StringMap {
 	return &sm
 }
 
+func MapStringStringPointer(mp map[string]string) *map[string]string {
+	return &mp
+}
+
 func TimePointer(t time.Time) *time.Time {
 	return &t
+}
+
+func DurationPointer(d time.Duration) *time.Duration {
+	return &d
 }
 
 func ReflectFuncLocation(handler interface{}) (file string, line int) {
@@ -456,9 +513,9 @@ type Cloner interface {
 //  width - the field width
 //  strip - if present it will specify the strip strategy, when missing strip will not be allowed
 //  padding - if present it will specify the padding strategy to use, left, right, zeroleft, zeroright
-func FmtFieldWidth(source string, width int, strip, padding string, mandatory bool) (string, error) {
+func FmtFieldWidth(fieldID, source string, width int, strip, padding string, mandatory bool) (string, error) {
 	if mandatory && len(source) == 0 {
-		return "", errors.New("Empty source value")
+		return "", fmt.Errorf("Empty source value for fieldID: <%s>", fieldID)
 	}
 	if width == 0 { // Disable width processing if not defined
 		return source, nil
@@ -468,7 +525,7 @@ func FmtFieldWidth(source string, width int, strip, padding string, mandatory bo
 	}
 	if len(source) > width { //the source is bigger than allowed
 		if len(strip) == 0 {
-			return "", fmt.Errorf("Source %s is bigger than the width %d, no strip defied", source, width)
+			return "", fmt.Errorf("Source %s is bigger than the width %d, no strip defied, fieldID: <%s>", source, width, fieldID)
 		}
 		if strip == "right" {
 			return source[:width], nil
@@ -483,7 +540,7 @@ func FmtFieldWidth(source string, width int, strip, padding string, mandatory bo
 		}
 	} else { //the source is smaller as the maximum allowed
 		if len(padding) == 0 {
-			return "", fmt.Errorf("Source %s is smaller than the width %d, no padding defined", source, width)
+			return "", fmt.Errorf("Source %s is smaller than the width %d, no padding defined, fieldID: <%s>", source, width, fieldID)
 		}
 		var paddingFmt string
 		switch padding {

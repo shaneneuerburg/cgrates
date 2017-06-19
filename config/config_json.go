@@ -30,10 +30,8 @@ const (
 	CACHE_JSN            = "cache"
 	LISTEN_JSN           = "listen"
 	HTTP_JSN             = "http"
-	TPDB_JSN             = "tariffplan_db"
 	DATADB_JSN           = "data_db"
 	STORDB_JSN           = "stor_db"
-	BALANCER_JSN         = "balancer"
 	RALS_JSN             = "rals"
 	SCHEDULER_JSN        = "scheduler"
 	CDRS_JSN             = "cdrs"
@@ -51,6 +49,7 @@ const (
 	KAMAILIO_JSN         = "kamailio"
 	OSIPS_JSN            = "opensips"
 	DA_JSN               = "diameter_agent"
+	RA_JSN               = "radius_agent"
 	HISTSERV_JSN         = "historys"
 	PUBSUBSERV_JSN       = "pubsubs"
 	ALIASESSERV_JSN      = "aliases"
@@ -137,18 +136,6 @@ func (self CgrJsonCfg) DbJsonCfg(section string) (*DbJsonCfg, error) {
 		return nil, nil
 	}
 	cfg := new(DbJsonCfg)
-	if err := json.Unmarshal(*rawCfg, cfg); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
-func (self CgrJsonCfg) BalancerJsonCfg() (*BalancerJsonCfg, error) {
-	rawCfg, hasKey := self[BALANCER_JSN]
-	if !hasKey {
-		return nil, nil
-	}
-	cfg := new(BalancerJsonCfg)
 	if err := json.Unmarshal(*rawCfg, cfg); err != nil {
 		return nil, err
 	}
@@ -293,6 +280,18 @@ func (self CgrJsonCfg) DiameterAgentJsonCfg() (*DiameterAgentJsonCfg, error) {
 		return nil, nil
 	}
 	cfg := new(DiameterAgentJsonCfg)
+	if err := json.Unmarshal(*rawCfg, cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func (self CgrJsonCfg) RadiusAgentJsonCfg() (*RadiusAgentJsonCfg, error) {
+	rawCfg, hasKey := self[RA_JSN]
+	if !hasKey {
+		return nil, nil
+	}
+	cfg := new(RadiusAgentJsonCfg)
 	if err := json.Unmarshal(*rawCfg, cfg); err != nil {
 		return nil, err
 	}

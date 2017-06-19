@@ -207,27 +207,6 @@ func TestCgrCfgJSONDefaultsListen(t *testing.T) {
 	}
 }
 
-func TestCgrCfgJSONDefaultsTPdb(t *testing.T) {
-	if cgrCfg.TpDbType != "redis" {
-		t.Error(cgrCfg.TpDbType)
-	}
-	if cgrCfg.TpDbHost != "127.0.0.1" {
-		t.Error(cgrCfg.TpDbHost)
-	}
-	if cgrCfg.TpDbPort != "6379" {
-		t.Error(cgrCfg.TpDbPort)
-	}
-	if cgrCfg.TpDbName != "10" {
-		t.Error(cgrCfg.TpDbName)
-	}
-	if cgrCfg.TpDbUser != "" {
-		t.Error(cgrCfg.TpDbUser)
-	}
-	if cgrCfg.TpDbPass != "" {
-		t.Error(cgrCfg.TpDbPass)
-	}
-}
-
 func TestCgrCfgJSONDefaultsjsnDataDb(t *testing.T) {
 	if cgrCfg.DataDbType != "redis" {
 		t.Error(cgrCfg.DataDbType)
@@ -238,10 +217,10 @@ func TestCgrCfgJSONDefaultsjsnDataDb(t *testing.T) {
 	if cgrCfg.DataDbPort != "6379" {
 		t.Error(cgrCfg.DataDbPort)
 	}
-	if cgrCfg.DataDbName != "11" {
+	if cgrCfg.DataDbName != "10" {
 		t.Error(cgrCfg.DataDbName)
 	}
-	if cgrCfg.DataDbUser != "" {
+	if cgrCfg.DataDbUser != "cgrates" {
 		t.Error(cgrCfg.DataDbUser)
 	}
 	if cgrCfg.DataDbPass != "" {
@@ -268,7 +247,7 @@ func TestCgrCfgJSONDefaultsStorDB(t *testing.T) {
 	if cgrCfg.StorDBUser != "cgrates" {
 		t.Error(cgrCfg.StorDBUser)
 	}
-	if cgrCfg.StorDBPass != "CGRateS.org" {
+	if cgrCfg.StorDBPass != "" {
 		t.Error(cgrCfg.StorDBPass)
 	}
 	if cgrCfg.StorDBMaxOpenConns != 100 {
@@ -283,21 +262,12 @@ func TestCgrCfgJSONDefaultsStorDB(t *testing.T) {
 	}
 }
 
-func TestCgrCfgJSONDefaultsBalancer(t *testing.T) {
-	if cgrCfg.BalancerEnabled != false {
-		t.Error(cgrCfg.BalancerEnabled)
-	}
-}
-
 func TestCgrCfgJSONDefaultsRALs(t *testing.T) {
 
 	eHaPoolcfg := []*HaPoolConfig{}
 
 	if cgrCfg.RALsEnabled != false {
 		t.Error(cgrCfg.RALsEnabled)
-	}
-	if cgrCfg.RALsBalancer != "" {
-		t.Error(cgrCfg.RALsBalancer)
 	}
 	if !reflect.DeepEqual(cgrCfg.RALsCDRStatSConns, eHaPoolcfg) {
 		t.Error(cgrCfg.RALsCDRStatSConns)
@@ -464,15 +434,15 @@ func TestCgrCfgJSONDefaultsSMKamConfig(t *testing.T) {
 		Enabled:         false,
 		RALsConns:       []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
 		CDRsConns:       []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
+		RLsConns:        []*HaPoolConfig{},
 		CreateCdr:       false,
 		DebitInterval:   10 * time.Second,
 		MinCallDuration: 0 * time.Second,
 		MaxCallDuration: 3 * time.Hour,
 		EvapiConns:      []*KamConnConfig{&KamConnConfig{Address: "127.0.0.1:8448", Reconnects: 5}},
 	}
-
 	if !reflect.DeepEqual(cgrCfg.SmKamConfig, eSmKaCfg) {
-		t.Errorf("received: %+v, expecting: %+v", cgrCfg.CdreProfiles, eSmKaCfg)
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.SmKamConfig, eSmKaCfg)
 	}
 }
 
@@ -547,7 +517,6 @@ func TestCgrCfgJSONDefaultsResLimCfg(t *testing.T) {
 		Enabled:           false,
 		CDRStatConns:      []*HaPoolConfig{},
 		CacheDumpInterval: 0 * time.Second,
-		UsageTTL:          3 * time.Hour,
 	}
 
 	if !reflect.DeepEqual(cgrCfg.resourceLimiterCfg, eResLiCfg) {
@@ -557,34 +526,6 @@ func TestCgrCfgJSONDefaultsResLimCfg(t *testing.T) {
 }
 
 func TestCgrCfgJSONDefaultsDiameterAgentCfg(t *testing.T) {
-	reqProc := []*DARequestProcessor{&DARequestProcessor{
-		Id:                "*default",
-		DryRun:            false,
-		PublishEvent:      false,
-		RequestFilter:     utils.ParseRSRFieldsMustCompile("Subscription-Id>Subscription-Id-Type(0)", utils.INFIELD_SEP),
-		Flags:             utils.StringMap{},
-		ContinueOnSuccess: false,
-		AppendCCA:         true,
-		CCRFields: []*CfgCdrField{
-			&CfgCdrField{Tag: "TOR", FieldId: "ToR", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("^*voice", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "OriginID", FieldId: "OriginID", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Session-Id", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "RequestType", FieldId: "RequestType", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("^*users", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "Direction", FieldId: "Direction", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("^*out", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "Tenant", FieldId: "Tenant", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("^*users", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "Category", FieldId: "Category", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("^call", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "Account", FieldId: "Account", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("^*users", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "Subject", FieldId: "Subject", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("^*users", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "Destination", FieldId: "Destination", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Service-Information>IN-Information>Real-Called-Number", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "SetupTime", FieldId: "SetupTime", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Event-Timestamp", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "AnswerTime", FieldId: "AnswerTime", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Event-Timestamp", utils.INFIELD_SEP), Mandatory: true},
-			&CfgCdrField{Tag: "Usage", FieldId: "Usage", Type: "*handler", HandlerId: "*ccr_usage", Mandatory: true},
-			&CfgCdrField{Tag: "SubscriberID", FieldId: "SubscriberId", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Subscription-Id>Subscription-Id-Data", utils.INFIELD_SEP), Mandatory: true},
-		},
-		CCAFields: []*CfgCdrField{
-			&CfgCdrField{Tag: "GrantedUnits", FieldId: "Granted-Service-Unit>CC-Time", Type: "*handler", HandlerId: "*cca_usage", Mandatory: true}},
-	},
-	}
-
 	testDA := &DiameterAgentCfg{
 		Enabled:           false,
 		Listen:            "127.0.0.1:3868",
@@ -598,7 +539,7 @@ func TestCgrCfgJSONDefaultsDiameterAgentCfg(t *testing.T) {
 		OriginRealm:       "cgrates.org",
 		VendorId:          0,
 		ProductName:       "CGRateS",
-		RequestProcessors: reqProc,
+		RequestProcessors: nil,
 	}
 
 	if !reflect.DeepEqual(cgrCfg.diameterAgentCfg.Enabled, testDA.Enabled) {

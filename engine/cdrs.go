@@ -68,7 +68,7 @@ func fsCdrHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewCdrServer(cgrCfg *config.CGRConfig, cdrDb CdrStorage, dataDB AccountingStorage, rater, pubsub, users, aliases, stats rpcclient.RpcClientConnection) (*CdrServer, error) {
+func NewCdrServer(cgrCfg *config.CGRConfig, cdrDb CdrStorage, dataDB DataDB, rater, pubsub, users, aliases, stats rpcclient.RpcClientConnection) (*CdrServer, error) {
 	if rater == nil || reflect.ValueOf(rater).IsNil() { // Work around so we store actual nil instead of nil interface value, faster to check here than in CdrServer code
 		rater = nil
 	}
@@ -92,7 +92,7 @@ func NewCdrServer(cgrCfg *config.CGRConfig, cdrDb CdrStorage, dataDB AccountingS
 type CdrServer struct {
 	cgrCfg        *config.CGRConfig
 	cdrDb         CdrStorage
-	dataDB        AccountingStorage
+	dataDB        DataDB
 	rals          rpcclient.RpcClientConnection
 	pubsub        rpcclient.RpcClientConnection
 	users         rpcclient.RpcClientConnection
@@ -140,7 +140,7 @@ func (self *CdrServer) storeSMCost(smCost *SMCost, checkDuplicate bool) error {
 	if checkDuplicate {
 		_, err := self.guard.Guard(func() (interface{}, error) {
 			smCosts, err := self.cdrDb.GetSMCosts(smCost.CGRID, smCost.RunID, "", "")
-			if err != nil {
+			if err != nil && err.Error() != utils.NotFoundCaps {
 				return nil, err
 			}
 			if len(smCosts) != 0 {
@@ -372,15 +372,19 @@ func (self *CdrServer) rateCDR(cdr *CDR) ([]*CDR, error) {
 	_, hasLastUsed := cdr.ExtraFields[utils.LastUsed]
 	if utils.IsSliceMember([]string{utils.META_PREPAID, utils.PREPAID}, cdr.RequestType) && (cdr.Usage != 0 || hasLastUsed) { // ToDo: Get rid of PREPAID as soon as we don't want to support it backwards
 		// Should be previously calculated and stored in DB
-		delay := utils.Fib()
+		fib := utils.Fib()
 		var smCosts []*SMCost
+		cgrID := cdr.CGRID
+		if _, hasIT := cdr.ExtraFields[utils.OriginIDPrefix]; hasIT {
+			cgrID = "" // for queries involving originIDPrefix we ignore CGRID
+		}
 		for i := 0; i < self.cgrCfg.CDRSSMCostRetries; i++ {
-			smCosts, err = self.cdrDb.GetSMCosts(cdr.CGRID, cdr.RunID, cdr.OriginHost, cdr.ExtraFields[utils.OriginIDPrefix])
+			smCosts, err = self.cdrDb.GetSMCosts(cgrID, cdr.RunID, cdr.OriginHost, cdr.ExtraFields[utils.OriginIDPrefix])
 			if err == nil && len(smCosts) != 0 {
 				break
 			}
 			if i != 3 {
-				time.Sleep(delay())
+				time.Sleep(time.Duration(fib()) * time.Second)
 			}
 		}
 		if len(smCosts) != 0 { // Cost retrieved from SMCost table
@@ -520,6 +524,50 @@ func (self *CdrServer) V1StoreSMCost(attr AttrCDRSStoreSMCost, reply *string) er
 	self.getCache().Cache(cacheKey, &cache.CacheItem{Value: utils.OK})
 	*reply = utils.OK
 	return nil
+}
+
+func (cdrs *CdrServer) V2StoreSMCost(args ArgsV2CDRSStoreSMCost, reply *string) error {
+	if args.Cost.CGRID == "" {
+		return utils.NewCGRError(utils.CDRSCtx,
+			utils.MandatoryIEMissingCaps, fmt.Sprintf("%s: CGRID", utils.MandatoryInfoMissing),
+			"SMCost: %+v with empty CGRID")
+	}
+	cacheKey := "V2StoreSMCost" + args.Cost.CGRID + args.Cost.RunID + args.Cost.OriginID
+	if item, err := cdrs.getCache().Get(cacheKey); err == nil && item != nil {
+		if item.Value != nil {
+			*reply = item.Value.(string)
+		}
+		return item.Err
+	}
+	cc := args.Cost.CostDetails.AsCallCost()
+	cc.Round()
+	roundIncrements := cc.GetRoundIncrements()
+	if len(roundIncrements) != 0 {
+		cd := cc.CreateCallDescriptor()
+		cd.CgrID = args.Cost.CGRID
+		cd.RunID = args.Cost.RunID
+		cd.Increments = roundIncrements
+		var response float64
+		if err := cdrs.rals.Call("Responder.RefundRounding", cd, &response); err != nil {
+			utils.Logger.Err(fmt.Sprintf("<CDRS> RefundRounding for cc: %+v, got error: %s", cc, err.Error()))
+		}
+	}
+	if err := cdrs.storeSMCost(&SMCost{
+		CGRID:       args.Cost.CGRID,
+		RunID:       args.Cost.RunID,
+		OriginHost:  args.Cost.OriginHost,
+		OriginID:    args.Cost.OriginID,
+		CostSource:  args.Cost.CostSource,
+		Usage:       args.Cost.Usage,
+		CostDetails: cc,
+	}, args.CheckDuplicate); err != nil {
+		cdrs.getCache().Cache(cacheKey, &cache.CacheItem{Err: err})
+		return utils.NewErrServerError(err)
+	}
+	*reply = utils.OK
+	cdrs.getCache().Cache(cacheKey, &cache.CacheItem{Value: *reply})
+	return nil
+
 }
 
 // Called by rate/re-rate API, RPC method

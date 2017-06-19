@@ -53,9 +53,14 @@ func (rit *RITiming) CronString() string {
 		return rit.cronString
 	}
 	var sec, min, hour, monthday, month, weekday, year string
-	if len(rit.StartTime) == 0 {
+	switch rit.StartTime {
+	case "":
 		hour, min, sec = "*", "*", "*"
-	} else {
+	case utils.MetaEveryMinute:
+		hour, min, sec = "*", "*", "0"
+	case utils.MetaHourly:
+		hour, min, sec = "*", "0", "0"
+	default:
 		hms := strings.Split(rit.StartTime, ":")
 		if len(hms) == 3 {
 			hour, min, sec = hms[0], hms[1], hms[2]
@@ -281,6 +286,27 @@ func (pg *RateGroups) AddRate(ps ...*Rate) {
 			*pg = append(*pg, p)
 		}
 	}
+}
+
+func (pg RateGroups) Equals(oRG RateGroups) bool {
+	if len(pg) != len(oRG) {
+		return false
+	}
+	for i := range pg {
+		if !pg[0].Equal(oRG[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (pg RateGroups) Clone() (cln RateGroups) {
+	cln = make(RateGroups, len(pg))
+	for i, rt := range pg {
+		cln[i] = new(Rate)
+		*cln[i] = *rt
+	}
+	return
 }
 
 /*

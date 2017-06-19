@@ -35,6 +35,7 @@ import (
 
 const (
 	MaxTimespansInCost = 50
+	MaxSessionTTL      = 10000 // maximum session TTL in miliseconds
 )
 
 var (
@@ -118,10 +119,8 @@ type smgSessionTerminator struct {
 
 // setSessionTerminator installs a new terminator for a session
 func (smg *SMGeneric) setSessionTerminator(s *SMGSession) {
-	ttl := smg.cgrCfg.SmGenericConfig.SessionTTL
-	if ttlEv := s.EventStart.GetSessionTTL(); ttlEv != 0 {
-		ttl = ttlEv
-	}
+	ttl := s.EventStart.GetSessionTTL(smg.cgrCfg.SmGenericConfig.SessionTTL,
+		smg.cgrCfg.SmGenericConfig.SessionTTLMaxDelay)
 	if ttl == 0 {
 		return
 	}
@@ -230,6 +229,8 @@ func (smg *SMGeneric) indexSession(s *SMGSession, passiveSessions bool) {
 	}
 	idxMux.Lock()
 	defer idxMux.Unlock()
+	s.mux.RLock()
+	defer s.mux.RUnlock()
 	for fieldName := range smg.ssIdxCfg {
 		fieldVal, err := utils.ReflectFieldAsString(s.EventStart, fieldName, "")
 		if err != nil {
@@ -359,17 +360,17 @@ func (smg *SMGeneric) getSessionIDsForPrefix(prefix string, passiveSessions bool
 }
 
 // sessionStart will handle a new session, pass the connectionId so we can communicate on disconnect request
-func (smg *SMGeneric) sessionStart(evStart SMGenericEvent, clntConn rpcclient.RpcClientConnection) error {
+func (smg *SMGeneric) sessionStart(evStart SMGenericEvent, clntConn rpcclient.RpcClientConnection) (err error) {
 	cgrID := evStart.GetCGRID(utils.META_DEFAULT)
-	processed, err := guardian.Guardian.Guard(func() (interface{}, error) { // Lock it on CGRID level
+	_, err = guardian.Guardian.Guard(func() (interface{}, error) { // Lock it on CGRID level
 		if pSS := smg.passiveToActive(cgrID); len(pSS) != 0 {
-			return true, nil // ToDo: handle here also debits
+			return nil, nil // ToDo: handle here also debits
 		}
 		var sessionRuns []*engine.SessionRun
 		if err := smg.rals.Call("Responder.GetSessionRuns", evStart.AsStoredCdr(smg.cgrCfg, smg.Timezone), &sessionRuns); err != nil {
-			return true, err
+			return nil, err
 		} else if len(sessionRuns) == 0 {
-			return true, nil
+			return nil, nil
 		}
 		stopDebitChan := make(chan struct{})
 		for _, sessionRun := range sessionRuns {
@@ -382,13 +383,9 @@ func (smg *SMGeneric) sessionStart(evStart SMGenericEvent, clntConn rpcclient.Rp
 				go s.debitLoop(smg.cgrCfg.SmGenericConfig.DebitInterval)
 			}
 		}
-		return true, nil
+		return nil, nil
 	}, smg.cgrCfg.LockingTimeout, cgrID)
-	if processed == nil || processed == false {
-		utils.Logger.Err("<SMGeneric> Cannot start session, empty reply")
-		return utils.ErrServerError
-	}
-	return err
+	return
 }
 
 // sessionEnd will end a session from outside
@@ -414,10 +411,10 @@ func (smg *SMGeneric) sessionEnd(cgrID string, usage time.Duration) error {
 					cgrID, s.RunID, aTime, err))
 				continue // Unanswered session
 			}
-			if err := s.close(aTime.Add(usage)); err != nil {
+			if err := s.close(usage); err != nil {
 				utils.Logger.Err(fmt.Sprintf("<SMGeneric> Could not close session: %s, runId: %s, error: %s", cgrID, s.RunID, err.Error()))
 			}
-			if err := s.saveOperations(cgrID); err != nil {
+			if err := s.storeSMCost(); err != nil {
 				utils.Logger.Err(fmt.Sprintf("<SMGeneric> Could not save session: %s, runId: %s, error: %s", cgrID, s.RunID, err.Error()))
 			}
 		}
@@ -472,7 +469,18 @@ func (smg *SMGeneric) replicateSessionsWithID(cgrID string, passiveSessions bool
 	}
 	ssMux.RLock()
 	ss := ssMp[cgrID]
+	if len(ss) != 0 {
+		ss[0].mux.RLock() // lock session so we can clone it after releasing the map lock
+	}
 	ssMux.RUnlock()
+	var ssCln []*SMGSession
+	err = utils.Clone(ss, &ssCln)
+	if len(ss) != 0 {
+		ss[0].mux.RUnlock()
+	}
+	if err != nil {
+		return
+	}
 	var wg sync.WaitGroup
 	for _, rplConn := range smgReplConns {
 		if rplConn.Synchronous {
@@ -485,7 +493,7 @@ func (smg *SMGeneric) replicateSessionsWithID(cgrID string, passiveSessions bool
 			if sync {
 				wg.Done()
 			}
-		}(rplConn.Connection, rplConn.Synchronous, ss)
+		}(rplConn.Connection, rplConn.Synchronous, ssCln)
 	}
 	wg.Wait() // wait for synchronous replication to finish
 	return
@@ -730,7 +738,9 @@ func (smg *SMGeneric) UpdateSession(gev SMGenericEvent, clnt rpcclient.RpcClient
 		}
 		smg.replicateSessionsWithID(initialCGRID, false, smg.smgReplConns)
 	}
-	smg.resetTerminatorTimer(cgrID, gev.GetSessionTTL(), gev.GetSessionTTLLastUsed(), gev.GetSessionTTLUsage())
+	smg.resetTerminatorTimer(cgrID,
+		gev.GetSessionTTL(smg.cgrCfg.SmGenericConfig.SessionTTL, smg.cgrCfg.SmGenericConfig.SessionTTLMaxDelay),
+		gev.GetSessionTTLLastUsed(), gev.GetSessionTTLUsage())
 	var lastUsed *time.Duration
 	var evLastUsed time.Duration
 	if evLastUsed, err = gev.GetLastUsed(utils.META_DEFAULT); err == nil {
@@ -1017,6 +1027,16 @@ func (smg *SMGeneric) BiRPCV1GetMaxUsage(clnt rpcclient.RpcClientConnection, ev 
 	return nil
 }
 
+// BiRPCV2GetMaxUsage returns the maximum usage as duration/int64
+func (smg *SMGeneric) BiRPCV2GetMaxUsage(clnt rpcclient.RpcClientConnection, ev SMGenericEvent, maxUsage *time.Duration) error {
+	maxUsageDur, err := smg.GetMaxUsage(ev)
+	if err != nil {
+		return utils.NewErrServerError(err)
+	}
+	*maxUsage = maxUsageDur
+	return nil
+}
+
 /// Returns list of suppliers which can be used for the request
 func (smg *SMGeneric) BiRPCV1GetLCRSuppliers(clnt rpcclient.RpcClientConnection, ev SMGenericEvent, suppliers *[]string) error {
 	if supls, err := smg.GetLCRSuppliers(ev); err != nil {
@@ -1028,13 +1048,29 @@ func (smg *SMGeneric) BiRPCV1GetLCRSuppliers(clnt rpcclient.RpcClientConnection,
 }
 
 // Called on session start, returns the maximum number of seconds the session can last
-func (smg *SMGeneric) BiRPCV1InitiateSession(clnt rpcclient.RpcClientConnection, ev SMGenericEvent, maxUsage *float64) error {
-	if minMaxUsage, err := smg.InitiateSession(ev, clnt); err != nil {
-		return utils.NewErrServerError(err)
+func (smg *SMGeneric) BiRPCV1InitiateSession(clnt rpcclient.RpcClientConnection, ev SMGenericEvent, maxUsage *float64) (err error) {
+	var minMaxUsage time.Duration
+	if minMaxUsage, err = smg.InitiateSession(ev, clnt); err != nil {
+		if err != rpcclient.ErrSessionNotFound {
+			err = utils.NewErrServerError(err)
+		}
 	} else {
 		*maxUsage = minMaxUsage.Seconds()
 	}
-	return nil
+	return
+}
+
+// BiRPCV2InitiateSession initiates a new session, returns the maximum duration the session can last
+func (smg *SMGeneric) BiRPCV2InitiateSession(clnt rpcclient.RpcClientConnection, ev SMGenericEvent, maxUsage *time.Duration) (err error) {
+	var minMaxUsage time.Duration
+	if minMaxUsage, err = smg.InitiateSession(ev, clnt); err != nil {
+		if err != rpcclient.ErrSessionNotFound {
+			err = utils.NewErrServerError(err)
+		}
+	} else {
+		*maxUsage = minMaxUsage
+	}
+	return
 }
 
 // Interim updates, returns remaining duration from the RALs
@@ -1046,6 +1082,19 @@ func (smg *SMGeneric) BiRPCV1UpdateSession(clnt rpcclient.RpcClientConnection, e
 		}
 	} else {
 		*maxUsage = minMaxUsage.Seconds()
+	}
+	return
+}
+
+// BiRPCV1UpdateSession updates an existing session, returning the duration which the session can still last
+func (smg *SMGeneric) BiRPCV2UpdateSession(clnt rpcclient.RpcClientConnection, ev SMGenericEvent, maxUsage *time.Duration) (err error) {
+	var minMaxUsage time.Duration
+	if minMaxUsage, err = smg.UpdateSession(ev, clnt); err != nil {
+		if err != rpcclient.ErrSessionNotFound {
+			err = utils.NewErrServerError(err)
+		}
+	} else {
+		*maxUsage = minMaxUsage
 	}
 	return
 }

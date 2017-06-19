@@ -132,6 +132,24 @@ func TestSMGenericEventParseFields(t *testing.T) {
 	}
 }
 
+func TestSMGenericEventGetSessionTTL(t *testing.T) {
+	smGev := SMGenericEvent{}
+	smGev[utils.EVENT_NAME] = "TEST_SESSION_TTL"
+	cfgSesTTL := time.Duration(5 * time.Second)
+	if sTTL := smGev.GetSessionTTL(time.Duration(5*time.Second), nil); sTTL != cfgSesTTL {
+		t.Errorf("Expecting: %v, received: %v", cfgSesTTL, sTTL)
+	}
+	smGev[utils.SessionTTL] = "6s"
+	eSesTTL := time.Duration(6 * time.Second)
+	if sTTL := smGev.GetSessionTTL(time.Duration(5*time.Second), nil); sTTL != eSesTTL {
+		t.Errorf("Expecting: %v, received: %v", eSesTTL, sTTL)
+	}
+	sesTTLMaxDelay := time.Duration(10 * time.Second)
+	if sTTL := smGev.GetSessionTTL(time.Duration(5*time.Second), &sesTTLMaxDelay); sTTL == eSesTTL || sTTL > eSesTTL+sesTTLMaxDelay {
+		t.Errorf("Received: %v", sTTL)
+	}
+}
+
 func TestSMGenericEventAsStoredCdr(t *testing.T) {
 	smGev := SMGenericEvent{}
 	smGev[utils.EVENT_NAME] = "TEST_EVENT"
@@ -204,6 +222,6 @@ func TestSMGenericEventGetFieldAsString(t *testing.T) {
 	if strVal, err := smGev.GetFieldAsString(utils.TOR); err != nil {
 		t.Error(err)
 	} else if strVal != eFldVal {
-		t.Errorf("Expecting: %s, received: %s", eFldVal, strVal)
+		t.Errorf("Expecting:\n%s\nReceived:\n%s", eFldVal, strVal)
 	}
 }

@@ -31,7 +31,10 @@ func (apier *ApierV2) GetCdrs(attrs utils.RPCCDRsFilter, reply *[]*engine.Extern
 		return utils.NewErrServerError(err)
 	}
 	if cdrs, _, err := apier.CdrDb.GetCDRs(cdrsFltr, false); err != nil {
-		return utils.NewErrServerError(err)
+		if err.Error() != utils.NotFoundCaps {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else if len(cdrs) == 0 {
 		*reply = make([]*engine.ExternalCDR, 0)
 	} else {
@@ -45,7 +48,10 @@ func (apier *ApierV2) GetCdrs(attrs utils.RPCCDRsFilter, reply *[]*engine.Extern
 func (apier *ApierV2) CountCdrs(attrs utils.RPCCDRsFilter, reply *int64) error {
 	cdrsFltr, err := attrs.AsCDRsFilter(apier.Config.DefaultTimezone)
 	if err != nil {
-		return utils.NewErrServerError(err)
+		if err.Error() != utils.NotFoundCaps {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	}
 	cdrsFltr.Count = true
 	if _, count, err := apier.CdrDb.GetCDRs(cdrsFltr, false); err != nil {
@@ -59,4 +65,8 @@ func (apier *ApierV2) CountCdrs(attrs utils.RPCCDRsFilter, reply *int64) error {
 // Receive CDRs via RPC methods, not included with APIer because it has way less dependencies and can be standalone
 type CdrsV2 struct {
 	v1.CdrsV1
+}
+
+func (self *CdrsV2) StoreSMCost(args engine.ArgsV2CDRSStoreSMCost, reply *string) error {
+	return self.CdrSrv.V2StoreSMCost(args, reply)
 }
