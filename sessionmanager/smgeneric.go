@@ -377,8 +377,9 @@ func (smg *SMGeneric) sessionStart(evStart SMGenericEvent, clntConn rpcclient.Rp
 			s := &SMGSession{CGRID: cgrID, EventStart: evStart, RunID: sessionRun.DerivedCharger.RunID, Timezone: smg.Timezone,
 				rals: smg.rals, cdrsrv: smg.cdrsrv, CD: sessionRun.CallDescriptor, clntConn: clntConn}
 			smg.recordASession(s)
-			//utils.Logger.Info(fmt.Sprintf("<SMGeneric> Starting session: %s, runId: %s", sessionId, s.runId))
+			utils.Logger.Debug(fmt.Sprintf("<SMGeneric> Starting session: %s", s.CGRID))
 			if smg.cgrCfg.SmGenericConfig.DebitInterval != 0 {
+				utils.Logger.Debug(fmt.Sprintf("<SMGeneric> Debit interval: %d, session: %s", smg.cgrCfg.SmGenericConfig.DebitInterval, s.CGRID))
 				s.stopDebit = stopDebitChan
 				go s.debitLoop(smg.cgrCfg.SmGenericConfig.DebitInterval)
 			}
@@ -391,6 +392,7 @@ func (smg *SMGeneric) sessionStart(evStart SMGenericEvent, clntConn rpcclient.Rp
 // sessionEnd will end a session from outside
 func (smg *SMGeneric) sessionEnd(cgrID string, usage time.Duration) error {
 	_, err := guardian.Guardian.Guard(func() (interface{}, error) { // Lock it on UUID level
+		utils.Logger.Debug(fmt.Sprintf("<SMGeneric> Ending session: %s usage: %d", cgrID, usage))
 		ss := smg.getSessions(cgrID, false)
 		if len(ss) == 0 {
 			if ss = smg.passiveToActive(cgrID); len(ss) == 0 {
@@ -777,6 +779,7 @@ func (smg *SMGeneric) UpdateSession(gev SMGenericEvent, clnt rpcclient.RpcClient
 // Called on session end, should stop debit loop
 func (smg *SMGeneric) TerminateSession(gev SMGenericEvent, clnt rpcclient.RpcClientConnection) (err error) {
 	cgrID := gev.GetCGRID(utils.META_DEFAULT)
+	utils.Logger.Debug(fmt.Sprintf("<SMGeneric> Terminate session: %s", cgrID))
 	cacheKey := "TerminateSession" + cgrID
 	if item, err := smg.responseCache.Get(cacheKey); err == nil && item != nil {
 		return item.Err
@@ -1017,6 +1020,7 @@ func (smg *SMGeneric) CallBiRPC(clnt rpcclient.RpcClientConnection, serviceMetho
 func (smg *SMGeneric) BiRPCV1GetMaxUsage(clnt rpcclient.RpcClientConnection, ev SMGenericEvent, maxUsage *float64) error {
 	maxUsageDur, err := smg.GetMaxUsage(ev)
 	if err != nil {
+		utils.Logger.Err(fmt.Sprintf("<SMGeneric.BiRPCV1GetMaxUsage> Error retrieving max usage: %s", err.Error()))
 		return utils.NewErrServerError(err)
 	}
 	if maxUsageDur == time.Duration(-1) {
@@ -1024,6 +1028,7 @@ func (smg *SMGeneric) BiRPCV1GetMaxUsage(clnt rpcclient.RpcClientConnection, ev 
 	} else {
 		*maxUsage = maxUsageDur.Seconds()
 	}
+	utils.Logger.Debug(fmt.Sprintf("<SMGeneric.BiRPCV1GetMaxUsage> Max usage: %f", maxUsage))
 	return nil
 }
 

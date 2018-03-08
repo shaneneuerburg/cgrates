@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"strings"
 
 	"github.com/cgrates/cgrates/cache"
@@ -335,6 +336,7 @@ func (rs *RedisStorage) CacheDataFromDB(prfx string, ids []string, mustBeCached 
 func (rs *RedisStorage) GetKeysForPrefix(prefix string) ([]string, error) {
 	r := rs.Cmd("KEYS", prefix+"*")
 	if r.Err != nil {
+		log.Print("error!")
 		return nil, r.Err
 	}
 	return r.List()

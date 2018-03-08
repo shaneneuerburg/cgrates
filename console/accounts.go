@@ -49,6 +49,7 @@ func (self *CmdGetAccounts) RpcMethod() string {
 }
 
 func (self *CmdGetAccounts) RpcParams(reset bool) interface{} {
+	utils.Logger.Err("<accounts> Retrieving accounts")
 	if reset || self.rpcParams == nil {
 		self.rpcParams = &utils.AttrGetAccounts{}
 	}

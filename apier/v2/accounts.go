@@ -20,6 +20,7 @@ package v2
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 
 	"github.com/cgrates/cgrates/engine"
@@ -28,16 +29,21 @@ import (
 )
 
 func (self *ApierV2) GetAccounts(attr utils.AttrGetAccounts, reply *[]*engine.Account) error {
+	log.Print("<ApierV2.Accounts> Retrieving accounts")
 	if len(attr.Tenant) == 0 {
+		log.Print("<ApierV2.Accounts> missing tenant")
 		return utils.NewErrMandatoryIeMissing("Tenant")
 	}
 	var accountKeys []string
 	var err error
 	if len(attr.AccountIds) == 0 {
+		log.Print("<ApierV2.Accounts> getting account keys!")
 		if accountKeys, err = self.DataDB.GetKeysForPrefix(utils.ACCOUNT_PREFIX + attr.Tenant); err != nil {
+			log.Print(fmt.Sprintf("<ApierV2.Accounts> Error retrieving account keys: %s", err.Error()))
 			return err
 		}
 	} else {
+		log.Print("<ApierV2.Accounts> already have keys?")
 		for _, acntId := range attr.AccountIds {
 			if len(acntId) == 0 { // Source of error returned from redis (key not found)
 				continue
@@ -45,6 +51,7 @@ func (self *ApierV2) GetAccounts(attr utils.AttrGetAccounts, reply *[]*engine.Ac
 			accountKeys = append(accountKeys, utils.ACCOUNT_PREFIX+utils.ConcatenatedKey(attr.Tenant, acntId))
 		}
 	}
+	log.Print("<ApierV2.Accounts> got account keys!")
 	if len(accountKeys) == 0 {
 		return nil
 	}
@@ -54,6 +61,7 @@ func (self *ApierV2) GetAccounts(attr utils.AttrGetAccounts, reply *[]*engine.Ac
 	if attr.Offset < 0 {
 		attr.Offset = 0
 	}
+	log.Print("<ApierV2.Accounts> limiting account keys!")
 	var limitedAccounts []string
 	if attr.Limit != 0 {
 		max := math.Min(float64(attr.Offset+attr.Limit), float64(len(accountKeys)))
@@ -61,9 +69,11 @@ func (self *ApierV2) GetAccounts(attr utils.AttrGetAccounts, reply *[]*engine.Ac
 	} else {
 		limitedAccounts = accountKeys[attr.Offset:]
 	}
+	log.Print("<ApierV2.Accounts> Retrieving accounts!")
 	retAccounts := make([]*engine.Account, 0)
 	for _, acntKey := range limitedAccounts {
 		if acnt, err := self.DataDB.GetAccount(acntKey[len(utils.ACCOUNT_PREFIX):]); err != nil && err != utils.ErrNotFound { // Not found is not an error here
+			log.Print(fmt.Sprintf("<ApierV2.Accounts> Error account: %s", err.Error()))
 			return err
 		} else if acnt != nil {
 			retAccounts = append(retAccounts, acnt)
