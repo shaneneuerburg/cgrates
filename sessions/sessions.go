@@ -697,6 +697,7 @@ func (smg *SMGeneric) asActiveSessions(fltrs map[string]string, count, passiveSe
 
 // MaxUsage calculates maximum usage allowed for given gevent
 func (smg *SMGeneric) GetMaxUsage(gev SMGenericEvent) (maxUsage time.Duration, err error) {
+	utils.Logger.Info(fmt.Sprintf("<SMGeneric.GetMaxUsage> Getting max usage: %s, %s, %s", gev.GetCategory(), gev.GetAccount(), gev.GetDestination()))
 	cacheKey := "MaxUsage" + gev.GetCGRID(utils.META_DEFAULT)
 	if item, err := smg.responseCache.Get(cacheKey); err == nil && item != nil {
 		return (item.Value.(time.Duration)), item.Err
