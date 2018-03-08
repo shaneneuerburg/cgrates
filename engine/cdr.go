@@ -209,6 +209,10 @@ func (cdr *CDR) FieldAsString(rsrFld *utils.RSRField) string {
 	case utils.PartialField:
 		return rsrFld.ParseValue(strconv.FormatBool(cdr.Partial))
 	default:
+		utils.Logger.Debug(fmt.Sprintf("Parsing value from field: %s", rsrFld.Id))
+		for key, value := range cdr.ExtraFields {
+			utils.Logger.Debug(fmt.Sprintf("Key: %s Value: %s", key, rsrFld.ParseValue(value)))
+		}
 		return rsrFld.ParseValue(cdr.ExtraFields[rsrFld.Id])
 	}
 }
@@ -822,6 +826,7 @@ func (cdr *CDR) AsExportRecord(exportFields []*config.CfgCdrField, httpSkipTlsCh
 func (cdr *CDR) AsExportMap(exportFields []*config.CfgCdrField, httpSkipTlsCheck bool, groupedCDRs []*CDR, roundingDecs int) (expMap map[string]string, err error) {
 	expMap = make(map[string]string)
 	for _, cfgFld := range exportFields {
+		utils.Logger.Debug(fmt.Sprintf("<CDR.AsExportMap> Exporting field: %s, %s", cfgFld.Tag, cfgFld.Value))
 		if roundingDecs != 0 {
 			clnFld := new(config.CfgCdrField) // Clone so we can modify the rounding decimals without affecting the template
 			*clnFld = *cfgFld
@@ -834,6 +839,7 @@ func (cdr *CDR) AsExportMap(exportFields []*config.CfgCdrField, httpSkipTlsCheck
 			expMap[cfgFld.FieldId] += fmtOut
 		}
 	}
+	utils.Logger.Debug(fmt.Sprintf("<CDR.AsExportMap> Exporting fields: %s, %v", expMap, expMap))
 	return
 }
 

@@ -604,6 +604,7 @@ func initLogger(cfg *config.CGRConfig) error {
 }
 
 func main() {
+	log.Print("STARTING")
 	flag.Parse()
 	if *version {
 		fmt.Println(utils.GetCGRVersion())
@@ -660,7 +661,7 @@ func main() {
 	var dataDB engine.DataDB
 	var loadDb engine.LoadStorage
 	var cdrDb engine.CdrStorage
-
+	utils.Logger.Err("Engine starting")
 	if cfg.RALsEnabled || cfg.CDRStatsEnabled || cfg.PubSubServerEnabled || cfg.AliasesServerEnabled || cfg.UserServerEnabled || cfg.SchedulerEnabled {
 		dataDB, err = engine.ConfigureDataStorage(cfg.DataDbType, cfg.DataDbHost, cfg.DataDbPort,
 			cfg.DataDbName, cfg.DataDbUser, cfg.DataDbPass, cfg.DBDataEncoding, cfg.CacheConfig, cfg.LoadHistorySize)

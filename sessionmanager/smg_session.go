@@ -84,10 +84,11 @@ func (self *SMGSession) debitLoop(debitInterval time.Duration) {
 	}
 }
 
-// Attempts to debit a duration, returns maximum duration which can be debitted or error
+// Attempts to debit a duration, returns maximum duration which can be debited or error
 func (self *SMGSession) debit(dur time.Duration, lastUsed *time.Duration) (time.Duration, error) {
 	self.mux.Lock()
 	defer self.mux.Unlock()
+	utils.Logger.Debug(fmt.Sprintf("<SMGeneric> Debit session: %s duration: %d last used: %d", self.CGRID, dur, lastUsed))
 	requestedDuration := dur
 	if lastUsed != nil {
 		self.ExtraDuration = self.LastDebit - *lastUsed
@@ -170,9 +171,11 @@ func (self *SMGSession) close(usage time.Duration) (err error) {
 	self.mux.Lock()
 	defer self.mux.Unlock()
 	if self.EventCost == nil {
+		utils.Logger.Debug(fmt.Sprintf("<SMGeneric> Closing session: %s. No event cost", self.CGRID))
 		return
 	}
 	if notCharged := usage - self.EventCost.GetUsage(); notCharged > 0 { // we did not charge enough, make a manual debit here
+		utils.Logger.Debug(fmt.Sprintf("<SMGeneric> Closing session: %s. Manually debit remaining cost: %v", self.CGRID, notCharged))
 		if self.CD.LoopIndex > 0 {
 			self.CD.TimeStart = self.CD.TimeEnd
 		}
@@ -184,6 +187,7 @@ func (self *SMGSession) close(usage time.Duration) (err error) {
 				engine.NewEventCostFromCallCost(cc, self.CGRID, self.RunID))
 		}
 	} else if notCharged < 0 { // charged too much, try refund
+		utils.Logger.Debug(fmt.Sprintf("<SMGeneric> Closing session: %s. Refunding overage: %v", self.CGRID, usage))
 		err = self.refund(usage)
 	}
 

@@ -20,6 +20,7 @@ package v1
 import (
 	"github.com/cenk/rpc2"
 	"github.com/cgrates/cgrates/sessionmanager"
+	"github.com/cgrates/cgrates/utils"
 )
 
 func NewSMGenericBiRpcV1(sm *sessionmanager.SMGeneric) *SMGenericBiRpcV1 {
@@ -50,6 +51,7 @@ func (self *SMGenericBiRpcV1) Handlers() map[string]interface{} {
 
 /// Returns MaxUsage (for calls in seconds), -1 for no limit
 func (self *SMGenericBiRpcV1) GetMaxUsage(clnt *rpc2.Client, ev sessionmanager.SMGenericEvent, maxUsage *float64) error {
+	utils.Logger.Debug("<SMGenericBiRpcV1.GetMaxUsage>: Max usage requested")
 	return self.sm.BiRPCV1GetMaxUsage(clnt, ev, maxUsage)
 }
 
@@ -60,6 +62,7 @@ func (self *SMGenericBiRpcV1) GetLCRSuppliers(clnt *rpc2.Client, ev sessionmanag
 
 // Called on session start, returns the maximum number of seconds the session can last
 func (self *SMGenericBiRpcV1) InitiateSession(clnt *rpc2.Client, ev sessionmanager.SMGenericEvent, maxUsage *float64) error {
+	utils.Logger.Debug("<SMGenericBiRpcV1.GetMaxUsage>: Initiating session")
 	return self.sm.BiRPCV1InitiateSession(clnt, ev, maxUsage)
 }
 

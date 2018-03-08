@@ -29,10 +29,11 @@ import (
 	"reflect"
 	"time"
 
+	_ "net/http/pprof"
+
 	"github.com/cenk/rpc2"
 	rpc2_jsonrpc "github.com/cenk/rpc2/jsonrpc"
 	"golang.org/x/net/websocket"
-	_ "net/http/pprof"
 )
 
 type Server struct {
@@ -167,6 +168,7 @@ func (s *Server) ServeHTTP(addr string, jsonRPCURL string, wsRPCURL string, useB
 		})
 		if useBasicAuth {
 			http.HandleFunc(wsRPCURL, use(func(w http.ResponseWriter, r *http.Request) {
+				Logger.Info("Handling auth")
 				wsHandler.ServeHTTP(w, r)
 			}, basicAuth(userList)))
 		} else {
@@ -198,6 +200,7 @@ func (s *Server) ServeBiJSON(addr string) {
 		if err != nil {
 			log.Fatal(err)
 		}
+		Logger.Info(fmt.Sprintf("Accepted BiJSON connection at <%s>", addr))
 		go s.birpcSrv.ServeCodec(rpc2_jsonrpc.NewJSONCodec(conn))
 	}
 }

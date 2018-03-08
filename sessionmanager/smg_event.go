@@ -314,6 +314,7 @@ func (self SMGenericEvent) GetCdrSource() string {
 func (self SMGenericEvent) GetExtraFields() map[string]string {
 	extraFields := make(map[string]string)
 	for key, val := range self {
+		utils.Logger.Debug(fmt.Sprintf("<SMGenericEvent.GetExtraFields> Getting event with key: %s value: %v", key, val))
 		primaryFields := append(utils.PrimaryCdrFields, utils.EVENT_NAME)
 		if utils.IsSliceMember(primaryFields, key) {
 			continue

@@ -27,6 +27,7 @@ import (
 
 // Returns MaxUsage (for calls in seconds), -1 for no limit
 func (self *ApierV1) GetMaxUsage(usageRecord engine.UsageRecord, maxUsage *float64) error {
+	utils.Logger.Info("Getting max usage")
 	err := engine.LoadUserProfile(&usageRecord, "ExtraFields")
 	if err != nil {
 		return utils.NewErrServerError(err)
