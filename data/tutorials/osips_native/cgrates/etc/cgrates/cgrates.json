@@ -17,9 +17,6 @@
 	"cdrstats_conns": [
 		{"address": "*internal"}
 	],
-	"historys_conns": [
-		{"address": "*internal"}
-	],
 	"pubsubs_conns": [
 		{"address": "*internal"}
 	],
@@ -108,14 +105,8 @@
 			{"tag":"Usage", "type": "*composed", "value": "Usage"},
 			{"tag":"Cost", "type": "*composed", "value": "Cost"},
 		],
-		"trailer_fields": [],	
+		"trailer_fields": [],
 	},
-},
-
-
-"historys": {
-	"enabled": true,							// starts History service: <true|false>.
-	"history_dir": "/tmp/cgr_osipsnative/cgrates/history",	// location on disk where to store history files.
 },
 
 
@@ -135,9 +126,10 @@
 },
 
 
-"sm_generic": {
+"sessions": {
 	"enabled": true,
 	"debit_interval": "10s",
+	"client_protocol": 0,
 },
 
 

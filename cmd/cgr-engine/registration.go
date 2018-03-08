@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package main
 
 import (
@@ -52,12 +53,5 @@ func shutdownSessionmanagerSingnalHandler(exitChan chan bool) {
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	<-c
-	if smRpc != nil {
-		for _, sm := range smRpc.SMs {
-			if err := sm.Shutdown(); err != nil {
-				utils.Logger.Warning(fmt.Sprintf("<SessionManager> %s", err))
-			}
-		}
-	}
 	exitChan <- true
 }

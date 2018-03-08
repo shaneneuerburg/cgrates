@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package console
 
 import "github.com/cgrates/cgrates/apier/v1"
@@ -56,5 +57,6 @@ func (self *CmdExportCdrs) PostprocessRpcParams() error {
 }
 
 func (self *CmdExportCdrs) RpcResult() interface{} {
-	return new(v1.ArgExportCDRs)
+	var reply *v1.RplExportedCDRs
+	return &reply
 }

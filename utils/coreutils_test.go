@@ -153,6 +153,22 @@ func TestParseTimeDetectLayout(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expecting error")
 	}
+	loc, err := time.LoadLocation("Asia/Kabul")
+	if err != nil {
+		t.Error(err)
+	}
+	expectedTime = time.Date(2013, 12, 30, 15, 0, 1, 0, loc)
+	goTmStr2 := "2013-12-30 15:00:01 +0430 +0430"
+	goTm, err = ParseTimeDetectLayout(goTmStr2, "")
+	if err != nil {
+		t.Error(err)
+	} else if !goTm.Equal(expectedTime) {
+		t.Errorf("Unexpected time parsed: %v, expecting: %v", goTm, expectedTime)
+	}
+	//goTmStr2 = "2013-12-30 15:00:01 +0430"
+	//if _, err = ParseTimeDetectLayout(goTmStr2, ""); err != nil {
+	//	t.Errorf("Expecting error")
+	//}
 	fsTmstampStr := "1394291049287234"
 	fsTm, err := ParseTimeDetectLayout(fsTmstampStr, "")
 	expectedTime = time.Date(2014, 3, 8, 15, 4, 9, 287234000, time.UTC)
@@ -213,6 +229,15 @@ func TestParseTimeDetectLayout(t *testing.T) {
 		t.Error(err)
 	} else if !astTMS.Equal(expectedTime) {
 		t.Errorf("Expecting: %v, received: %v", expectedTime, astTMS)
+	}
+	nowTimeStr := "+24h"
+	start := time.Now().Add(time.Duration(23*time.Hour + 59*time.Minute + 58*time.Second))
+	end := start.Add(time.Duration(2 * time.Second))
+	parseNowTimeStr, err := ParseTimeDetectLayout(nowTimeStr, "")
+	if err != nil {
+		t.Error(err)
+	} else if parseNowTimeStr.After(start) && parseNowTimeStr.Before(end) {
+		t.Errorf("Unexpected time parsed: %v", parseNowTimeStr)
 	}
 }
 
@@ -388,10 +413,11 @@ func TestMinDuration(t *testing.T) {
 }
 
 func TestParseZeroRatingSubject(t *testing.T) {
-	subj := []string{"", "*zero1s", "*zero5m", "*zero10h"}
-	dur := []time.Duration{time.Second, time.Second, 5 * time.Minute, 10 * time.Hour}
+	subj := []string{"", "*zero1024", "*zero1s", "*zero5m", "*zero10h"}
+	dur := []time.Duration{time.Second, time.Duration(1024),
+		time.Second, 5 * time.Minute, 10 * time.Hour}
 	for i, s := range subj {
-		if d, err := ParseZeroRatingSubject(s); err != nil || d != dur[i] {
+		if d, err := ParseZeroRatingSubject(VOICE, s); err != nil || d != dur[i] {
 			t.Error("Error parsing rating subject: ", s, d, err)
 		}
 	}
@@ -406,25 +432,6 @@ func TestConcatenatedKey(t *testing.T) {
 	}
 	if key := ConcatenatedKey("a", "b", "c"); key != fmt.Sprintf("a%sb%sc", CONCATENATED_KEY_SEP, CONCATENATED_KEY_SEP) {
 		t.Error("Unexpected key value received: ", key)
-	}
-}
-
-func TestConvertIfaceToString(t *testing.T) {
-	val := interface{}("string1")
-	if resVal, converted := ConvertIfaceToString(val); !converted || resVal != "string1" {
-		t.Error(resVal, converted)
-	}
-	val = interface{}(123)
-	if resVal, converted := ConvertIfaceToString(val); !converted || resVal != "123" {
-		t.Error(resVal, converted)
-	}
-	val = interface{}([]byte("byte_val"))
-	if resVal, converted := ConvertIfaceToString(val); !converted || resVal != "byte_val" {
-		t.Error(resVal, converted)
-	}
-	val = interface{}(true)
-	if resVal, converted := ConvertIfaceToString(val); !converted || resVal != "true" {
-		t.Error(resVal, converted)
 	}
 }
 
@@ -675,24 +682,6 @@ func TestBoolPointer(t *testing.T) {
 	expected := &t1
 	if *expected != *result {
 		t.Error("Expected:", expected, ", received:", result)
-	}
-}
-
-func TestStringSlicePointer(t *testing.T) {
-	t1 := []string{"CGR", "CGR", "CGR", "CGR"}
-	expected := &t1
-	result := StringSlicePointer(t1)
-	if *result == nil {
-		t.Error("Expected:", expected, ", received: nil")
-	}
-}
-
-func TestFloat64SlicePointer(t *testing.T) {
-	t1 := []float64{1.2, 12.3, 123.4, 1234.5}
-	expected := &t1
-	result := Float64SlicePointer(t1)
-	if *result == nil {
-		t.Error("Expected:", expected, ", received: nil")
 	}
 }
 

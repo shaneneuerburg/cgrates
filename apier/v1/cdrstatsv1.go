@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -45,7 +46,7 @@ func (sts *CDRStatsV1) GetQueueIds(empty string, reply *[]string) error {
 	return sts.CdrStats.Call("CDRStatsV1.GetQueueIds", 0, reply)
 }
 
-func (sts *CDRStatsV1) GetQueue(id string, sq *engine.StatsQueue) error {
+func (sts *CDRStatsV1) GetQueue(id string, sq *engine.CDRStatsQueue) error {
 	return sts.CdrStats.Call("CDRStatsV1.GetQueue", id, sq)
 }
 

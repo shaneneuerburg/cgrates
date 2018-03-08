@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v2
 
 import (
@@ -87,7 +88,7 @@ func (attr *AttrSetAccountActionTriggers) UpdateActionTrigger(at *engine.ActionT
 		at.Executed = *attr.Executed
 	}
 	if attr.MinSleep != nil {
-		if at.MinSleep, err = utils.ParseDurationWithSecs(*attr.MinSleep); err != nil {
+		if at.MinSleep, err = utils.ParseDurationWithNanosecs(*attr.MinSleep); err != nil {
 			return
 		}
 	}
@@ -161,7 +162,7 @@ func (self *ApierV2) SetAccountActionTriggers(attr AttrSetAccountActionTriggers,
 	accID := utils.AccountKey(attr.Tenant, attr.Account)
 	var account *engine.Account
 	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
-		if acc, err := self.DataDB.GetAccount(accID); err == nil {
+		if acc, err := self.DataManager.DataDB().GetAccount(accID); err == nil {
 			account = acc
 		} else {
 			return 0, err
@@ -183,7 +184,7 @@ func (self *ApierV2) SetAccountActionTriggers(attr AttrSetAccountActionTriggers,
 			}
 		}
 		account.ExecuteActionTriggers(nil)
-		if err := self.DataDB.SetAccount(account); err != nil {
+		if err := self.DataManager.DataDB().SetAccount(account); err != nil {
 			return 0, err
 		}
 		return 0, nil

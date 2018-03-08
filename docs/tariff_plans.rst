@@ -410,7 +410,7 @@ TBD
 ::
 
     "ActionPlans.csv"  - csv
-    "tp_account_plans" - stor_db
+    "tp_action_plans" - stor_db
 
 .. csv-table::
     :file: ../data/tariffplans/tutorial/ActionPlans.csv
@@ -850,8 +850,8 @@ TBD
 
 ::
 
-    "ResourceLimits.csv" - csv
-    "tp_resource_limits" - stor_db
+    "Resources.csv" - csv
+    "tp_resources" - stor_db
 
 .. csv-table::
     :file: ../data/tariffplans/tutorial/ResourceLimits.csv

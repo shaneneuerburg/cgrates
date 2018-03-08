@@ -15,17 +15,19 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"reflect"
 
 	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/mgo/bson"
 	"github.com/ugorji/go/codec"
-	"gopkg.in/mgo.v2/bson"
 )
 
 type Storage interface {
@@ -33,82 +35,122 @@ type Storage interface {
 	Flush(string) error
 	GetKeysForPrefix(string) ([]string, error)
 	RebuildReverseForPrefix(string) error
+	RemoveReverseForPrefix(string) error
 	GetVersions(itm string) (vrs Versions, err error)
 	SetVersions(vrs Versions, overwrite bool) (err error)
 	RemoveVersions(vrs Versions) (err error)
 	SelectDatabase(dbName string) (err error)
+	GetStorageType() string
+	IsDBEmpty() (resp bool, err error)
 }
 
 // OnlineStorage contains methods to use for administering online data
 type DataDB interface {
 	Storage
 	Marshaler() Marshaler
-	HasData(string, string) (bool, error)
-	LoadRatingCache(dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs []string) error
-	GetRatingPlan(string, bool, string) (*RatingPlan, error)
-	SetRatingPlan(*RatingPlan, string) error
-	GetRatingProfile(string, bool, string) (*RatingProfile, error)
-	SetRatingProfile(*RatingProfile, string) error
-	RemoveRatingProfile(string, string) error
+	HasDataDrv(string, string, string) (bool, error)
+	GetRatingPlanDrv(string) (*RatingPlan, error)
+	SetRatingPlanDrv(*RatingPlan) error
+	RemoveRatingPlanDrv(key string) (err error)
+	GetRatingProfileDrv(string) (*RatingProfile, error)
+	SetRatingProfileDrv(*RatingProfile) error
+	RemoveRatingProfileDrv(string) error
 	GetDestination(string, bool, string) (*Destination, error)
 	SetDestination(*Destination, string) error
 	RemoveDestination(string, string) error
 	SetReverseDestination(*Destination, string) error
 	GetReverseDestination(string, bool, string) ([]string, error)
 	UpdateReverseDestination(*Destination, *Destination, string) error
-	GetLCR(string, bool, string) (*LCR, error)
-	SetLCR(*LCR, string) error
-	SetCdrStats(*CdrStats) error
-	GetCdrStats(string) (*CdrStats, error)
-	GetAllCdrStats() ([]*CdrStats, error)
-	GetDerivedChargers(string, bool, string) (*utils.DerivedChargers, error)
+	GetLCRDrv(string) (*LCR, error)
+	SetLCRDrv(*LCR) error
+	RemoveLCRDrv(id, transactionID string) (err error)
+	SetCdrStatsDrv(*CdrStats) error
+	GetCdrStatsDrv(string) (*CdrStats, error)
+	GetAllCdrStatsDrv() ([]*CdrStats, error)
+	GetDerivedChargersDrv(string) (*utils.DerivedChargers, error)
 	SetDerivedChargers(string, *utils.DerivedChargers, string) error
-	GetActions(string, bool, string) (Actions, error)
-	SetActions(string, Actions, string) error
-	RemoveActions(string, string) error
-	GetSharedGroup(string, bool, string) (*SharedGroup, error)
-	SetSharedGroup(*SharedGroup, string) error
-	GetActionTriggers(string, bool, string) (ActionTriggers, error)
-	SetActionTriggers(string, ActionTriggers, string) error
-	RemoveActionTriggers(string, string) error
+	RemoveDerivedChargersDrv(id, transactionID string) (err error)
+	GetActionsDrv(string) (Actions, error)
+	SetActionsDrv(string, Actions) error
+	RemoveActionsDrv(string) error
+	GetSharedGroupDrv(string) (*SharedGroup, error)
+	SetSharedGroupDrv(*SharedGroup) error
+	RemoveSharedGroupDrv(id, transactionID string) (err error)
+	GetActionTriggersDrv(string) (ActionTriggers, error)
+	SetActionTriggersDrv(string, ActionTriggers) error
+	RemoveActionTriggersDrv(string) error
 	GetActionPlan(string, bool, string) (*ActionPlan, error)
 	SetActionPlan(string, *ActionPlan, bool, string) error
+	RemoveActionPlan(key string, transactionID string) error
 	GetAllActionPlans() (map[string]*ActionPlan, error)
-	GetAccountActionPlans(acntID string, skipCache bool, transactionID string) (apIDs []string, err error)
+	GetAccountActionPlans(acntID string, skipCache bool,
+		transactionID string) (apIDs []string, err error)
 	SetAccountActionPlans(acntID string, apIDs []string, overwrite bool) (err error)
 	RemAccountActionPlans(acntID string, apIDs []string) (err error)
 	PushTask(*Task) error
 	PopTask() (*Task, error)
-	LoadAccountingCache(alsIDs, rvAlsIDs, rlIDs []string) error
 	GetAccount(string) (*Account, error)
 	SetAccount(*Account) error
 	RemoveAccount(string) error
-	GetCdrStatsQueue(string) (*StatsQueue, error)
-	SetCdrStatsQueue(*StatsQueue) error
-	GetSubscribers() (map[string]*SubscriberData, error)
-	SetSubscriber(string, *SubscriberData) error
-	RemoveSubscriber(string) error
-	SetUser(*UserProfile) error
-	GetUser(string) (*UserProfile, error)
-	GetUsers() ([]*UserProfile, error)
-	RemoveUser(string) error
+	GetCdrStatsQueueDrv(string) (*CDRStatsQueue, error)
+	SetCdrStatsQueueDrv(*CDRStatsQueue) error
+	RemoveCdrStatsQueueDrv(id string) (err error)
+	GetSubscribersDrv() (map[string]*SubscriberData, error)
+	SetSubscriberDrv(string, *SubscriberData) error
+	RemoveSubscriberDrv(string) error
+	SetUserDrv(*UserProfile) error
+	GetUserDrv(string) (*UserProfile, error)
+	GetUsersDrv() ([]*UserProfile, error)
+	RemoveUserDrv(string) error
 	SetAlias(*Alias, string) error
 	GetAlias(string, bool, string) (*Alias, error)
 	RemoveAlias(string, string) error
 	SetReverseAlias(*Alias, string) error
 	GetReverseAlias(string, bool, string) ([]string, error)
-	GetResourceLimit(string, bool, string) (*ResourceLimit, error)
-	SetResourceLimit(*ResourceLimit, string) error
-	RemoveResourceLimit(string, string) error
+	GetResourceProfileDrv(string, string) (*ResourceProfile, error)
+	SetResourceProfileDrv(*ResourceProfile) error
+	RemoveResourceProfileDrv(string, string) error
+	GetResourceDrv(string, string) (*Resource, error)
+	SetResourceDrv(*Resource) error
+	RemoveResourceDrv(string, string) error
+	GetTimingDrv(string) (*utils.TPTiming, error)
+	SetTimingDrv(*utils.TPTiming) error
+	RemoveTimingDrv(string) error
 	GetLoadHistory(int, bool, string) ([]*utils.LoadInstance, error)
 	AddLoadHistory(*utils.LoadInstance, int, string) error
-	GetStructVersion() (*StructVersion, error)
-	SetStructVersion(*StructVersion) error
-	GetReqFilterIndexes(dbKey string) (indexes map[string]map[string]utils.StringMap, err error)
-	SetReqFilterIndexes(dbKey string, indexes map[string]map[string]utils.StringMap) (err error)
-	MatchReqFilterIndex(dbKey, fieldValKey string) (itemIDs utils.StringMap, err error)
-	// CacheDataFromDB loads data to cache, prefix represents the cache prefix, IDs should be nil if all available data should be loaded
-	CacheDataFromDB(prefix string, IDs []string, mustBeCached bool) error // ToDo: Move this to dataManager
+	GetFilterIndexesDrv(cacheID, itemIDPrefix, filterType string,
+		fldNameVal map[string]string) (indexes map[string]utils.StringMap, err error)
+	SetFilterIndexesDrv(cacheID, itemIDPrefix string,
+		indexes map[string]utils.StringMap, commit bool, transactionID string) (err error)
+	RemoveFilterIndexesDrv(cacheID, itemIDPrefix string) (err error)
+	GetFilterReverseIndexesDrv(cacheID, itemIDPrefix string,
+		fldNameVal map[string]string) (indexes map[string]utils.StringMap, err error)
+	SetFilterReverseIndexesDrv(cacheID, itemIDPrefix string, indexes map[string]utils.StringMap,
+		commit bool, transactionID string) (err error)
+	RemoveFilterReverseIndexesDrv(cacheID, itemIDPrefix string) (err error)
+	MatchFilterIndexDrv(cacheID, itemIDPrefix,
+		filterType, fieldName, fieldVal string) (itemIDs utils.StringMap, err error)
+	GetStatQueueProfileDrv(tenant string, ID string) (sq *StatQueueProfile, err error)
+	SetStatQueueProfileDrv(sq *StatQueueProfile) (err error)
+	RemStatQueueProfileDrv(tenant, id string) (err error)
+	GetStoredStatQueueDrv(tenant, id string) (sq *StoredStatQueue, err error)
+	SetStoredStatQueueDrv(sq *StoredStatQueue) (err error)
+	RemStoredStatQueueDrv(tenant, id string) (err error)
+	GetThresholdProfileDrv(tenant string, ID string) (tp *ThresholdProfile, err error)
+	SetThresholdProfileDrv(tp *ThresholdProfile) (err error)
+	RemThresholdProfileDrv(tenant, id string) (err error)
+	GetThresholdDrv(string, string) (*Threshold, error)
+	SetThresholdDrv(*Threshold) error
+	RemoveThresholdDrv(string, string) error
+	GetFilterDrv(string, string) (*Filter, error)
+	SetFilterDrv(*Filter) error
+	RemoveFilterDrv(string, string) error
+	GetSupplierProfileDrv(string, string) (*SupplierProfile, error)
+	SetSupplierProfileDrv(*SupplierProfile) error
+	RemoveSupplierProfileDrv(string, string) error
+	GetAttributeProfileDrv(string, string) (*AttributeProfile, error)
+	SetAttributeProfileDrv(*AttributeProfile) error
+	RemoveAttributeProfileDrv(string, string) error
 }
 
 type StorDB interface {
@@ -134,8 +176,9 @@ type LoadStorage interface {
 
 // LoadReader reads from .csv or TP tables and provides the data ready for the tp_db or data_db.
 type LoadReader interface {
-	GetTpIds() ([]string, error)
-	GetTpTableIds(string, string, utils.TPDistinctIds, map[string]string, *utils.Paginator) ([]string, error)
+	GetTpIds(string) ([]string, error)
+	GetTpTableIds(string, string, utils.TPDistinctIds,
+		map[string]string, *utils.Paginator) ([]string, error)
 	GetTPTimings(string, string) ([]*utils.ApierTPTiming, error)
 	GetTPDestinations(string, string) ([]*utils.TPDestination, error)
 	GetTPRates(string, string) ([]*utils.TPRate, error)
@@ -152,7 +195,12 @@ type LoadReader interface {
 	GetTPActionPlans(string, string) ([]*utils.TPActionPlan, error)
 	GetTPActionTriggers(string, string) ([]*utils.TPActionTriggers, error)
 	GetTPAccountActions(*utils.TPAccountActions) ([]*utils.TPAccountActions, error)
-	GetTPResourceLimits(string, string) ([]*utils.TPResourceLimit, error)
+	GetTPResources(string, string) ([]*utils.TPResource, error)
+	GetTPStats(string, string) ([]*utils.TPStats, error)
+	GetTPThresholds(string, string) ([]*utils.TPThreshold, error)
+	GetTPFilters(string, string) ([]*utils.TPFilterProfile, error)
+	GetTPSuppliers(string, string) ([]*utils.TPSupplierProfile, error)
+	GetTPAttributes(string, string) ([]*utils.TPAttributeProfile, error)
 }
 
 type LoadWriter interface {
@@ -173,7 +221,25 @@ type LoadWriter interface {
 	SetTPActionPlans([]*utils.TPActionPlan) error
 	SetTPActionTriggers([]*utils.TPActionTriggers) error
 	SetTPAccountActions([]*utils.TPAccountActions) error
-	SetTPResourceLimits([]*utils.TPResourceLimit) error
+	SetTPResources([]*utils.TPResource) error
+	SetTPStats([]*utils.TPStats) error
+	SetTPThresholds([]*utils.TPThreshold) error
+	SetTPFilters([]*utils.TPFilterProfile) error
+	SetTPSuppliers([]*utils.TPSupplierProfile) error
+	SetTPAttributes([]*utils.TPAttributeProfile) error
+}
+
+// NewMarshaler returns the marshaler type selected by mrshlerStr
+func NewMarshaler(mrshlerStr string) (ms Marshaler, err error) {
+	switch mrshlerStr {
+	case utils.MSGPACK:
+		ms = NewCodecMsgpackMarshaler()
+	case utils.JSON:
+		ms = new(JSONMarshaler)
+	default:
+		err = fmt.Errorf("Unsupported marshaler: %v", mrshlerStr)
+	}
+	return
 }
 
 type Marshaler interface {

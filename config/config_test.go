@@ -40,7 +40,7 @@ func TestCgrCfgConfigSharing(t *testing.T) {
 func TestCgrCfgLoadWithDefaults(t *testing.T) {
 	JSN_CFG := `
 {
-"sm_freeswitch": {
+"freeswitch_agent": {
 	"enabled": true,				// starts SessionManager service: <true|false>
 	"event_socket_conns":[					// instantiate connections to multiple FreeSWITCH servers
 		{"address": "1.2.3.4:8021", "password": "ClueCon", "reconnects": 3},
@@ -49,16 +49,19 @@ func TestCgrCfgLoadWithDefaults(t *testing.T) {
 },
 
 }`
-	eCgrCfg, _ := NewDefaultCGRConfig()
-	eCgrCfg.SmFsConfig.Enabled = true
-	eCgrCfg.SmFsConfig.EventSocketConns = []*FsConnConfig{
+	eCgrCfg, err := NewDefaultCGRConfig()
+	if err != nil {
+		t.Error(err)
+	}
+	eCgrCfg.fsAgentCfg.Enabled = true
+	eCgrCfg.fsAgentCfg.EventSocketConns = []*FsConnConfig{
 		&FsConnConfig{Address: "1.2.3.4:8021", Password: "ClueCon", Reconnects: 3},
 		&FsConnConfig{Address: "1.2.3.5:8021", Password: "ClueCon", Reconnects: 5},
 	}
 	if cgrCfg, err := NewCGRConfigFromJsonStringWithDefaults(JSN_CFG); err != nil {
 		t.Error(err)
-	} else if !reflect.DeepEqual(eCgrCfg.SmFsConfig, cgrCfg.SmFsConfig) {
-		t.Errorf("Expected: %+v, received: %+v", eCgrCfg.SmFsConfig, cgrCfg.SmFsConfig)
+	} else if !reflect.DeepEqual(eCgrCfg.fsAgentCfg, cgrCfg.fsAgentCfg) {
+		t.Errorf("Expected: %+v, received: %+v", eCgrCfg.fsAgentCfg, cgrCfg.fsAgentCfg)
 	}
 }
 
@@ -100,27 +103,45 @@ func TestCgrCfgCDRC(t *testing.T) {
 			PartialCacheExpiryAction: "*dump_to_file",
 			HeaderFields:             make([]*CfgCdrField, 0),
 			ContentFields: []*CfgCdrField{
-				&CfgCdrField{FieldId: "ToR", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile("~7:s/^(voice|data|sms|mms|generic)$/*$1/", utils.INFIELD_SEP)},
-				&CfgCdrField{FieldId: "AnswerTime", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile("1", utils.INFIELD_SEP)},
-				&CfgCdrField{FieldId: "Usage", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile("~9:s/^(\\d+)$/${1}s/", utils.INFIELD_SEP)},
+				&CfgCdrField{FieldId: "ToR", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile("~7:s/^(voice|data|sms|mms|generic)$/*$1/", utils.INFIELD_SEP)},
+				&CfgCdrField{FieldId: "AnswerTime", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile("1", utils.INFIELD_SEP)},
+				&CfgCdrField{FieldId: "Usage", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile("~9:s/^(\\d+)$/${1}s/", utils.INFIELD_SEP)},
 			},
 			TrailerFields: make([]*CfgCdrField, 0),
 			CacheDumpFields: []*CfgCdrField{
-				&CfgCdrField{Tag: "CGRID", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.CGRID, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "RunID", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.MEDI_RUNID, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "TOR", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.TOR, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "OriginID", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.ACCID, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "RequestType", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.REQTYPE, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "Direction", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.DIRECTION, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "Tenant", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.TENANT, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "Category", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.CATEGORY, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "Account", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.ACCOUNT, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "Subject", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.SUBJECT, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "Destination", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.DESTINATION, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "SetupTime", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.SETUP_TIME, utils.INFIELD_SEP), Layout: "2006-01-02T15:04:05Z07:00"},
-				&CfgCdrField{Tag: "AnswerTime", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.ANSWER_TIME, utils.INFIELD_SEP), Layout: "2006-01-02T15:04:05Z07:00"},
-				&CfgCdrField{Tag: "Usage", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.USAGE, utils.INFIELD_SEP)},
-				&CfgCdrField{Tag: "Cost", Type: utils.META_COMPOSED, Value: utils.ParseRSRFieldsMustCompile(utils.COST, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "CGRID", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.CGRID, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "RunID", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.MEDI_RUNID, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "TOR", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.TOR, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "OriginID", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.OriginID, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "RequestType", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.RequestType, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "Tenant", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.Tenant, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "Category", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.Category, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "Account", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.Account, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "Subject", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.Subject, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "Destination", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.Destination, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "SetupTime", Type: utils.META_COMPOSED,
+					Value:  utils.ParseRSRFieldsMustCompile(utils.SetupTime, utils.INFIELD_SEP),
+					Layout: "2006-01-02T15:04:05Z07:00"},
+				&CfgCdrField{Tag: "AnswerTime", Type: utils.META_COMPOSED,
+					Value:  utils.ParseRSRFieldsMustCompile(utils.AnswerTime, utils.INFIELD_SEP),
+					Layout: "2006-01-02T15:04:05Z07:00"},
+				&CfgCdrField{Tag: "Usage", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.Usage, utils.INFIELD_SEP)},
+				&CfgCdrField{Tag: "Cost", Type: utils.META_COMPOSED,
+					Value: utils.ParseRSRFieldsMustCompile(utils.COST, utils.INFIELD_SEP)},
 			},
 		},
 	}
@@ -189,6 +210,9 @@ func TestCgrCfgJSONDefaultsGeneral(t *testing.T) {
 	}
 	if cgrCfg.LockingTimeout != 5*time.Second {
 		t.Error(cgrCfg.LockingTimeout)
+	}
+	if cgrCfg.Logger != utils.MetaSysLog {
+		t.Error(cgrCfg.Logger)
 	}
 	if cgrCfg.LogLevel != 6 {
 		t.Error(cgrCfg.LogLevel)
@@ -263,20 +287,24 @@ func TestCgrCfgJSONDefaultsStorDB(t *testing.T) {
 }
 
 func TestCgrCfgJSONDefaultsRALs(t *testing.T) {
-
+	//asd
 	eHaPoolcfg := []*HaPoolConfig{}
 
 	if cgrCfg.RALsEnabled != false {
 		t.Error(cgrCfg.RALsEnabled)
 	}
+
+	if !reflect.DeepEqual(cgrCfg.RALsThresholdSConns, eHaPoolcfg) {
+		t.Error(cgrCfg.RALsThresholdSConns)
+	}
 	if !reflect.DeepEqual(cgrCfg.RALsCDRStatSConns, eHaPoolcfg) {
 		t.Error(cgrCfg.RALsCDRStatSConns)
 	}
-	if !reflect.DeepEqual(cgrCfg.RALsHistorySConns, eHaPoolcfg) {
-		t.Error(cgrCfg.RALsHistorySConns)
-	}
 	if !reflect.DeepEqual(cgrCfg.RALsPubSubSConns, eHaPoolcfg) {
 		t.Error(cgrCfg.RALsPubSubSConns)
+	}
+	if !reflect.DeepEqual(cgrCfg.RALsAttributeSConns, eHaPoolcfg) {
+		t.Error(cgrCfg.RALsAttributeSConns)
 	}
 	if !reflect.DeepEqual(cgrCfg.RALsUserSConns, eHaPoolcfg) {
 		t.Error(cgrCfg.RALsUserSConns)
@@ -289,6 +317,15 @@ func TestCgrCfgJSONDefaultsRALs(t *testing.T) {
 	}
 	if cgrCfg.LcrSubjectPrefixMatching != false {
 		t.Error(cgrCfg.LcrSubjectPrefixMatching)
+	}
+	eMaxCU := map[string]time.Duration{
+		utils.ANY:   time.Duration(189 * time.Hour),
+		utils.VOICE: time.Duration(72 * time.Hour),
+		utils.DATA:  time.Duration(107374182400),
+		utils.SMS:   time.Duration(10000),
+	}
+	if !reflect.DeepEqual(eMaxCU, cgrCfg.RALsMaxComputedUsage) {
+		t.Errorf("Expecting: %+v, received: %+v", eMaxCU, cgrCfg.RALsMaxComputedUsage)
 	}
 }
 
@@ -322,11 +359,20 @@ func TestCgrCfgJSONDefaultsCDRS(t *testing.T) {
 	if !reflect.DeepEqual(cgrCfg.CDRSPubSubSConns, eHaPoolCfg) {
 		t.Error(cgrCfg.CDRSPubSubSConns)
 	}
+	if !reflect.DeepEqual(cgrCfg.CDRSAttributeSConns, eHaPoolCfg) {
+		t.Error(cgrCfg.CDRSAttributeSConns)
+	}
 	if !reflect.DeepEqual(cgrCfg.CDRSUserSConns, eHaPoolCfg) {
 		t.Error(cgrCfg.CDRSUserSConns)
 	}
 	if !reflect.DeepEqual(cgrCfg.CDRSAliaseSConns, eHaPoolCfg) {
 		t.Error(cgrCfg.CDRSAliaseSConns)
+	}
+	if !reflect.DeepEqual(cgrCfg.CDRSCDRStatSConns, eHaPoolCfg) {
+		t.Error(cgrCfg.CDRSCDRStatSConns)
+	}
+	if !reflect.DeepEqual(cgrCfg.CDRSThresholdSConns, eHaPoolCfg) {
+		t.Error(cgrCfg.CDRSThresholdSConns)
 	}
 	if !reflect.DeepEqual(cgrCfg.CDRSStatSConns, eHaPoolCfg) {
 		t.Error(cgrCfg.CDRSStatSConns)
@@ -348,21 +394,37 @@ func TestCgrCfgJSONDefaultsCDRStats(t *testing.T) {
 func TestCgrCfgJSONDefaultsCdreProfiles(t *testing.T) {
 	eFields := []*CfgCdrField{}
 	eContentFlds := []*CfgCdrField{
-		&CfgCdrField{Tag: "CGRID", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("CGRID", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "RunID", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("RunID", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "TOR", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("ToR", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "OriginID", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("OriginID", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "RequestType", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("RequestType", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "Direction", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Direction", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "Tenant", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Tenant", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "Category", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Category", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "Account", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Account", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "Subject", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Subject", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "Destination", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Destination", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "SetupTime", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("SetupTime", utils.INFIELD_SEP), Layout: "2006-01-02T15:04:05Z07:00"},
-		&CfgCdrField{Tag: "AnswerTime", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("AnswerTime", utils.INFIELD_SEP), Layout: "2006-01-02T15:04:05Z07:00"},
-		&CfgCdrField{Tag: "Usage", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Usage", utils.INFIELD_SEP)},
-		&CfgCdrField{Tag: "Cost", Type: "*composed", Value: utils.ParseRSRFieldsMustCompile("Cost", utils.INFIELD_SEP), RoundingDecimals: 4},
+		&CfgCdrField{Tag: "CGRID", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("CGRID", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "RunID", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("RunID", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "TOR", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("ToR", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "OriginID", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("OriginID", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "RequestType", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("RequestType", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "Tenant", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("Tenant", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "Category", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("Category", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "Account", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("Account", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "Subject", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("Subject", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "Destination", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("Destination", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "SetupTime", Type: "*composed",
+			Value:  utils.ParseRSRFieldsMustCompile("SetupTime", utils.INFIELD_SEP),
+			Layout: "2006-01-02T15:04:05Z07:00"},
+		&CfgCdrField{Tag: "AnswerTime", Type: "*composed",
+			Value:  utils.ParseRSRFieldsMustCompile("AnswerTime", utils.INFIELD_SEP),
+			Layout: "2006-01-02T15:04:05Z07:00"},
+		&CfgCdrField{Tag: "Usage", Type: "*composed",
+			Value: utils.ParseRSRFieldsMustCompile("Usage", utils.INFIELD_SEP)},
+		&CfgCdrField{Tag: "Cost", Type: "*composed",
+			Value:            utils.ParseRSRFieldsMustCompile("Cost", utils.INFIELD_SEP),
+			RoundingDecimals: 4},
 	}
 	eCdreCfg := map[string]*CdreConfig{
 		"*default": {
@@ -384,108 +446,164 @@ func TestCgrCfgJSONDefaultsCdreProfiles(t *testing.T) {
 }
 
 func TestCgrCfgJSONDefaultsSMGenericCfg(t *testing.T) {
-	eSmGeCfg := &SmGenericConfig{
-		Enabled:             false,
-		ListenBijson:        "127.0.0.1:2014",
-		RALsConns:           []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
-		CDRsConns:           []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
-		SMGReplicationConns: []*HaPoolConfig{},
-		DebitInterval:       0 * time.Second,
-		MinCallDuration:     0 * time.Second,
-		MaxCallDuration:     3 * time.Hour,
-		SessionTTL:          0 * time.Second,
-		SessionIndexes:      utils.StringMap{},
-	}
-
-	if !reflect.DeepEqual(cgrCfg.SmGenericConfig, eSmGeCfg) {
-		t.Errorf("received: %+v, expecting: %+v", cgrCfg.SmGenericConfig, eSmGeCfg)
-	}
-
-}
-
-func TestCgrCfgJSONDefaultsSMFsConfig(t *testing.T) {
-	eSmFsCfg := &SmFsConfig{
-		Enabled:             false,
-		RALsConns:           []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
-		CDRsConns:           []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
-		RLsConns:            []*HaPoolConfig{},
-		CreateCdr:           false,
-		ExtraFields:         nil,
-		DebitInterval:       10 * time.Second,
-		MinCallDuration:     0 * time.Second,
-		MaxCallDuration:     3 * time.Hour,
-		MinDurLowBalance:    5 * time.Second,
-		LowBalanceAnnFile:   "",
-		EmptyBalanceContext: "",
-		EmptyBalanceAnnFile: "",
-		SubscribePark:       true,
-		ChannelSyncInterval: 5 * time.Minute,
-		MaxWaitConnection:   2 * time.Second,
-		EventSocketConns:    []*FsConnConfig{&FsConnConfig{Address: "127.0.0.1:8021", Password: "ClueCon", Reconnects: 5}},
-	}
-
-	if !reflect.DeepEqual(cgrCfg.SmFsConfig, eSmFsCfg) {
-		t.Errorf("received: %+v, expecting: %+v", cgrCfg.SmFsConfig, eSmFsCfg)
-	}
-}
-
-func TestCgrCfgJSONDefaultsSMKamConfig(t *testing.T) {
-	eSmKaCfg := &SmKamConfig{
-		Enabled:         false,
-		RALsConns:       []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
-		CDRsConns:       []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
-		RLsConns:        []*HaPoolConfig{},
-		CreateCdr:       false,
-		DebitInterval:   10 * time.Second,
-		MinCallDuration: 0 * time.Second,
-		MaxCallDuration: 3 * time.Hour,
-		EvapiConns:      []*KamConnConfig{&KamConnConfig{Address: "127.0.0.1:8448", Reconnects: 5}},
-	}
-	if !reflect.DeepEqual(cgrCfg.SmKamConfig, eSmKaCfg) {
-		t.Errorf("received: %+v, expecting: %+v", cgrCfg.SmKamConfig, eSmKaCfg)
-	}
-}
-
-func TestCgrCfgJSONDefaultsSMOsipsConfig(t *testing.T) {
-	eSmOpCfg := &SmOsipsConfig{
-		Enabled:                 false,
-		ListenUdp:               "127.0.0.1:2020",
-		RALsConns:               []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
-		CDRsConns:               []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
-		CreateCdr:               false,
-		DebitInterval:           10 * time.Second,
+	eSessionSCfg := &SessionSCfg{
+		Enabled:      false,
+		ListenBijson: "127.0.0.1:2014",
+		RALsConns: []*HaPoolConfig{
+			&HaPoolConfig{Address: "*internal"}},
+		CDRsConns: []*HaPoolConfig{
+			&HaPoolConfig{Address: "*internal"}},
+		ResSConns:               []*HaPoolConfig{},
+		ThreshSConns:            []*HaPoolConfig{},
+		StatSConns:              []*HaPoolConfig{},
+		SupplSConns:             []*HaPoolConfig{},
+		AttrSConns:              []*HaPoolConfig{},
+		SessionReplicationConns: []*HaPoolConfig{},
+		DebitInterval:           0 * time.Second,
 		MinCallDuration:         0 * time.Second,
 		MaxCallDuration:         3 * time.Hour,
-		EventsSubscribeInterval: 60 * time.Second,
-		MiAddr:                  "127.0.0.1:8020",
+		SessionTTL:              0 * time.Second,
+		SessionIndexes:          utils.StringMap{},
+		ClientProtocol:          1.0,
+	}
+	if !reflect.DeepEqual(eSessionSCfg, cgrCfg.sessionSCfg) {
+		t.Errorf("expecting: %s, received: %s",
+			utils.ToJSON(eSessionSCfg), utils.ToJSON(cgrCfg.sessionSCfg))
 	}
 
-	if !reflect.DeepEqual(cgrCfg.SmOsipsConfig, eSmOpCfg) {
-		t.Errorf("received: %+v, expecting: %+v", cgrCfg.SmOsipsConfig, eSmOpCfg)
+}
+func TestCgrCfgJSONDefaultsCacheCFG(t *testing.T) {
+	eCacheCfg := CacheConfig{
+		utils.CacheDestinations: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheReverseDestinations: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheRatingPlans: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheRatingProfiles: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheLCRRules: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheCDRStatS: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheActions: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheActionPlans: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheAccountActionPlans: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheActionTriggers: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheSharedGroups: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheAliases: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheReverseAliases: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheDerivedChargers: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheTimings: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheResourceProfiles: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheResources: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheEventResources: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(1 * time.Minute), StaticTTL: false},
+		utils.CacheStatQueueProfiles: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(1 * time.Minute), StaticTTL: false, Precache: false},
+		utils.CacheStatQueues: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(1 * time.Minute), StaticTTL: false, Precache: false},
+		utils.CacheThresholdProfiles: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheThresholds: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheFilters: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheSupplierProfiles: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheAttributeProfiles: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheResourceFilterIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheResourceFilterRevIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheStatFilterIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheStatFilterRevIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheThresholdFilterIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheThresholdFilterRevIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheSupplierFilterIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheSupplierFilterRevIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheAttributeFilterIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+		utils.CacheAttributeFilterRevIndexes: &CacheParamConfig{Limit: -1,
+			TTL: time.Duration(0), StaticTTL: false, Precache: false},
+	}
+
+	if !reflect.DeepEqual(eCacheCfg, cgrCfg.CacheCfg()) {
+		t.Errorf("received: %s, \nexpecting: %s",
+			utils.ToJSON(eCacheCfg), utils.ToJSON(cgrCfg.CacheCfg()))
 	}
 }
 
-func TestCgrCfgJSONDefaultsSMAsteriskCfg(t *testing.T) {
-	eSmAsCfg := &SMAsteriskCfg{
-		Enabled:       false,
-		CreateCDR:     false,
-		AsteriskConns: []*AsteriskConnCfg{&AsteriskConnCfg{Address: "127.0.0.1:8088", User: "cgrates", Password: "CGRateS.org", ConnectAttempts: 3, Reconnects: 5}},
+func TestCgrCfgJSONDefaultsFsAgentConfig(t *testing.T) {
+	eFsAgentCfg := &FsAgentConfig{
+		Enabled: false,
+		SessionSConns: []*HaPoolConfig{
+			&HaPoolConfig{Address: "*internal"}},
+		SubscribePark:       true,
+		CreateCdr:           false,
+		ExtraFields:         nil,
+		EmptyBalanceContext: "",
+		EmptyBalanceAnnFile: "",
+		ChannelSyncInterval: 5 * time.Minute,
+		MaxWaitConnection:   2 * time.Second,
+		EventSocketConns: []*FsConnConfig{
+			&FsConnConfig{Address: "127.0.0.1:8021",
+				Password: "ClueCon", Reconnects: 5}},
 	}
 
-	if !reflect.DeepEqual(cgrCfg.smAsteriskCfg, eSmAsCfg) {
-		t.Errorf("received: %+v, expecting: %+v", cgrCfg.smAsteriskCfg, eSmAsCfg)
+	if !reflect.DeepEqual(cgrCfg.fsAgentCfg, eFsAgentCfg) {
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.fsAgentCfg, eFsAgentCfg)
 	}
 }
 
-func TestCgrCfgJSONDefaultsHistoryS(t *testing.T) {
-	if cgrCfg.HistoryServerEnabled != false {
-		t.Error(cgrCfg.HistoryServerEnabled)
+func TestCgrCfgJSONDefaultsKamAgentConfig(t *testing.T) {
+	eKamAgentCfg := &KamAgentCfg{
+		Enabled: false,
+		SessionSConns: []*HaPoolConfig{
+			&HaPoolConfig{Address: "*internal"}},
+		CreateCdr: false,
+		EvapiConns: []*KamConnConfig{
+			&KamConnConfig{
+				Address: "127.0.0.1:8448", Reconnects: 5}},
 	}
-	if cgrCfg.HistoryDir != "/var/lib/cgrates/history" {
-		t.Error(cgrCfg.HistoryDir)
+	if !reflect.DeepEqual(cgrCfg.kamAgentCfg, eKamAgentCfg) {
+		t.Errorf("received: %+v, expecting: %+v",
+			utils.ToJSON(cgrCfg.kamAgentCfg), utils.ToJSON(eKamAgentCfg))
 	}
-	if cgrCfg.HistorySaveInterval != 1*time.Second {
-		t.Error(cgrCfg.HistorySaveInterval)
+}
+
+func TestCgrCfgJSONDefaultssteriskAgentCfg(t *testing.T) {
+	eAstAgentCfg := &AsteriskAgentCfg{
+		Enabled: false,
+		SessionSConns: []*HaPoolConfig{
+			&HaPoolConfig{Address: "*internal"}},
+		CreateCDR: false,
+		AsteriskConns: []*AsteriskConnCfg{
+			&AsteriskConnCfg{Address: "127.0.0.1:8088",
+				User: "cgrates", Password: "CGRateS.org",
+				ConnectAttempts: 3, Reconnects: 5}},
+	}
+
+	if !reflect.DeepEqual(cgrCfg.asteriskAgentCfg, eAstAgentCfg) {
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.asteriskAgentCfg, eAstAgentCfg)
 	}
 }
 
@@ -512,25 +630,89 @@ func TestCgrCfgJSONDefaultsUserS(t *testing.T) {
 	}
 }
 
-func TestCgrCfgJSONDefaultsResLimCfg(t *testing.T) {
-	eResLiCfg := &ResourceLimiterConfig{
-		Enabled:           false,
-		CDRStatConns:      []*HaPoolConfig{},
-		CacheDumpInterval: 0 * time.Second,
+func TestCgrCfgJSONDefaultFiltersCfg(t *testing.T) {
+	eFiltersCfg := &FilterSCfg{
+		StatSConns: []*HaPoolConfig{},
 	}
+	if !reflect.DeepEqual(cgrCfg.filterSCfg, eFiltersCfg) {
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.filterSCfg, eFiltersCfg)
+	}
+}
 
-	if !reflect.DeepEqual(cgrCfg.resourceLimiterCfg, eResLiCfg) {
-		t.Errorf("received: %+v, expecting: %+v", cgrCfg.resourceLimiterCfg, eResLiCfg)
+func TestCgrCfgJSONDefaultSAttributeSCfg(t *testing.T) {
+	eAliasSCfg := &AttributeSCfg{
+		Enabled:             false,
+		StringIndexedFields: nil,
+		PrefixIndexedFields: &[]string{},
+	}
+	if !reflect.DeepEqual(eAliasSCfg, cgrCfg.attributeSCfg) {
+		t.Errorf("received: %+v, expecting: %+v", eAliasSCfg, cgrCfg.attributeSCfg)
+	}
+}
+
+func TestCgrCfgJSONDefaultsResLimCfg(t *testing.T) {
+	eResLiCfg := &ResourceSConfig{
+		Enabled:             false,
+		ThresholdSConns:     []*HaPoolConfig{},
+		StoreInterval:       0,
+		StringIndexedFields: nil,
+		PrefixIndexedFields: &[]string{},
+	}
+	if !reflect.DeepEqual(cgrCfg.resourceSCfg, eResLiCfg) {
+		t.Errorf("expecting: %s, received: %s", utils.ToJSON(eResLiCfg), utils.ToJSON(cgrCfg.resourceSCfg))
 	}
 
 }
 
+func TestCgrCfgJSONDefaultStatsCfg(t *testing.T) {
+	eStatsCfg := &StatSCfg{
+		Enabled:             false,
+		StoreInterval:       0,
+		ThresholdSConns:     []*HaPoolConfig{},
+		StringIndexedFields: nil,
+		PrefixIndexedFields: &[]string{},
+	}
+	if !reflect.DeepEqual(cgrCfg.statsCfg, eStatsCfg) {
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.statsCfg, eStatsCfg)
+	}
+}
+
+func TestCgrCfgJSONDefaultThresholdSCfg(t *testing.T) {
+	eThresholdSCfg := &ThresholdSCfg{
+		Enabled:             false,
+		StoreInterval:       0,
+		StringIndexedFields: nil,
+		PrefixIndexedFields: &[]string{},
+	}
+	if !reflect.DeepEqual(eThresholdSCfg, cgrCfg.thresholdSCfg) {
+		t.Errorf("received: %+v, expecting: %+v", eThresholdSCfg, cgrCfg.thresholdSCfg)
+	}
+}
+
+func TestCgrCfgJSONDefaultSupplierSCfg(t *testing.T) {
+	eSupplSCfg := &SupplierSCfg{
+		Enabled:             false,
+		StringIndexedFields: nil,
+		PrefixIndexedFields: &[]string{},
+
+		RALsConns: []*HaPoolConfig{
+			&HaPoolConfig{Address: "*internal"},
+		},
+		ResourceSConns: []*HaPoolConfig{},
+		StatSConns:     []*HaPoolConfig{},
+	}
+	if !reflect.DeepEqual(eSupplSCfg, cgrCfg.supplierSCfg) {
+		t.Errorf("received: %+v, expecting: %+v", eSupplSCfg, cgrCfg.supplierSCfg)
+	}
+}
+
 func TestCgrCfgJSONDefaultsDiameterAgentCfg(t *testing.T) {
 	testDA := &DiameterAgentCfg{
-		Enabled:           false,
-		Listen:            "127.0.0.1:3868",
-		DictionariesDir:   "/usr/share/cgrates/diameter/dict/",
-		SMGenericConns:    []*HaPoolConfig{&HaPoolConfig{Address: "*internal"}},
+		Enabled:         false,
+		Listen:          "127.0.0.1:3868",
+		DictionariesDir: "/usr/share/cgrates/diameter/dict/",
+		SessionSConns: []*HaPoolConfig{
+			&HaPoolConfig{Address: "*internal"}},
 		PubSubConns:       []*HaPoolConfig{},
 		CreateCDR:         true,
 		DebitInterval:     5 * time.Minute,
@@ -551,8 +733,8 @@ func TestCgrCfgJSONDefaultsDiameterAgentCfg(t *testing.T) {
 	if !reflect.DeepEqual(cgrCfg.diameterAgentCfg.DictionariesDir, testDA.DictionariesDir) {
 		t.Errorf("expecting: %+v, received: %+v", cgrCfg.diameterAgentCfg.DictionariesDir, testDA.DictionariesDir)
 	}
-	if !reflect.DeepEqual(cgrCfg.diameterAgentCfg.SMGenericConns, testDA.SMGenericConns) {
-		t.Errorf("expecting: %+v, received: %+v", cgrCfg.diameterAgentCfg.SMGenericConns, testDA.SMGenericConns)
+	if !reflect.DeepEqual(cgrCfg.diameterAgentCfg.SessionSConns, testDA.SessionSConns) {
+		t.Errorf("expecting: %+v, received: %+v", cgrCfg.diameterAgentCfg.SessionSConns, testDA.SessionSConns)
 	}
 	if !reflect.DeepEqual(cgrCfg.diameterAgentCfg.PubSubConns, testDA.PubSubConns) {
 		t.Errorf("expecting: %+v, received: %+v", cgrCfg.diameterAgentCfg.PubSubConns, testDA.PubSubConns)
@@ -633,5 +815,97 @@ func TestCgrCfgJSONDefaultsSureTax(t *testing.T) {
 
 	if !reflect.DeepEqual(cgrCfg.sureTaxCfg, eSureTaxCfg) {
 		t.Errorf("received: %+v, expecting: %+v", cgrCfg.sureTaxCfg, eSureTaxCfg)
+	}
+}
+
+func TestCgrCfgJSONDefaultsHTTP(t *testing.T) {
+	if cgrCfg.HTTPJsonRPCURL != "/jsonrpc" {
+		t.Error(cgrCfg.HTTPJsonRPCURL)
+	}
+	if cgrCfg.HTTPWSURL != "/ws" {
+		t.Error(cgrCfg.HTTPWSURL)
+	}
+	if cgrCfg.HTTPUseBasicAuth != false {
+		t.Error(cgrCfg.HTTPUseBasicAuth)
+	}
+	if !reflect.DeepEqual(cgrCfg.HTTPAuthUsers, map[string]string{}) {
+		t.Error(cgrCfg.HTTPAuthUsers)
+	}
+}
+
+func TestRadiusAgentCfg(t *testing.T) {
+	testRA := &RadiusAgentCfg{
+		Enabled:            false,
+		ListenNet:          "udp",
+		ListenAuth:         "127.0.0.1:1812",
+		ListenAcct:         "127.0.0.1:1813",
+		ClientSecrets:      map[string]string{utils.META_DEFAULT: "CGRateS.org"},
+		ClientDictionaries: map[string]string{utils.META_DEFAULT: "/usr/share/cgrates/radius/dict/"},
+		SessionSConns:      []*HaPoolConfig{&HaPoolConfig{Address: utils.MetaInternal}},
+		CreateCDR:          true,
+		CDRRequiresSession: false,
+		Timezone:           "",
+		RequestProcessors:  nil,
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.Enabled, testRA.Enabled) {
+		t.Errorf("expecting: %+v, received: %+v", cgrCfg.radiusAgentCfg.Enabled, testRA.Enabled)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.ListenNet, testRA.ListenNet) {
+		t.Errorf("expecting: %+v, received: %+v", cgrCfg.radiusAgentCfg.ListenNet, testRA.ListenNet)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.ListenAuth, testRA.ListenAuth) {
+		t.Errorf("expecting: %+v, received: %+v", cgrCfg.radiusAgentCfg.ListenAuth, testRA.ListenAuth)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.ListenAcct, testRA.ListenAcct) {
+		t.Errorf("expecting: %+v, received: %+v", cgrCfg.radiusAgentCfg.ListenAcct, testRA.ListenAcct)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.ClientSecrets, testRA.ClientSecrets) {
+		t.Errorf("expecting: %+v, received: %+v", cgrCfg.radiusAgentCfg.ClientSecrets, testRA.ClientSecrets)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.ClientDictionaries, testRA.ClientDictionaries) {
+		t.Errorf("expecting: %+v, received: %+v", cgrCfg.radiusAgentCfg.ClientDictionaries, testRA.ClientDictionaries)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.SessionSConns, testRA.SessionSConns) {
+		t.Errorf("expecting: %+v, received: %+v", cgrCfg.radiusAgentCfg.SessionSConns, testRA.SessionSConns)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.CreateCDR, testRA.CreateCDR) {
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.radiusAgentCfg.CreateCDR, testRA.CreateCDR)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.CDRRequiresSession, testRA.CDRRequiresSession) {
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.radiusAgentCfg.CDRRequiresSession, testRA.CDRRequiresSession)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.Timezone, testRA.Timezone) {
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.radiusAgentCfg.Timezone, testRA.Timezone)
+	}
+	if !reflect.DeepEqual(cgrCfg.radiusAgentCfg.RequestProcessors, testRA.RequestProcessors) {
+		t.Errorf("received: %+v, expecting: %+v", cgrCfg.radiusAgentCfg.RequestProcessors, testRA.RequestProcessors)
+	}
+}
+
+func TestDbDefaults(t *testing.T) {
+	dbdf := NewDbDefaults()
+	flagInput := utils.MetaDynamic
+	dbs := []string{utils.MONGO, utils.REDIS, utils.MYSQL}
+	for _, dbtype := range dbs {
+		host := dbdf.DBHost(dbtype, flagInput)
+		if host != utils.LOCALHOST {
+			t.Errorf("received: %+v, expecting: %+v", host, utils.LOCALHOST)
+		}
+		user := dbdf.DBUser(dbtype, flagInput)
+		if user != utils.CGRATES {
+			t.Errorf("received: %+v, expecting: %+v", user, utils.CGRATES)
+		}
+		port := dbdf.DBPort(dbtype, flagInput)
+		if port != dbdf[dbtype]["DbPort"] {
+			t.Errorf("received: %+v, expecting: %+v", port, dbdf[dbtype]["DbPort"])
+		}
+		name := dbdf.DBName(dbtype, flagInput)
+		if name != dbdf[dbtype]["DbName"] {
+			t.Errorf("received: %+v, expecting: %+v", name, dbdf[dbtype]["DbName"])
+		}
+		pass := dbdf.DBPass(dbtype, flagInput)
+		if pass != dbdf[dbtype]["DbPass"] {
+			t.Errorf("received: %+v, expecting: %+v", pass, dbdf[dbtype]["DbPass"])
+		}
 	}
 }

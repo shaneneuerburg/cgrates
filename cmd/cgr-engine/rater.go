@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package main
 
 import (
@@ -23,100 +24,54 @@ import (
 	"github.com/cgrates/cgrates/apier/v1"
 	"github.com/cgrates/cgrates/apier/v2"
 	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/history"
 	"github.com/cgrates/cgrates/servmanager"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
 
-/*func init() {
-	gob.Register(map[interface{}]struct{}{})
-	gob.Register(engine.Actions{})
-	gob.RegisterName("github.com/cgrates/cgrates/engine.ActionPlan", &engine.ActionPlan{})
-	gob.Register([]*utils.LoadInstance{})
-	gob.RegisterName("github.com/cgrates/cgrates/engine.RatingPlan", &engine.RatingPlan{})
-	gob.RegisterName("github.com/cgrates/cgrates/engine.RatingProfile", &engine.RatingProfile{})
-	gob.RegisterName("github.com/cgrates/cgrates/utils.DerivedChargers", &utils.DerivedChargers{})
-	gob.Register(engine.AliasValues{})
-}*/
-
 // Starts rater and reports on chan
-func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneChan chan struct{},
-	internalCdrStatSChan chan rpcclient.RpcClientConnection, internalHistorySChan chan rpcclient.RpcClientConnection,
-	internalPubSubSChan chan rpcclient.RpcClientConnection, internalUserSChan chan rpcclient.RpcClientConnection, internalAliaseSChan chan rpcclient.RpcClientConnection,
+func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheS *engine.CacheS,
+	internalThdSChan, internalCdrStatSChan, internalStatSChan, internalPubSubSChan,
+	internalAttributeSChan, internalUserSChan, internalAliaseSChan chan rpcclient.RpcClientConnection,
 	serviceManager *servmanager.ServiceManager, server *utils.Server,
-	dataDB engine.DataDB, loadDb engine.LoadStorage, cdrDb engine.CdrStorage, stopHandled *bool, exitChan chan bool) {
+	dm *engine.DataManager, loadDb engine.LoadStorage, cdrDb engine.CdrStorage, stopHandled *bool, exitChan chan bool) {
 	var waitTasks []chan struct{}
-
-	//Cache load
 	cacheTaskChan := make(chan struct{})
 	waitTasks = append(waitTasks, cacheTaskChan)
-	go func() {
+	go func() { //Wait for cache load
 		defer close(cacheTaskChan)
-
-		/*loadHist, err := dataDB.GetLoadHistory(1, true, utils.NonTransactional)
-		if err != nil || len(loadHist) == 0 {
-			utils.Logger.Info(fmt.Sprintf("could not get load history: %v (%v)", loadHist, err))
-			cacheDoneChan <- struct{}{}
-			return
-		}
-		*/
-		var dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs, alsIDs, rvAlsIDs, rlIDs []string
-		if !cfg.CacheConfig.Destinations.Precache {
-			dstIDs = make([]string, 0) // Don't cache any
-		}
-		if !cfg.CacheConfig.ReverseDestinations.Precache {
-			rvDstIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.RatingPlans.Precache {
-			rplIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.RatingProfiles.Precache {
-			rpfIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.Actions.Precache {
-			actIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.ActionPlans.Precache {
-			aplIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.AccountActionPlans.Precache {
-			aapIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.ActionTriggers.Precache {
-			atrgIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.SharedGroups.Precache {
-			sgIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.Lcr.Precache {
-			lcrIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.DerivedChargers.Precache {
-			dcIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.Aliases.Precache {
-			alsIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.ReverseAliases.Precache {
-			rvAlsIDs = make([]string, 0)
-		}
-		if !cfg.CacheConfig.ResourceLimits.Precache {
-			rlIDs = make([]string, 0)
-		}
-		if err := dataDB.LoadRatingCache(dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs); err != nil {
-			utils.Logger.Crit(fmt.Sprintf("<RALs> Cache rating error: %s", err.Error()))
-			exitChan <- true
-			return
-		}
-		if err := dataDB.LoadAccountingCache(alsIDs, rvAlsIDs, rlIDs); err != nil {
-			utils.Logger.Crit(fmt.Sprintf("<RALs> Cache accounting error: %s", err.Error()))
-			exitChan <- true
-			return
-		}
-
-		cacheDoneChan <- struct{}{}
+		<-cacheS.GetPrecacheChannel(utils.CacheDestinations)
+		<-cacheS.GetPrecacheChannel(utils.CacheReverseDestinations)
+		<-cacheS.GetPrecacheChannel(utils.CacheRatingPlans)
+		<-cacheS.GetPrecacheChannel(utils.CacheRatingProfiles)
+		<-cacheS.GetPrecacheChannel(utils.CacheActions)
+		<-cacheS.GetPrecacheChannel(utils.CacheActionPlans)
+		<-cacheS.GetPrecacheChannel(utils.CacheAccountActionPlans)
+		<-cacheS.GetPrecacheChannel(utils.CacheActionTriggers)
+		<-cacheS.GetPrecacheChannel(utils.CacheActionTriggers)
+		<-cacheS.GetPrecacheChannel(utils.CacheSharedGroups)
+		<-cacheS.GetPrecacheChannel(utils.CacheLCRRules)
+		<-cacheS.GetPrecacheChannel(utils.CacheDerivedChargers)
+		<-cacheS.GetPrecacheChannel(utils.CacheAliases)
+		<-cacheS.GetPrecacheChannel(utils.CacheReverseAliases)
 	}()
+
+	var thdS *rpcclient.RpcClientPool
+	if len(cfg.RALsThresholdSConns) != 0 { // Connections to ThresholdS
+		thdsTaskChan := make(chan struct{})
+		waitTasks = append(waitTasks, thdsTaskChan)
+		go func() {
+			defer close(thdsTaskChan)
+			var err error
+			thdS, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
+				cfg.RALsThresholdSConns, internalThdSChan, cfg.InternalTtl)
+			if err != nil {
+				utils.Logger.Crit(fmt.Sprintf("<RALs> Could not connect to ThresholdS, error: %s", err.Error()))
+				exitChan <- true
+				return
+			}
+		}()
+	}
 
 	var cdrStats *rpcclient.RpcClientPool
 	if len(cfg.RALsCDRStatSConns) != 0 { // Connections to CDRStats
@@ -124,6 +79,7 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 		waitTasks = append(waitTasks, cdrstatTaskChan)
 		go func() {
 			defer close(cdrstatTaskChan)
+			var err error
 			cdrStats, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
 				cfg.RALsCDRStatSConns, internalCdrStatSChan, cfg.InternalTtl)
 			if err != nil {
@@ -133,27 +89,31 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 			}
 		}()
 	}
-	if len(cfg.RALsHistorySConns) != 0 { // Connection to HistoryS,
-		histTaskChan := make(chan struct{})
-		waitTasks = append(waitTasks, histTaskChan)
+
+	var stats *rpcclient.RpcClientPool
+	if len(cfg.RALsStatSConns) != 0 { // Connections to CDRStats
+		statsTaskChan := make(chan struct{})
+		waitTasks = append(waitTasks, statsTaskChan)
 		go func() {
-			defer close(histTaskChan)
-			if historySConns, err := engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
-				cfg.RALsHistorySConns, internalHistorySChan, cfg.InternalTtl); err != nil {
-				utils.Logger.Crit(fmt.Sprintf("<RALs> Could not connect HistoryS, error: %s", err.Error()))
+			defer close(statsTaskChan)
+			var err error
+			stats, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
+				cfg.RALsStatSConns, internalStatSChan, cfg.InternalTtl)
+			if err != nil {
+				utils.Logger.Crit(fmt.Sprintf("<RALs> Could not connect to StatS, error: %s", err.Error()))
 				exitChan <- true
 				return
-			} else {
-				engine.SetHistoryScribe(historySConns)
 			}
 		}()
 	}
+
 	if len(cfg.RALsPubSubSConns) != 0 { // Connection to pubsubs
 		pubsubTaskChan := make(chan struct{})
 		waitTasks = append(waitTasks, pubsubTaskChan)
 		go func() {
 			defer close(pubsubTaskChan)
-			if pubSubSConns, err := engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
+			if pubSubSConns, err := engine.NewRPCPool(rpcclient.POOL_FIRST,
+				cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
 				cfg.RALsPubSubSConns, internalPubSubSChan, cfg.InternalTtl); err != nil {
 				utils.Logger.Crit(fmt.Sprintf("<RALs> Could not connect to PubSubS: %s", err.Error()))
 				exitChan <- true
@@ -163,12 +123,33 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 			}
 		}()
 	}
+
+	var attrS *rpcclient.RpcClientPool
+	if len(cfg.RALsAttributeSConns) != 0 { // Connections to AttributeS
+		attrsTaskChan := make(chan struct{})
+		waitTasks = append(waitTasks, attrsTaskChan)
+		go func() {
+			defer close(attrsTaskChan)
+			var err error
+			attrS, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts,
+				cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
+				cfg.RALsAttributeSConns, internalAttributeSChan, cfg.InternalTtl)
+			if err != nil {
+				utils.Logger.Crit(fmt.Sprintf("<RALs> Could not connect to %s, error: %s",
+					utils.AttributeS, err.Error()))
+				exitChan <- true
+				return
+			}
+		}()
+	}
+
 	if len(cfg.RALsAliasSConns) != 0 { // Connection to AliasService
 		aliasesTaskChan := make(chan struct{})
 		waitTasks = append(waitTasks, aliasesTaskChan)
 		go func() {
 			defer close(aliasesTaskChan)
-			if aliaseSCons, err := engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
+			if aliaseSCons, err := engine.NewRPCPool(rpcclient.POOL_FIRST,
+				cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
 				cfg.RALsAliasSConns, internalAliaseSChan, cfg.InternalTtl); err != nil {
 				utils.Logger.Crit(fmt.Sprintf("<RALs> Could not connect to AliaseS, error: %s", err.Error()))
 				exitChan <- true
@@ -178,31 +159,42 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 			}
 		}()
 	}
+
 	var usersConns rpcclient.RpcClientConnection
 	if len(cfg.RALsUserSConns) != 0 { // Connection to UserService
 		usersTaskChan := make(chan struct{})
 		waitTasks = append(waitTasks, usersTaskChan)
 		go func() {
 			defer close(usersTaskChan)
-			if usersConns, err = engine.NewRPCPool(rpcclient.POOL_FIRST, cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
+			var err error
+			if usersConns, err = engine.NewRPCPool(rpcclient.POOL_FIRST,
+				cfg.ConnectAttempts, cfg.Reconnects, cfg.ConnectTimeout, cfg.ReplyTimeout,
 				cfg.RALsUserSConns, internalUserSChan, cfg.InternalTtl); err != nil {
 				utils.Logger.Crit(fmt.Sprintf("<RALs> Could not connect UserS, error: %s", err.Error()))
 				exitChan <- true
 				return
+			} else {
+				engine.SetUserService(usersConns)
 			}
-			engine.SetUserService(usersConns)
 		}()
 	}
 	// Wait for all connections to complete before going further
 	for _, chn := range waitTasks {
 		<-chn
 	}
-	responder := &engine.Responder{ExitChan: exitChan}
+	responder := &engine.Responder{ExitChan: exitChan, MaxComputedUsage: cfg.RALsMaxComputedUsage}
 	responder.SetTimeToLive(cfg.ResponseCacheTTL, nil)
-	apierRpcV1 := &v1.ApierV1{StorDb: loadDb, DataDB: dataDB, CdrDb: cdrDb,
-		Config: cfg, Responder: responder, ServManager: serviceManager, HTTPPoster: utils.NewHTTPPoster(cfg.HttpSkipTlsVerify, cfg.ReplyTimeout)}
+	apierRpcV1 := &v1.ApierV1{StorDb: loadDb, DataManager: dm, CdrDb: cdrDb,
+		Config: cfg, Responder: responder, ServManager: serviceManager,
+		HTTPPoster: utils.NewHTTPPoster(cfg.HttpSkipTlsVerify, cfg.ReplyTimeout)}
+	if thdS != nil {
+		engine.SetThresholdS(thdS) // temporary architectural fix until we will have separate AccountS
+	}
+	if attrS != nil {
+		responder.AttributeS = attrS
+	}
 	if cdrStats != nil { // ToDo: Fix here properly the init of stats
-		responder.Stats = cdrStats
+		responder.CdrStats = cdrStats
 		apierRpcV1.CdrStatsSrv = cdrStats
 	}
 	if usersConns != nil {
@@ -217,13 +209,11 @@ func startRater(internalRaterChan chan rpcclient.RpcClientConnection, cacheDoneC
 
 	utils.RegisterRpcParams("", &engine.Stats{})
 	utils.RegisterRpcParams("", &v1.CDRStatsV1{})
-	utils.RegisterRpcParams("ScribeV1", &history.FileScribe{})
 	utils.RegisterRpcParams("PubSubV1", &engine.PubSub{})
 	utils.RegisterRpcParams("AliasesV1", &engine.AliasHandler{})
 	utils.RegisterRpcParams("UsersV1", &engine.UserMap{})
 	utils.RegisterRpcParams("", &v1.CdrsV1{})
 	utils.RegisterRpcParams("", &v2.CdrsV2{})
-	utils.RegisterRpcParams("", &v1.SessionManagerV1{})
 	utils.RegisterRpcParams("", &v1.SMGenericV1{})
 	utils.RegisterRpcParams("", responder)
 	utils.RegisterRpcParams("", apierRpcV1)

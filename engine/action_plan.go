@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -276,7 +277,7 @@ func (at *ActionTiming) GetActionPlanID() string {
 
 func (at *ActionTiming) getActions() (as []*Action, err error) {
 	if at.actions == nil {
-		at.actions, err = dataStorage.GetActions(at.ActionsID, false, utils.NonTransactional)
+		at.actions, err = dm.GetActions(at.ActionsID, false, utils.NonTransactional)
 	}
 	at.actions.Sort()
 	return at.actions, err
@@ -293,7 +294,7 @@ func (at *ActionTiming) Execute(successActions, failedActions chan *Action) (err
 	}
 	for accID, _ := range at.accountIDs {
 		_, err = guardian.Guardian.Guard(func() (interface{}, error) {
-			acc, err := dataStorage.GetAccount(accID)
+			acc, err := dm.DataDB().GetAccount(accID)
 			if err != nil {
 				utils.Logger.Warning(fmt.Sprintf("Could not get account id: %s. Skipping!", accID))
 				return 0, err
@@ -346,7 +347,7 @@ func (at *ActionTiming) Execute(successActions, failedActions chan *Action) (err
 				}
 			}
 			if !transactionFailed && !removeAccountActionFound {
-				dataStorage.SetAccount(acc)
+				dm.DataDB().SetAccount(acc)
 			}
 			return 0, nil
 		}, 0, accID)

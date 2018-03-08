@@ -15,12 +15,12 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package console
 
 import (
 	"github.com/cgrates/cgrates/apier/v1"
 	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
@@ -52,7 +52,7 @@ func (self *CmdGetDataCost) RpcMethod() string {
 
 func (self *CmdGetDataCost) RpcParams(reset bool) interface{} {
 	if reset || self.rpcParams == nil {
-		self.rpcParams = &v1.AttrGetDataCost{Direction: utils.OUT}
+		self.rpcParams = new(v1.AttrGetDataCost)
 	}
 	return self.rpcParams
 }

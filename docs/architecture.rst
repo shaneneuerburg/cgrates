@@ -1,14 +1,16 @@
 2. Architecture
 ===============
-The CGRateS suite consists of **four** software applications described below.
+The CGRateS suite consists of **five** software applications described below.
 
 .. hlist::
-   :columns: 4
+   :columns: 5
 
    - cgr-engine
    - cgr-loader
    - cgr-console
    - cgr-tester
+   - cgr-migrator
+
 
 CGRateS has an internal cache.
 
@@ -125,13 +127,6 @@ Responsible with call control on the Telecommunication Switch side. Operates in 
 
 All call actions are logged into CGRateS's LogDB.
 
-Right now there are **five** session manager types.
-   - sm_freeswitch
-   - sm_kamailio
-   - sm_opensips
-   - sm_asterisk
-   - **sm_generic**
-
 - Communicates via:
    - RPC
    - internal/in-process *within the same running* **cgr-engine** process.
@@ -140,12 +135,6 @@ Right now there are **five** session manager types.
 
    "stor_db" - (cdrDb)
 
-- Config section in the CGRateS configuration file:
-   - ``"sm_freeswitch": {...}``
-   - ``"sm_kamailio": {...}``
-   - ``"sm_opensips": {...}``
-   - ``"sm_asterisk": {...}``
-   - ``"sm_generic": {...}``
 
 2.1.4. DiameterAgent service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -163,7 +152,7 @@ Despite the name it is a flexible **Diameter Server**.
 - Config section in the CGRateS configuration file:
    - ``"diameter_agent": {...}``
 
-2.1.5. CDRS service
+2.1.5. CDR service
 ~~~~~~~~~~~~~~~~~~~
 Centralized CDR server and CDR (raw or rated) **replicator**.
 
@@ -209,22 +198,7 @@ Gathers offline CDRs and post them to CDR Server - (CDRS component)
 - Config section in the CGRateS configuration file:
    - ``"cdrc": {...}``
 
-2.1.8. History service
-~~~~~~~~~~~~~~~~~~~~~~
-Archives rate changes in human readable JSON format using **GIT**.
-
-- Communicates via:
-   - RPC
-   - internal/in-process *within the same running* **cgr-engine** process.
-
-- Operates with the following CGRateS database(s): ::
-
-   - none
-
-- Config section in the CGRateS configuration file:
-   - ``"historys": {...}``
-
-2.1.9. Aliases service
+2.1.8. Aliases service
 ~~~~~~~~~~~~~~~~~~~~~~~
 Generic purpose **aliasing** system.
 
@@ -244,7 +218,7 @@ Possible applications:
 - Config section in the CGRateS configuration file:
    - ``"aliases": {...}``
 
-2.1.10. User service
+2.1.9. User service
 ~~~~~~~~~~~~~~~~~~~~
 Generic purpose **user** system to maintain user profiles (LDAP similarity).
 
@@ -259,7 +233,7 @@ Generic purpose **user** system to maintain user profiles (LDAP similarity).
 - Config section in the CGRateS configuration file:
    - ``"users": {...}``
 
-2.1.11. PubSub service
+2.1.10. PubSub service
 ~~~~~~~~~~~~~~~~~~~~~~
 PubSub service used to expose internal events to interested external components (eg: balance ops)
 
@@ -275,7 +249,7 @@ PubSub service used to expose internal events to interested external components 
    - ``"pubsubs": {...}``
 
 
-2.1.12. Resource Limiter service
+2.1.11. Resource Limiter service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Resource Limiter service used to limit resources during authorization (eg: maximum calls per destination for an account)
 
@@ -290,7 +264,7 @@ Resource Limiter service used to limit resources during authorization (eg: maxim
 - Config section in the CGRateS configuration file:
    - ``"rls": {...}``
 
-2.1.13. APIER RPC service
+2.1.12. APIER RPC service
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 RPC service used to expose external access towards internal components.
 
@@ -299,7 +273,7 @@ RPC service used to expose external access towards internal components.
    - JSON over HTTP
    - JSON over WebSocket
 
-2.1.14. Cdre
+2.1.13. Cdre
 ~~~~~~~~~~~~
 Component to retrieve rated CDRs from internal CDRs database.
 
@@ -312,7 +286,7 @@ Component to retrieve rated CDRs from internal CDRs database.
 - Config section in the CGRateS configuration file:
    - ``"cdre": {...}``
 
-2.1.15. Mailer
+2.1.14. Mailer
 ~~~~~~~~~~~~~~
 TBD
 
@@ -323,7 +297,7 @@ TBD
 - Config section in the CGRateS configuration file:
    - ``"mailer": {...}``
 
-2.1.16. Suretax
+2.1.15. Suretax
 ~~~~~~~~~~~~~~~
 TBD
 
@@ -384,8 +358,6 @@ Can be used to:
          Flush the database before importing
    -from_stordb
          Load the tariff plan from storDb to dataDb
-   -history_server string
-         The history server address:port, empty to disable automatic history archiving (default "127.0.0.1:2013")
    -load_history_size int
          Limit the number of records in the load history (default 10)
    -migrate_rc8 string
@@ -499,3 +471,78 @@ Command line stress testing tool.
 
 .. hint:: # cgr-tester -runs=10000
 
+2.5. cgr-migrator
+-----------------
+Command line migration tool.
+
+::
+
+ cgrates@OCS:~$ cgr-migrator --help
+ Usage of cgr-migrator:
+  -datadb_host string
+      The DataDb host to connect to. (default "192.168.100.40")
+  -datadb_name string
+      The name/number of the DataDb to connect to. (default "10")
+  -datadb_passwd string
+      The DataDb user's password.
+  -datadb_port string
+      The DataDb port to bind to. (default "6379")
+  -datadb_type string
+      The type of the DataDb database <redis> (default "redis")
+  -datadb_user string
+      The DataDb user to sign in as. (default "cgrates")
+  -dbdata_encoding string
+      The encoding used to store object data in strings (default "msgpack")
+  -dry_run
+      When true will not save loaded data to dataDb but just parse it for consistency and errors.(default "false")
+  -load_history_size int
+      Limit the number of records in the load history (default 10)
+  -migrate string
+      Fire up automatic migration *to use multiple values use ',' as separator 
+      <*set_versions|*cost_details|*accounts|*actions|*action_triggers|*action_plans|*shared_groups> 
+  -old_datadb_host string
+      The DataDb host to connect to. (default "192.168.100.40")
+  -old_datadb_name string
+      The name/number of the DataDb to connect to. (default "10")
+  -old_datadb_passwd string
+      The DataDb user's password.
+  -old_datadb_port string
+      The DataDb port to bind to. (default "6379")
+  -old_datadb_type string
+      The type of the DataDb database <redis>
+  -old_datadb_user string
+      The DataDb user to sign in as. (default "cgrates")
+  -old_dbdata_encoding string
+      The encoding used to store object data in strings
+  -old_load_history_size int
+      Limit the number of records in the load history
+  -old_stordb_host string
+      The storDb host to connect to. (default "192.168.100.40")
+  -old_stordb_name string
+      The name/number of the storDb to connect to. (default "cgrates")
+  -old_stordb_passwd string
+      The storDb user's password.
+  -old_stordb_port string
+      The storDb port to bind to. (default "3306")
+  -old_stordb_type string
+      The type of the storDb database <mysql|postgres>
+  -old_stordb_user string
+      The storDb user to sign in as. (default "cgrates")
+  -stats
+      Generates statsistics about given data.(default "false")
+  -stordb_host string
+      The storDb host to connect to. (default "192.168.100.40")
+  -stordb_name string
+      The name/number of the storDb to connect to. (default "cgrates")
+  -stordb_passwd string
+      The storDb user's password.
+  -stordb_port string
+      The storDb port to bind to. (default "3306")
+  -stordb_type string
+      The type of the storDb database <mysql|postgres> (default "mysql")
+  -stordb_user string
+      The storDb user to sign in as. (default "cgrates")
+  -verbose
+      Enable detailed verbose logging output.(default "false")
+  -version
+      Prints the application version.

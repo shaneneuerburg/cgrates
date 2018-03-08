@@ -23,7 +23,7 @@ dedicated benchmark tool,
 asynchronous request processing,
 own transactional cache with majority of handled data loaded on start or reloaded during runtime,
 )
-however not loosing focus of **quality** (over 1300 tests part of the build environment).
+however not losing focus of **quality** (over 1300 tests part of the build environment).
 
 Modular and flexible, CGRateS provides APIs over a variety of simultaneously accessible communication interfaces:
  - **In-process**           : optimal when there is no need to split services over different processes.
@@ -177,7 +177,7 @@ CGRateS is capable of four charging modes
 - Asterisk specific communication over ARI and AMI interfaces
 - Bidirectional (subscribing for events as well as sending commands)
 
-2.10.3. SM-FreeSWITCH
+2.10.3. FreeSWITCHAgent
 ~~~~~~~~~~~~~~~~~~~~~
 - FreeSWITCH specific communication interface via ESL
 - Bidirectional (subscribing for events as well as sending commands)
@@ -251,4 +251,3 @@ Packaged together due to common usage
 -------------------------------------
 - Thresholds are monitoring CDRStatS queues and reacting by calling synchronously or asynchronously a set of predefined actions.
 - Various stats metrics can be monitored (min-/max- ASR, ACD, TCD, ACC, TCC, PDD, DDC)
-

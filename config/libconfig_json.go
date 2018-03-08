@@ -15,11 +15,13 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package config
 
 // General config section
 type GeneralJsonCfg struct {
-	Instance_id          *string
+	Node_id              *string
+	Logger               *string
 	Log_level            *int
 	Http_skip_tls_verify *bool
 	Rounding_decimals    *int
@@ -65,20 +67,29 @@ type DbJsonCfg struct {
 	Db_password       *string
 	Max_open_conns    *int // Used only in case of storDb
 	Max_idle_conns    *int
+	Conn_max_lifetime *int // Used only in case of storDb
 	Load_history_size *int // Used in case of dataDb to limit the length of the loads history
 	Cdrs_indexes      *[]string
+}
+
+// Filters config
+type FilterSJsonCfg struct {
+	Stats_conns *[]*HaPoolJsonCfg
 }
 
 // Rater config section
 type RalsJsonCfg struct {
 	Enabled                     *bool
+	Thresholds_conns            *[]*HaPoolJsonCfg
 	Cdrstats_conns              *[]*HaPoolJsonCfg
-	Historys_conns              *[]*HaPoolJsonCfg
+	Stats_conns                 *[]*HaPoolJsonCfg
 	Pubsubs_conns               *[]*HaPoolJsonCfg
+	Attributes_conns            *[]*HaPoolJsonCfg
 	Aliases_conns               *[]*HaPoolJsonCfg
 	Users_conns                 *[]*HaPoolJsonCfg
 	Rp_subject_prefix_matching  *bool
 	Lcr_subject_prefix_matching *bool
+	Max_computed_usage          *map[string]string
 }
 
 // Scheduler config section
@@ -88,17 +99,19 @@ type SchedulerJsonCfg struct {
 
 // Cdrs config section
 type CdrsJsonCfg struct {
-	Enabled             *bool
-	Extra_fields        *[]string
-	Store_cdrs          *bool
-	Cdr_account_summary *bool
-	Sm_cost_retries     *int
-	Rals_conns          *[]*HaPoolJsonCfg
-	Pubsubs_conns       *[]*HaPoolJsonCfg
-	Users_conns         *[]*HaPoolJsonCfg
-	Aliases_conns       *[]*HaPoolJsonCfg
-	Cdrstats_conns      *[]*HaPoolJsonCfg
-	Online_cdr_exports  *[]string
+	Enabled               *bool
+	Extra_fields          *[]string
+	Store_cdrs            *bool
+	Sessions_cost_retries *int
+	Rals_conns            *[]*HaPoolJsonCfg
+	Pubsubs_conns         *[]*HaPoolJsonCfg
+	Attributes_conns      *[]*HaPoolJsonCfg
+	Users_conns           *[]*HaPoolJsonCfg
+	Aliases_conns         *[]*HaPoolJsonCfg
+	Cdrstats_conns        *[]*HaPoolJsonCfg
+	Thresholds_conns      *[]*HaPoolJsonCfg
+	Stats_conns           *[]*HaPoolJsonCfg
+	Online_cdr_exports    *[]string
 }
 
 type CdrReplicationJsonCfg struct {
@@ -181,41 +194,49 @@ type CdrcJsonCfg struct {
 }
 
 // SM-Generic config section
-type SmGenericJsonCfg struct {
-	Enabled               *bool
-	Listen_bijson         *string
-	Rals_conns            *[]*HaPoolJsonCfg
-	Cdrs_conns            *[]*HaPoolJsonCfg
-	Smg_replication_conns *[]*HaPoolJsonCfg
-	Debit_interval        *string
-	Min_call_duration     *string
-	Max_call_duration     *string
-	Session_ttl           *string
-	Session_ttl_max_delay *string
-	Session_ttl_last_used *string
-	Session_ttl_usage     *string
-	Session_indexes       *[]string
+type SessionSJsonCfg struct {
+	Enabled                   *bool
+	Listen_bijson             *string
+	Rals_conns                *[]*HaPoolJsonCfg
+	Resources_conns           *[]*HaPoolJsonCfg
+	Thresholds_conns          *[]*HaPoolJsonCfg
+	Stats_conns               *[]*HaPoolJsonCfg
+	Suppliers_conns           *[]*HaPoolJsonCfg
+	Cdrs_conns                *[]*HaPoolJsonCfg
+	Session_replication_conns *[]*HaPoolJsonCfg
+	Attributes_conns          *[]*HaPoolJsonCfg
+	Debit_interval            *string
+	Min_call_duration         *string
+	Max_call_duration         *string
+	Session_ttl               *string
+	Session_ttl_max_delay     *string
+	Session_ttl_last_used     *string
+	Session_ttl_usage         *string
+	Session_indexes           *[]string
+	Client_protocol           *float64
 }
 
-// SM-FreeSWITCH config section
-type SmFsJsonCfg struct {
-	Enabled                *bool
-	Rals_conns             *[]*HaPoolJsonCfg
-	Cdrs_conns             *[]*HaPoolJsonCfg
-	Rls_conns              *[]*HaPoolJsonCfg
-	Create_cdr             *bool
-	Extra_fields           *[]string
-	Debit_interval         *string
-	Min_call_duration      *string
-	Max_call_duration      *string
-	Min_dur_low_balance    *string
-	Low_balance_ann_file   *string
+// FreeSWITCHAgent config section
+type FreeswitchAgentJsonCfg struct {
+	Enabled        *bool
+	Sessions_conns *[]*HaPoolJsonCfg
+	Subscribe_park *bool
+	Create_cdr     *bool
+	Extra_fields   *[]string
+	//Min_dur_low_balance    *string
+	//Low_balance_ann_file   *string
 	Empty_balance_context  *string
 	Empty_balance_ann_file *string
-	Subscribe_park         *bool
 	Channel_sync_interval  *string
 	Max_wait_connection    *string
 	Event_socket_conns     *[]*FsConnJsonCfg
+}
+
+// Represents one connection instance towards FreeSWITCH
+type FsConnJsonCfg struct {
+	Address    *string
+	Password   *string
+	Reconnects *int
 }
 
 // Represents one connection instance towards a rater/cdrs server
@@ -233,55 +254,28 @@ type AstConnJsonCfg struct {
 	Reconnects       *int
 }
 
-type SMAsteriskJsonCfg struct {
-	Enabled          *bool
-	Sm_generic_conns *[]*HaPoolJsonCfg // Connections towards generic SMf
-	Create_cdr       *bool
-	Asterisk_conns   *[]*AstConnJsonCfg
+type AsteriskAgentJsonCfg struct {
+	Enabled        *bool
+	Sessions_conns *[]*HaPoolJsonCfg
+	Create_cdr     *bool
+	Asterisk_conns *[]*AstConnJsonCfg
 }
 
 type CacheParamJsonCfg struct {
-	Limit    *int
-	Ttl      *string
-	Precache *bool
+	Limit      *int
+	Ttl        *string
+	Static_ttl *bool
+	Precache   *bool
 }
 
-type CacheJsonCfg struct {
-	Destinations         *CacheParamJsonCfg
-	Reverse_destinations *CacheParamJsonCfg
-	Rating_plans         *CacheParamJsonCfg
-	Rating_profiles      *CacheParamJsonCfg
-	Lcr                  *CacheParamJsonCfg
-	Cdr_stats            *CacheParamJsonCfg
-	Actions              *CacheParamJsonCfg
-	Action_plans         *CacheParamJsonCfg
-	Account_action_plans *CacheParamJsonCfg
-	Action_triggers      *CacheParamJsonCfg
-	Shared_groups        *CacheParamJsonCfg
-	Aliases              *CacheParamJsonCfg
-	Reverse_aliases      *CacheParamJsonCfg
-	Derived_chargers     *CacheParamJsonCfg
-	Resource_limits      *CacheParamJsonCfg
-}
-
-// Represents one connection instance towards FreeSWITCH
-type FsConnJsonCfg struct {
-	Address    *string
-	Password   *string
-	Reconnects *int
-}
+type CacheJsonCfg map[string]*CacheParamJsonCfg
 
 // SM-Kamailio config section
-type SmKamJsonCfg struct {
-	Enabled           *bool
-	Rals_conns        *[]*HaPoolJsonCfg
-	Cdrs_conns        *[]*HaPoolJsonCfg
-	Rls_conns         *[]*HaPoolJsonCfg
-	Create_cdr        *bool
-	Debit_interval    *string
-	Min_call_duration *string
-	Max_call_duration *string
-	Evapi_conns       *[]*KamConnJsonCfg
+type KamAgentJsonCfg struct {
+	Enabled        *bool
+	Sessions_conns *[]*HaPoolJsonCfg
+	Create_cdr     *bool
+	Evapi_conns    *[]*KamConnJsonCfg
 }
 
 // Represents one connection instance towards Kamailio
@@ -315,7 +309,7 @@ type DiameterAgentJsonCfg struct {
 	Enabled              *bool             // enables the diameter agent: <true|false>
 	Listen               *string           // address where to listen for diameter requests <x.y.z.y:1234>
 	Dictionaries_dir     *string           // path towards additional dictionaries
-	Sm_generic_conns     *[]*HaPoolJsonCfg // Connections towards generic SM
+	Sessions_conns       *[]*HaPoolJsonCfg // Connections towards generic SM
 	Pubsubs_conns        *[]*HaPoolJsonCfg // connection towards pubsubs
 	Create_cdr           *bool
 	Cdr_requires_session *bool
@@ -349,7 +343,7 @@ type RadiusAgentJsonCfg struct {
 	Listen_acct          *string
 	Client_secrets       *map[string]string
 	Client_dictionaries  *map[string]string
-	Sm_generic_conns     *[]*HaPoolJsonCfg
+	Sessions_conns       *[]*HaPoolJsonCfg
 	Create_cdr           *bool
 	Cdr_requires_session *bool
 	Timezone             *string
@@ -390,11 +384,47 @@ type UserServJsonCfg struct {
 	Indexes *[]string
 }
 
+// Attribute service config section
+type AttributeSJsonCfg struct {
+	Enabled               *bool
+	String_indexed_fields *[]string
+	Prefix_indexed_fields *[]string
+}
+
 // ResourceLimiter service config section
-type ResourceLimiterServJsonCfg struct {
-	Enabled             *bool
-	Cdrstats_conns      *[]*HaPoolJsonCfg
-	Cache_dump_interval *string
+type ResourceSJsonCfg struct {
+	Enabled               *bool
+	Thresholds_conns      *[]*HaPoolJsonCfg
+	Store_interval        *string
+	String_indexed_fields *[]string
+	Prefix_indexed_fields *[]string
+}
+
+// Stat service config section
+type StatServJsonCfg struct {
+	Enabled               *bool
+	Store_interval        *string
+	Thresholds_conns      *[]*HaPoolJsonCfg
+	String_indexed_fields *[]string
+	Prefix_indexed_fields *[]string
+}
+
+// Threshold service config section
+type ThresholdSJsonCfg struct {
+	Enabled               *bool
+	Store_interval        *string
+	String_indexed_fields *[]string
+	Prefix_indexed_fields *[]string
+}
+
+// Supplier service config section
+type SupplierSJsonCfg struct {
+	Enabled               *bool
+	String_indexed_fields *[]string
+	Prefix_indexed_fields *[]string
+	Rals_conns            *[]*HaPoolJsonCfg
+	Resources_conns       *[]*HaPoolJsonCfg
+	Stats_conns           *[]*HaPoolJsonCfg
 }
 
 // Mailer config section

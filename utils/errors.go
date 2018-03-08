@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package utils
 
 import (
@@ -23,6 +24,7 @@ import (
 )
 
 var (
+	ErrNoMoreData              = errors.New("NO_MORE_DATA")
 	ErrNotImplemented          = errors.New("NOT_IMPLEMENTED")
 	ErrNotFound                = errors.New("NOT_FOUND")
 	ErrTimedOut                = errors.New("TIMED_OUT")
@@ -42,7 +44,11 @@ var (
 	ErrInsufficientCredit      = errors.New("INSUFFICIENT_CREDIT")
 	ErrNotConvertible          = errors.New("NOT_CONVERTIBLE")
 	ErrResourceUnavailable     = errors.New("RESOURCE_UNAVAILABLE")
+	ErrResourceUnauthorized    = errors.New("RESOURCE_UNAUTHORIZED")
 	ErrNoActiveSession         = errors.New("NO_ACTIVE_SESSION")
+	ErrPartiallyExecuted       = errors.New("PARTIALLY_EXECUTED")
+	ErrMaxUsageExceeded        = errors.New("MAX_USAGE_EXCEEDED")
+	ErrUnallocatedResource     = errors.New("UNALLOCATED_RESOURCE")
 )
 
 // NewCGRError initialises a new CGRError
@@ -82,23 +88,51 @@ func (err *CGRError) ActivateLongError() {
 }
 
 func NewErrMandatoryIeMissing(fields ...string) error {
-	return fmt.Errorf("MANDATORY_IE_MISSING:%v", fields)
+	return fmt.Errorf("MANDATORY_IE_MISSING: %v", fields)
 }
 
 func NewErrServerError(err error) error {
 	return fmt.Errorf("SERVER_ERROR: %s", err)
 }
 
+func NewErrServiceNotOperational(serv string) error {
+	return fmt.Errorf("SERVICE_NOT_OPERATIONAL: %s", serv)
+}
+
+func NewErrNotConnected(serv string) error {
+	return fmt.Errorf("NOT_CONNECTED: %s", serv)
+}
+
+func NewErrRALs(err error) error {
+	return fmt.Errorf("RALS_ERROR: %s", err)
+}
+
+func NewErrResourceS(err error) error {
+	return fmt.Errorf("RESOURCES_ERROR: %s", err)
+}
+
+func NewErrSupplierS(err error) error {
+	return fmt.Errorf("SUPPLIERS_ERROR: %s", err)
+}
+
+func NewErrAttributeS(err error) error {
+	return fmt.Errorf("ATTRIBUTES_ERROR: %s", err)
+}
+
 // Centralized returns for APIs
-func APIErrorHandler(err error) error {
-	cgrErr, ok := err.(*CGRError)
+func APIErrorHandler(errIn error) (err error) {
+	cgrErr, ok := errIn.(*CGRError)
 	if !ok {
-		if err == ErrNotFound {
-			return err
-		} else {
-			return NewErrServerError(err)
+		err = errIn
+		if err != ErrNotFound {
+			err = NewErrServerError(err)
 		}
+		return
 	}
 	cgrErr.ActivateAPIError()
 	return cgrErr
+}
+
+func NewErrStringCast(valIface interface{}) error {
+	return fmt.Errorf("cannot cast value: %v to string", valIface)
 }

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -30,7 +31,7 @@ func NewCgrCdrFromHttpReq(req *http.Request, timezone string) (CgrCdr, error) {
 		}
 	}
 	cgrCdr := make(CgrCdr)
-	cgrCdr[utils.CDRSOURCE] = req.RemoteAddr
+	cgrCdr[utils.Source] = req.RemoteAddr
 	for k, vals := range req.Form {
 		cgrCdr[k] = vals[0] // We only support the first value for now, if more are provided it is considered remote's fault
 	}
@@ -43,8 +44,8 @@ func (cgrCdr CgrCdr) getCGRID(timezone string) string {
 	if CGRID, hasIt := cgrCdr[utils.CGRID]; hasIt {
 		return CGRID
 	}
-	setupTime, _ := utils.ParseTimeDetectLayout(cgrCdr[utils.SETUP_TIME], timezone)
-	return utils.Sha1(cgrCdr[utils.ACCID], setupTime.UTC().String())
+	setupTime, _ := utils.ParseTimeDetectLayout(cgrCdr[utils.SetupTime], timezone)
+	return utils.Sha1(cgrCdr[utils.OriginID], setupTime.UTC().String())
 }
 
 func (cgrCdr CgrCdr) getExtraFields() map[string]string {
@@ -57,26 +58,22 @@ func (cgrCdr CgrCdr) getExtraFields() map[string]string {
 	return extraFields
 }
 
-func (cgrCdr CgrCdr) AsStoredCdr(timezone string) *CDR {
+func (cgrCdr CgrCdr) AsCDR(timezone string) *CDR {
 	storCdr := new(CDR)
 	storCdr.CGRID = cgrCdr.getCGRID(timezone)
 	storCdr.ToR = cgrCdr[utils.TOR]
-	storCdr.OriginID = cgrCdr[utils.ACCID]
-	storCdr.OriginHost = cgrCdr[utils.CDRHOST]
-	storCdr.Source = cgrCdr[utils.CDRSOURCE]
-	storCdr.RequestType = cgrCdr[utils.REQTYPE]
-	storCdr.Direction = utils.OUT
-	storCdr.Tenant = cgrCdr[utils.TENANT]
-	storCdr.Category = cgrCdr[utils.CATEGORY]
-	storCdr.Account = cgrCdr[utils.ACCOUNT]
-	storCdr.Subject = cgrCdr[utils.SUBJECT]
-	storCdr.Destination = cgrCdr[utils.DESTINATION]
-	storCdr.SetupTime, _ = utils.ParseTimeDetectLayout(cgrCdr[utils.SETUP_TIME], timezone) // Not interested to process errors, should do them if necessary in a previous step
-	storCdr.PDD, _ = utils.ParseDurationWithSecs(cgrCdr[utils.PDD])
-	storCdr.AnswerTime, _ = utils.ParseTimeDetectLayout(cgrCdr[utils.ANSWER_TIME], timezone)
-	storCdr.Usage, _ = utils.ParseDurationWithSecs(cgrCdr[utils.USAGE])
-	storCdr.Supplier = cgrCdr[utils.SUPPLIER]
-	storCdr.DisconnectCause = cgrCdr[utils.DISCONNECT_CAUSE]
+	storCdr.OriginID = cgrCdr[utils.OriginID]
+	storCdr.OriginHost = cgrCdr[utils.OriginHost]
+	storCdr.Source = cgrCdr[utils.Source]
+	storCdr.RequestType = cgrCdr[utils.RequestType]
+	storCdr.Tenant = cgrCdr[utils.Tenant]
+	storCdr.Category = cgrCdr[utils.Category]
+	storCdr.Account = cgrCdr[utils.Account]
+	storCdr.Subject = cgrCdr[utils.Subject]
+	storCdr.Destination = cgrCdr[utils.Destination]
+	storCdr.SetupTime, _ = utils.ParseTimeDetectLayout(cgrCdr[utils.SetupTime], timezone) // Not interested to process errors, should do them if necessary in a previous step
+	storCdr.AnswerTime, _ = utils.ParseTimeDetectLayout(cgrCdr[utils.AnswerTime], timezone)
+	storCdr.Usage, _ = utils.ParseDurationWithNanosecs(cgrCdr[utils.Usage])
 	storCdr.ExtraFields = cgrCdr.getExtraFields()
 	storCdr.Cost = -1
 	if costStr, hasIt := cgrCdr[utils.COST]; hasIt {

@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/utils"
 )
 
@@ -59,20 +58,20 @@ WEEKENDS,*any,*any,*any,6;7,00:00:00
 ONE_TIME_RUN,2012,,,,*asap
 `
 	rates = `
-R1,0,0.2,60,1,0
-R2,0,0.1,60s,1s,0
-R3,0,0.05,60s,1s,0
-R4,1,1,1s,1s,0
-R5,0,0.5,1s,1s,0
-LANDLINE_OFFPEAK,0,1,1,60,0
-LANDLINE_OFFPEAK,0,1,1,1,60
+R1,0,0.2,60s,1s,0s
+R2,0,0.1,60s,1s,0s
+R3,0,0.05,60s,1s,0s
+R4,1,1,1s,1s,0s
+R5,0,0.5,1s,1s,0s
+LANDLINE_OFFPEAK,0,1,1s,60s,0s
+LANDLINE_OFFPEAK,0,1,1s,1s,60s
 GBP_71,0.000000,5.55555,1s,1s,0s
 GBP_72,0.000000,7.77777,1s,1s,0s
-GBP_70,0.000000,1,1,1,0
+GBP_70,0.000000,1,1s,1s,0s
 RT_UK_Mobile_BIG5_PKG,0.01,0,20s,20s,0s
 RT_UK_Mobile_BIG5,0.01,0.10,1s,1s,0s
-R_URG,0,0,1,1,0
-MX,0,1,1s,1s,0
+R_URG,0,0,1s,1s,0s
+MX,0,1,1s,1s,0s
 DY,0.15,0.05,60s,1s,0s
 CF,1.12,0,1s,1s,0s
 `
@@ -164,10 +163,10 @@ SG3,*any,*lowest,
 `
 	actions = `
 MINI,*topup_reset,,,,*monetary,*out,,,,,*unlimited,,10,10,false,false,10
-MINI,*topup,,,,*voice,*out,,NAT,test,,*unlimited,,100,10,false,false,10
+MINI,*topup,,,,*voice,*out,,NAT,test,,*unlimited,,100s,10,false,false,10
 SHARED,*topup,,,,*monetary,*out,,,,SG1,*unlimited,,100,10,false,false,10
 TOPUP10_AC,*topup_reset,,,,*monetary,*out,,*any,,,*unlimited,,1,10,false,false,10
-TOPUP10_AC1,*topup_reset,,,,*voice,*out,,DST_UK_Mobile_BIG5,discounted_minutes,,*unlimited,,40,10,false,false,10
+TOPUP10_AC1,*topup_reset,,,,*voice,*out,,DST_UK_Mobile_BIG5,discounted_minutes,,*unlimited,,40s,10,false,false,10
 SE0,*topup_reset,,,,*monetary,*out,,,,SG2,*unlimited,,0,10,false,false,10
 SE10,*topup_reset,,,,*monetary,*out,,,,SG2,*unlimited,,10,5,false,false,10
 SE10,*topup,,,,*monetary,*out,,,,,*unlimited,,10,10,false,false,10
@@ -180,8 +179,8 @@ BLOCK,*topup,,,bfree,*monetary,*out,,,,,*unlimited,,20,10,false,false,10
 BLOCK_EMPTY,*topup,,,bblocker,*monetary,*out,,NAT,,,*unlimited,,0,20,true,false,20
 BLOCK_EMPTY,*topup,,,bfree,*monetary,*out,,,,,*unlimited,,20,10,false,false,10
 FILTER,*topup,,"{""*and"":[{""Value"":{""*lt"":0}},{""Id"":{""*eq"":""*default""}}]}",bfree,*monetary,*out,,,,,*unlimited,,20,10,false,false,10
-EXP,*topup,,,,*voice,*out,,,,,*monthly,*any,300,10,false,false,10
-NOEXP,*topup,,,,*voice,*out,,,,,*unlimited,*any,50,10,false,false,10
+EXP,*topup,,,,*voice,*out,,,,,*monthly,*any,300s,10,false,false,10
+NOEXP,*topup,,,,*voice,*out,,,,,*unlimited,*any,50s,10,false,false,10
 VF,*debit,,,,*monetary,*out,,,,,*unlimited,*any,"{""Method"":""*incremental"",""Params"":{""Units"":10, ""Interval"":""month"", ""Increment"":""day""}}",10,false,false,10
 TOPUP_RST_GNR_1000,*topup_reset,"{""*voice"": 60.0,""*data"":1024.0,""*sms"":1.0}",,,*generic,*out,,*any,,,*unlimited,,1000,20,false,false,10
 `
@@ -265,21 +264,53 @@ cgrates.org,mas,true,another,value,10
 *out,cgrates.org,call,remo,remo,*any,*rating,Subject,remo,minu,10
 *out,cgrates.org,call,remo,remo,*any,*rating,Account,remo,minu,10
 `
+	resProfiles = `
+#Tenant[0],Id[1],FilterIDs[2],ActivationInterval[3],TTL[4],Limit[5],AllocationMessage[6],Blocker[7],Stored[8],Weight[9],Thresholds[10]
+cgrates.org,ResGroup21,FLTR_1,2014-07-29T15:00:00Z,1s,2,call,true,true,10,
+cgrates.org,ResGroup22,FLTR_ACNT_dan,2014-07-29T15:00:00Z,3600s,2,premium_call,true,true,10,
+`
+	stats = `
+#Tenant[0],Id[1],FilterIDs[2],ActivationInterval[3],QueueLength[4],TTL[5],Metrics[6],Blocker[7],Stored[8],Weight[9],MinItems[10],Thresholds[11]
+cgrates.org,Stats1,FLTR_1,2014-07-29T15:00:00Z,100,1s,*asr;*acc;*tcc;*acd;*tcd;*pdd,value,true,true,20,2,THRESH1;THRESH2
+cgrates.org,Stats2,FLTR_1,2014-07-29T15:00:00Z,100,1s,*asr;*acc;*tcc;*acd;*tcd;*pdd,value,true,true,20,2,THRESH1;THRESH2
+cgrates.org,Stats3,FLTR_1,2014-07-29T15:00:00Z,100,1s,*asr;*acc;*tcc;*acd;*tcd;*pdd,,true,true,20,2,THRESH1;THRESH2
+`
 
-	resLimits = `
-#Id,FilterType,FilterFieldName,FilterFieldValues,ActivationInterval,TTL,Limit,AllocationMessage,Weight,ActionTriggers
-ResGroup21,*string,HdrAccount,1001;1002,2014-07-29T15:00:00Z,1s,2,call,10,
-ResGroup21,*string_prefix,HdrDestination,10;20,,,,,,
-ResGroup21,*rsr_fields,,HdrSubject(~^1.*1$);HdrDestination(1002),,,,,,
-ResGroup22,*destinations,HdrDestination,DST_FS,2014-07-29T15:00:00Z,3600s,2,premium_call,10,
+	thresholds = `
+#Tenant[0],Id[1],FilterIDs[2],ActivationInterval[3],Recurrent[4],MinHits[5],MinSleep[6],Blocker[7],Weight[8],ActionIDs[9],Async[10]
+cgrates.org,Threshold1,FLTR_1;FLTR_ACNT_dan,2014-07-29T15:00:00Z,true,10,1s,true,10,THRESH1;THRESH2,true
+`
+
+	filters = `
+#Tenant[0],ID[1],FilterType[2],FilterFieldName[3],FilterFieldValues[4],ActivationInterval[5]
+cgrates.org,FLTR_1,*string,Account,1001;1002,2014-07-29T15:00:00Z
+cgrates.org,FLTR_1,*prefix,Destination,10;20,2014-07-29T15:00:00Z
+cgrates.org,FLTR_1,*rsr,,Subject(~^1.*1$);Destination(1002),
+cgrates.org,FLTR_ACNT_dan,*string,Account,dan,2014-07-29T15:00:00Z
+cgrates.org,FLTR_DST_DE,*destinations,Destination,DST_DE,2014-07-29T15:00:00Z
+cgrates.org,FLTR_DST_NL,*destinations,Destination,DST_NL,2014-07-29T15:00:00Z
+`
+	sppProfiles = `
+#Tenant,ID,FilterIDs,ActivationInterval,Sorting,SortingParameters,SupplierID,SupplierFilterIDs,SupplierAccountIDs,SupplierRatingPlanIDs,SupplierResourceIDs,SupplierStatIDs,SupplierWeight,SupplierBlocker,SupplierParameters,Weight
+cgrates.org,SPP_1,FLTR_ACNT_dan,2014-07-29T15:00:00Z,*lowest_cost,,supplier1,FLTR_ACNT_dan,Account1;Account1_1,RPL_1,ResGroup1,Stat1,10,true,param1,20
+cgrates.org,SPP_1,,,,,supplier1,,,RPL_2,ResGroup2,,10,,,
+cgrates.org,SPP_1,,,,,supplier1,FLTR_DST_DE,Account2,RPL_3,ResGroup3,Stat2,10,,,
+cgrates.org,SPP_1,,,,,supplier1,,,,ResGroup4,Stat3,10,,,
+`
+	attributeProfiles = `
+#Tenant,ID,Contexts,FilterIDs,ActivationInterval,FieldName,Initial,Substitute,Append,Weight
+cgrates.org,ALS1,con1,FLTR_1,2014-07-29T15:00:00Z,Field1,Initial1,Sub1,true,20
+cgrates.org,ALS1,con2;con3,,,Field2,Initial2,Sub2,false,
 `
 )
 
 var csvr *TpReader
 
 func init() {
-	csvr = NewTpReader(dataStorage, NewStringCSVStorage(',', destinations, timings, rates, destinationRates, ratingPlans, ratingProfiles,
-		sharedGroups, lcrs, actions, actionPlans, actionTriggers, accountActions, derivedCharges, cdrStats, users, aliases, resLimits), testTPID, "")
+	csvr = NewTpReader(dm.dataDB, NewStringCSVStorage(',', destinations, timings, rates, destinationRates, ratingPlans, ratingProfiles,
+		sharedGroups, lcrs, actions, actionPlans, actionTriggers, accountActions, derivedCharges,
+		cdrStats, users, aliases, resProfiles, stats, thresholds, filters, sppProfiles, attributeProfiles), testTPID, "")
+
 	if err := csvr.LoadDestinations(); err != nil {
 		log.Print("error in LoadDestinations:", err)
 	}
@@ -328,12 +359,27 @@ func init() {
 	if err := csvr.LoadAliases(); err != nil {
 		log.Print("error in LoadAliases:", err)
 	}
-	if err := csvr.LoadResourceLimits(); err != nil {
+	if err := csvr.LoadFilters(); err != nil {
+		log.Print("error in LoadFilter:", err)
+	}
+	if err := csvr.LoadResourceProfiles(); err != nil {
+		log.Print("error in LoadResourceProfiles:", err)
+	}
+	if err := csvr.LoadStats(); err != nil {
+		log.Print("error in LoadStats:", err)
+	}
+	if err := csvr.LoadThresholds(); err != nil {
+		log.Print("error in LoadThresholds:", err)
+	}
+	if err := csvr.LoadSupplierProfiles(); err != nil {
+		log.Print("error in LoadSupplierProfiles:", err)
+	}
+	if err := csvr.LoadAttributeProfiles(); err != nil {
+		log.Print("error in LoadAttributeProfiles:", err)
 	}
 	csvr.WriteToDatabase(false, false, false)
-	cache.Flush()
-	dataStorage.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	dataStorage.LoadAccountingCache(nil, nil, nil)
+	Cache.Clear(nil)
+	//dm.LoadDataDBCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func TestLoadDestinations(t *testing.T) {
@@ -461,7 +507,7 @@ func TestLoadRates(t *testing.T) {
 		t.Error("Failed to load rates: ", len(csvr.rates))
 	}
 	rate := csvr.rates["R1"].RateSlots[0]
-	expctRs, err := utils.NewRateSlot(0, 0.2, "60", "1", "0")
+	expctRs, err := utils.NewRateSlot(0, 0.2, "60s", "1s", "0s")
 	if err != nil {
 		t.Error("Error loading rate: ", rate, err.Error())
 	} else if !reflect.DeepEqual(rate, expctRs) ||
@@ -471,16 +517,16 @@ func TestLoadRates(t *testing.T) {
 		t.Error("Error loading rate: ", rate, expctRs)
 	}
 	rate = csvr.rates["R2"].RateSlots[0]
-	if expctRs, err = utils.NewRateSlot(0, 0.1, "60s", "1s", "0"); err != nil {
+	if expctRs, err = utils.NewRateSlot(0, 0.1, "60s", "1s", "0s"); err != nil {
 		t.Error("Error loading rate: ", rate, err.Error())
 	} else if !reflect.DeepEqual(rate, expctRs) ||
 		rate.RateUnitDuration() != expctRs.RateUnitDuration() ||
 		rate.RateIncrementDuration() != expctRs.RateIncrementDuration() ||
 		rate.GroupIntervalStartDuration() != expctRs.GroupIntervalStartDuration() {
-		t.Error("Error loading rate: ", rate)
+		t.Errorf("Expecting: %+v, received: %+v", expctRs, rate)
 	}
 	rate = csvr.rates["R3"].RateSlots[0]
-	if expctRs, err = utils.NewRateSlot(0, 0.05, "60s", "1s", "0"); err != nil {
+	if expctRs, err = utils.NewRateSlot(0, 0.05, "60s", "1s", "0s"); err != nil {
 		t.Error("Error loading rate: ", rate, err.Error())
 	} else if !reflect.DeepEqual(rate, expctRs) ||
 		rate.RateUnitDuration() != expctRs.RateUnitDuration() ||
@@ -489,7 +535,7 @@ func TestLoadRates(t *testing.T) {
 		t.Error("Error loading rate: ", rate)
 	}
 	rate = csvr.rates["R4"].RateSlots[0]
-	if expctRs, err = utils.NewRateSlot(1, 1.0, "1s", "1s", "0"); err != nil {
+	if expctRs, err = utils.NewRateSlot(1, 1.0, "1s", "1s", "0s"); err != nil {
 		t.Error("Error loading rate: ", rate, err.Error())
 	} else if !reflect.DeepEqual(rate, expctRs) ||
 		rate.RateUnitDuration() != expctRs.RateUnitDuration() ||
@@ -498,7 +544,7 @@ func TestLoadRates(t *testing.T) {
 		t.Error("Error loading rate: ", rate)
 	}
 	rate = csvr.rates["R5"].RateSlots[0]
-	if expctRs, err = utils.NewRateSlot(0, 0.5, "1s", "1s", "0"); err != nil {
+	if expctRs, err = utils.NewRateSlot(0, 0.5, "1s", "1s", "0s"); err != nil {
 		t.Error("Error loading rate: ", rate, err.Error())
 	} else if !reflect.DeepEqual(rate, expctRs) ||
 		rate.RateUnitDuration() != expctRs.RateUnitDuration() ||
@@ -507,7 +553,7 @@ func TestLoadRates(t *testing.T) {
 		t.Error("Error loading rate: ", rate)
 	}
 	rate = csvr.rates["LANDLINE_OFFPEAK"].RateSlots[0]
-	if expctRs, err = utils.NewRateSlot(0, 1, "1", "60", "0"); err != nil {
+	if expctRs, err = utils.NewRateSlot(0, 1, "1s", "60s", "0s"); err != nil {
 		t.Error("Error loading rate: ", rate, err.Error())
 	} else if !reflect.DeepEqual(rate, expctRs) ||
 		rate.RateUnitDuration() != expctRs.RateUnitDuration() ||
@@ -516,7 +562,7 @@ func TestLoadRates(t *testing.T) {
 		t.Error("Error loading rate: ", rate)
 	}
 	rate = csvr.rates["LANDLINE_OFFPEAK"].RateSlots[1]
-	if expctRs, err = utils.NewRateSlot(0, 1, "1", "1", "60"); err != nil {
+	if expctRs, err = utils.NewRateSlot(0, 1, "1s", "1s", "60s"); err != nil {
 		t.Error("Error loading rate: ", rate, err.Error())
 	} else if !reflect.DeepEqual(rate, expctRs) ||
 		rate.RateUnitDuration() != expctRs.RateUnitDuration() ||
@@ -907,7 +953,7 @@ func TestLoadActions(t *testing.T) {
 				Type:           utils.StringPointer(utils.VOICE),
 				Uuid:           as1[1].Balance.Uuid,
 				Directions:     utils.StringMapPointer(utils.NewStringMap(utils.OUT)),
-				Value:          &utils.ValueFormula{Static: 100},
+				Value:          &utils.ValueFormula{Static: 100 * float64(time.Second)},
 				Weight:         utils.Float64Pointer(10),
 				RatingSubject:  utils.StringPointer("test"),
 				DestinationIDs: utils.StringMapPointer(utils.NewStringMap("NAT")),
@@ -1217,12 +1263,12 @@ func TestLoadAccountActions(t *testing.T) {
 		t.Errorf("Error loading account action: %+v", utils.ToIJSON(aa.UnitCounters[utils.VOICE][0].Counters[0].Filter))
 	}
 	// test that it does not overwrite balances
-	existing, err := dataStorage.GetAccount(aa.ID)
+	existing, err := dm.DataDB().GetAccount(aa.ID)
 	if err != nil || len(existing.BalanceMap) != 2 {
 		t.Errorf("The account was not set before load: %+v", existing)
 	}
-	dataStorage.SetAccount(aa)
-	existing, err = dataStorage.GetAccount(aa.ID)
+	dm.DataDB().SetAccount(aa)
+	existing, err = dm.DataDB().GetAccount(aa.ID)
 	if err != nil || len(existing.BalanceMap) != 2 {
 		t.Errorf("The set account altered the balances: %+v", existing)
 	}
@@ -1373,16 +1419,13 @@ func TestLoadReverseAliases(t *testing.T) {
 	}
 }
 
-func TestLoadResourceLimits(t *testing.T) {
-	eResLimits := map[string]*utils.TPResourceLimit{
-		"ResGroup21": &utils.TPResourceLimit{
-			TPid: testTPID,
-			ID:   "ResGroup21",
-			Filters: []*utils.TPRequestFilter{
-				&utils.TPRequestFilter{Type: MetaString, FieldName: "HdrAccount", Values: []string{"1001", "1002"}},
-				&utils.TPRequestFilter{Type: MetaStringPrefix, FieldName: "HdrDestination", Values: []string{"10", "20"}},
-				&utils.TPRequestFilter{Type: MetaRSRFields, Values: []string{"HdrSubject(~^1.*1$)", "HdrDestination(1002)"}},
-			},
+func TestLoadResourceProfiles(t *testing.T) {
+	eResProfiles := map[utils.TenantID]*utils.TPResource{
+		utils.TenantID{Tenant: "cgrates.org", ID: "ResGroup21"}: &utils.TPResource{
+			TPid:      testTPID,
+			Tenant:    "cgrates.org",
+			ID:        "ResGroup21",
+			FilterIDs: []string{"FLTR_1"},
 			ActivationInterval: &utils.TPActivationInterval{
 				ActivationTime: "2014-07-29T15:00:00Z",
 			},
@@ -1390,26 +1433,332 @@ func TestLoadResourceLimits(t *testing.T) {
 			AllocationMessage: "call",
 			Weight:            10,
 			Limit:             "2",
+			Blocker:           true,
+			Stored:            true,
 		},
-		"ResGroup22": &utils.TPResourceLimit{
-			TPid: testTPID,
-			ID:   "ResGroup22",
-			Filters: []*utils.TPRequestFilter{
-				&utils.TPRequestFilter{Type: MetaDestinations, FieldName: "HdrDestination", Values: []string{"DST_FS"}},
-			},
+		utils.TenantID{Tenant: "cgrates.org", ID: "ResGroup22"}: &utils.TPResource{
+			TPid:      testTPID,
+			Tenant:    "cgrates.org",
+			ID:        "ResGroup22",
+			FilterIDs: []string{"FLTR_ACNT_dan"},
 			ActivationInterval: &utils.TPActivationInterval{
 				ActivationTime: "2014-07-29T15:00:00Z",
 			},
 			UsageTTL:          "3600s",
 			AllocationMessage: "premium_call",
+			Blocker:           true,
+			Stored:            true,
 			Weight:            10,
 			Limit:             "2",
 		},
 	}
-	if len(csvr.resLimits) != len(eResLimits) {
-		t.Error("Failed to load resourcelimits: ", len(csvr.resLimits))
-	} else if !reflect.DeepEqual(eResLimits["ResGroup22"], csvr.resLimits["ResGroup22"]) {
-		t.Errorf("Expecting: %+v, received: %+v", eResLimits["ResGroup22"], csvr.resLimits["ResGroup22"])
+	resKey := utils.TenantID{Tenant: "cgrates.org", ID: "ResGroup21"}
+	if len(csvr.resProfiles) != len(eResProfiles) {
+		t.Errorf("Failed to load ResourceProfiles: %s", utils.ToIJSON(csvr.resProfiles))
+	} else if !reflect.DeepEqual(eResProfiles[resKey], csvr.resProfiles[resKey]) {
+		t.Errorf("Expecting: %+v, received: %+v", eResProfiles[resKey], csvr.resProfiles[resKey])
+	}
+}
+
+/*
+func TestLoadStatProfiles(t *testing.T) {
+	eStats := map[utils.TenantID]*utils.TPStats{
+		utils.TenantID{Tenant: "cgrates.org", ID: "Stats1"}: &utils.TPStats{
+			Tenant:    "cgrates.org",
+			TPid:      testTPID,
+			ID:        "Stats1",
+			FilterIDs: []string{"FLTR_1"},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+			QueueLength: 100,
+			TTL:         "1s",
+			Metrics:     []string{"*asr", "*acc", "*tcc", "*acd", "*tcd", "*pdd"},
+			Thresholds:  []string{"THRESH1", "THRESH2"},
+			Blocker:     true,
+			Stored:      true,
+			Weight:      20,
+			MinItems:    2,
+		},
+		utils.TenantID{Tenant: "cgrates.org", ID: "Stats2"}: &utils.TPStats{
+			Tenant:    "cgrates.org",
+			TPid:      testTPID,
+			ID:        "Stats2",
+			FilterIDs: []string{"FLTR_1"},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+			QueueLength: 100,
+			TTL:         "1s",
+			Metrics:     []string{"*asr", "*acc", "*tcc", "*acd", "*tcd", "*pdd"},
+			Thresholds:  []string{"THRESH1", "THRESH2"},
+			Blocker:     true,
+			Stored:      true,
+			Weight:      20,
+			MinItems:    2,
+		},
+		utils.TenantID{Tenant: "cgrates.org", ID: "Stats3"}: &utils.TPStats{
+			Tenant:    "cgrates.org",
+			TPid:      testTPID,
+			ID:        "Stats3",
+			FilterIDs: []string{"FLTR_1"},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+			QueueLength: 100,
+			TTL:         "1s",
+			Metrics:     []string{"*asr", "*acc", "*tcc", "*acd", "*tcd", "*pdd"},
+			Thresholds:  []string{"THRESH1", "THRESH2"},
+			Blocker:     true,
+			Stored:      true,
+			Weight:      20,
+			MinItems:    2,
+		},
+	}
+	stKey := utils.TenantID{Tenant: "cgrates.org", ID: "Stats1"}
+	if len(csvr.sqProfiles) != len(eStats) {
+		t.Errorf("Failed to load StatQueueProfiles: %s", len(csvr.sqProfiles))
+	} else if !reflect.DeepEqual(eStats[stKey], csvr.sqProfiles[stKey]) {
+		t.Errorf("Expecting: %+v, received: %+v", eStats[stKey], csvr.sqProfiles[stKey])
+	}
+}
+*/
+func TestLoadThresholdProfiles(t *testing.T) {
+	eThresholds := map[utils.TenantID]*utils.TPThreshold{
+		utils.TenantID{Tenant: "cgrates.org", ID: "Threshold1"}: &utils.TPThreshold{
+			TPid:      testTPID,
+			Tenant:    "cgrates.org",
+			ID:        "Threshold1",
+			FilterIDs: []string{"FLTR_1", "FLTR_ACNT_dan"},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+			Recurrent: true,
+			MinHits:   10,
+			MinSleep:  "1s",
+			Blocker:   true,
+			Weight:    10,
+			ActionIDs: []string{"THRESH1", "THRESH2"},
+			Async:     true,
+		},
+	}
+	thkey := utils.TenantID{Tenant: "cgrates.org", ID: "Threshold1"}
+	if len(csvr.thProfiles) != len(eThresholds) {
+		t.Errorf("Failed to load ThresholdProfiles: %s", utils.ToIJSON(csvr.thProfiles))
+	} else if !reflect.DeepEqual(eThresholds[thkey], csvr.thProfiles[thkey]) {
+		t.Errorf("Expecting: %+v, received: %+v", eThresholds[thkey], csvr.thProfiles[thkey])
+	}
+}
+
+func TestLoadFilters(t *testing.T) {
+	eFilters := map[utils.TenantID]*utils.TPFilterProfile{
+		utils.TenantID{Tenant: "cgrates.org", ID: "FLTR_1"}: &utils.TPFilterProfile{
+			TPid:   testTPID,
+			Tenant: "cgrates.org",
+			ID:     "FLTR_1",
+			Filters: []*utils.TPFilter{
+				&utils.TPFilter{
+					FieldName: "Account",
+					Type:      "*string",
+					Values:    []string{"1001", "1002"},
+				},
+				&utils.TPFilter{
+					FieldName: "Destination",
+					Type:      MetaPrefix,
+					Values:    []string{"10", "20"},
+				},
+				&utils.TPFilter{
+					FieldName: "",
+					Type:      "*rsr",
+					Values:    []string{"Subject(~^1.*1$)", "Destination(1002)"},
+				},
+			},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+		},
+		utils.TenantID{Tenant: "cgrates.org", ID: "FLTR_ACNT_dan"}: &utils.TPFilterProfile{
+			TPid:   testTPID,
+			Tenant: "cgrates.org",
+			ID:     "FLTR_ACNT_dan",
+			Filters: []*utils.TPFilter{
+				&utils.TPFilter{
+					FieldName: "Account",
+					Type:      "*string",
+					Values:    []string{"dan"},
+				},
+			},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+		},
+		utils.TenantID{Tenant: "cgrates.org", ID: "FLTR_DST_DE"}: &utils.TPFilterProfile{
+			TPid:   testTPID,
+			Tenant: "cgrates.org",
+			ID:     "FLTR_DST_DE",
+			Filters: []*utils.TPFilter{
+				&utils.TPFilter{
+					FieldName: "Destination",
+					Type:      "*destinations",
+					Values:    []string{"DST_DE"},
+				},
+			},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+		},
+		utils.TenantID{Tenant: "cgrates.org", ID: "FLTR_DST_NL"}: &utils.TPFilterProfile{
+			TPid:   testTPID,
+			Tenant: "cgrates.org",
+			ID:     "FLTR_DST_NL",
+			Filters: []*utils.TPFilter{
+				&utils.TPFilter{
+					FieldName: "Destination",
+					Type:      "*destinations",
+					Values:    []string{"DST_NL"},
+				},
+			},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+		},
+	}
+	fltrKey := utils.TenantID{Tenant: "cgrates.org", ID: "FLTR_1"}
+	if len(csvr.filters) != len(eFilters) {
+		t.Errorf("Failed to load Filters: %s", utils.ToIJSON(csvr.filters))
+	} else if !reflect.DeepEqual(eFilters[fltrKey], csvr.filters[fltrKey]) {
+		t.Errorf("Expecting: %+v, received: %+v", eFilters[fltrKey], csvr.filters[fltrKey])
+	}
+}
+
+func TestLoadSupplierProfiles(t *testing.T) {
+	eSppProfiles := map[utils.TenantID]*utils.TPSupplierProfile{
+		utils.TenantID{Tenant: "cgrates.org", ID: "SPP_1"}: &utils.TPSupplierProfile{
+			TPid:      testTPID,
+			Tenant:    "cgrates.org",
+			ID:        "SPP_1",
+			FilterIDs: []string{"FLTR_ACNT_dan"},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+			Sorting:           "*lowest_cost",
+			SortingParameters: []string{},
+			Suppliers: []*utils.TPSupplier{
+				&utils.TPSupplier{
+					ID:                 "supplier1",
+					FilterIDs:          []string{"FLTR_ACNT_dan", "FLTR_DST_DE"},
+					AccountIDs:         []string{"Account1", "Account1_1", "Account2"},
+					RatingPlanIDs:      []string{"RPL_1", "RPL_2", "RPL_3"},
+					ResourceIDs:        []string{"ResGroup1", "ResGroup2", "ResGroup3", "ResGroup4"},
+					StatIDs:            []string{"Stat1", "Stat2", "Stat3"},
+					Weight:             10,
+					Blocker:            true,
+					SupplierParameters: "param1",
+				},
+			},
+			Weight: 20,
+		},
+	}
+	resKey := utils.TenantID{Tenant: "cgrates.org", ID: "SPP_1"}
+	if len(csvr.sppProfiles) != len(eSppProfiles) {
+		t.Errorf("Failed to load SupplierProfiles: %s", utils.ToIJSON(csvr.sppProfiles))
+	} else if !reflect.DeepEqual(eSppProfiles[resKey], csvr.sppProfiles[resKey]) {
+		t.Errorf("Expecting: %+v, received: %+v", eSppProfiles[resKey], csvr.sppProfiles[resKey])
+	}
+}
+
+func TestLoadAttributeProfiles(t *testing.T) {
+	eAttrProfiles := map[utils.TenantID]*utils.TPAttributeProfile{
+		utils.TenantID{Tenant: "cgrates.org", ID: "ALS1"}: &utils.TPAttributeProfile{
+			TPid:      testTPID,
+			Tenant:    "cgrates.org",
+			ID:        "ALS1",
+			Contexts:  []string{"con1", "con2", "con3"},
+			FilterIDs: []string{"FLTR_1"},
+			ActivationInterval: &utils.TPActivationInterval{
+				ActivationTime: "2014-07-29T15:00:00Z",
+			},
+			Attributes: []*utils.TPAttribute{
+				&utils.TPAttribute{
+					FieldName:  "Field1",
+					Initial:    "Initial1",
+					Substitute: "Sub1",
+					Append:     true,
+				},
+				&utils.TPAttribute{
+					FieldName:  "Field2",
+					Initial:    "Initial2",
+					Substitute: "Sub2",
+					Append:     false,
+				},
+			},
+			Weight: 20,
+		},
+	}
+	resKey := utils.TenantID{Tenant: "cgrates.org", ID: "ALS1"}
+	if len(csvr.attributeProfiles) != len(eAttrProfiles) {
+		t.Errorf("Failed to load attributeProfiles: %s", utils.ToIJSON(csvr.attributeProfiles))
+	} else if !reflect.DeepEqual(eAttrProfiles[resKey].Tenant, csvr.attributeProfiles[resKey].Tenant) {
+		t.Errorf("Expecting: %+v, received: %+v", eAttrProfiles[resKey].Tenant, csvr.attributeProfiles[resKey].Tenant)
+	} else if !reflect.DeepEqual(eAttrProfiles[resKey].ID, csvr.attributeProfiles[resKey].ID) {
+		t.Errorf("Expecting: %+v, received: %+v", eAttrProfiles[resKey].ID, csvr.attributeProfiles[resKey].ID)
+	} else if !reflect.DeepEqual(eAttrProfiles[resKey].Contexts, csvr.attributeProfiles[resKey].Contexts) {
+		t.Errorf("Expecting: %+v, received: %+v", eAttrProfiles[resKey].Contexts, csvr.attributeProfiles[resKey].Contexts)
+	} else if !reflect.DeepEqual(eAttrProfiles[resKey].FilterIDs, csvr.attributeProfiles[resKey].FilterIDs) {
+		t.Errorf("Expecting: %+v, received: %+v", eAttrProfiles[resKey].FilterIDs, csvr.attributeProfiles[resKey].FilterIDs)
+	} else if !reflect.DeepEqual(eAttrProfiles[resKey].ActivationInterval.ActivationTime, csvr.attributeProfiles[resKey].ActivationInterval.ActivationTime) {
+		t.Errorf("Expecting: %+v, received: %+v", eAttrProfiles[resKey].ActivationInterval, csvr.attributeProfiles[resKey].ActivationInterval)
+	} else if !reflect.DeepEqual(eAttrProfiles[resKey].Attributes, csvr.attributeProfiles[resKey].Attributes) {
+		t.Errorf("Expecting: %+v, received: %+v", eAttrProfiles[resKey].Attributes, csvr.attributeProfiles[resKey].Attributes)
+	}
+}
+
+func TestLoadResource(t *testing.T) {
+	eResources := []*utils.TenantID{
+		&utils.TenantID{
+			Tenant: "cgrates.org",
+			ID:     "ResGroup21",
+		},
+		&utils.TenantID{
+			Tenant: "cgrates.org",
+			ID:     "ResGroup22",
+		},
+	}
+	if len(csvr.resources) != len(eResources) {
+		t.Errorf("Failed to load resources expecting 2 but received : %+v", len(csvr.resources))
+	}
+}
+
+func TestLoadstatQueues(t *testing.T) {
+	eStatQueues := []*utils.TenantID{
+		&utils.TenantID{
+			Tenant: "cgrates.org",
+			ID:     "Stats1",
+		},
+		&utils.TenantID{
+			Tenant: "cgrates.org",
+			ID:     "Stats2",
+		},
+		&utils.TenantID{
+			Tenant: "cgrates.org",
+			ID:     "Stats3",
+		},
 	}
 
+	if len(csvr.statQueues) != len(eStatQueues) {
+		t.Errorf("Failed to load statQueues: %s", utils.ToIJSON(csvr.statQueues))
+	}
+}
+
+func TestLoadThresholds(t *testing.T) {
+	eThresholds := []*utils.TenantID{
+		&utils.TenantID{
+			Tenant: "cgrates.org",
+			ID:     "Threshold1",
+		},
+	}
+
+	if len(csvr.thresholds) != len(eThresholds) {
+		t.Errorf("Failed to load thresholds: %s", utils.ToIJSON(csvr.thresholds))
+	}
 }

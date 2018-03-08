@@ -15,320 +15,335 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/cgrates/cgrates/config"
+	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
+	"github.com/cgrates/rpcclient"
 )
 
-type StatsInterface interface {
-	GetValues(string, *map[string]float64) error
-	GetQueueIds(int, *[]string) error
-	GetQueue(string, *StatsQueue) error
-	GetQueueTriggers(string, *ActionTriggers) error
-	AppendCDR(*CDR, *int) error
-	AddQueue(*CdrStats, *int) error
-	RemoveQueue(string, *int) error
-	ReloadQueues([]string, *int) error
-	ResetQueues([]string, *int) error
-	Stop(int, *int) error
-}
-
-type Stats struct {
-	queues              map[string]*StatsQueue
-	queueSavers         map[string]*queueSaver
-	mux                 sync.RWMutex
-	dataDB              DataDB
-	defaultSaveInterval time.Duration
-}
-
-type queueSaver struct {
-	ticker  *time.Ticker
-	stopper chan bool
-	save    func(*queueSaver)
-	sq      *StatsQueue
-	dataDB  DataDB
-}
-
-func newQueueSaver(saveInterval time.Duration, sq *StatsQueue, db DataDB) *queueSaver {
-	svr := &queueSaver{
-		ticker:  time.NewTicker(saveInterval),
-		stopper: make(chan bool),
-		sq:      sq,
-		dataDB:  db,
+// NewStatService initializes a StatService
+func NewStatService(dm *DataManager, storeInterval time.Duration,
+	thdS rpcclient.RpcClientConnection, filterS *FilterS, stringIndexedFields, prefixIndexedFields *[]string) (ss *StatService, err error) {
+	if thdS != nil && reflect.ValueOf(thdS).IsNil() { // fix nil value in interface
+		thdS = nil
 	}
-	go func(saveInterval time.Duration, sq *StatsQueue, db DataDB) {
-		for {
-			select {
-			case <-svr.ticker.C:
-				sq.Save(db)
-			case <-svr.stopper:
-				break
-			}
-		}
-	}(saveInterval, sq, db)
-	return svr
+	return &StatService{
+		dm:                  dm,
+		storeInterval:       storeInterval,
+		thdS:                thdS,
+		filterS:             filterS,
+		stringIndexedFields: stringIndexedFields,
+		prefixIndexedFields: prefixIndexedFields,
+		storedStatQueues:    make(utils.StringMap),
+		stopBackup:          make(chan struct{})}, nil
 }
 
-func (svr *queueSaver) stop() {
-	svr.sq.Save(svr.dataDB)
-	svr.ticker.Stop()
-	svr.stopper <- true
+// StatService builds stats for events
+type StatService struct {
+	dm                  *DataManager
+	storeInterval       time.Duration
+	thdS                rpcclient.RpcClientConnection // rpc connection towards ThresholdS
+	filterS             *FilterS
+	stringIndexedFields *[]string
+	prefixIndexedFields *[]string
+	stopBackup          chan struct{}
+	storedStatQueues    utils.StringMap // keep a record of stats which need saving, map[statsTenantID]bool
+	ssqMux              sync.RWMutex    // protects storedStatQueues
 }
 
-func NewStats(dataDB DataDB, saveInterval time.Duration) *Stats {
-	cdrStats := &Stats{dataDB: dataDB, defaultSaveInterval: saveInterval}
-	if css, err := dataDB.GetAllCdrStats(); err == nil {
-		cdrStats.UpdateQueues(css, nil)
-	} else {
-		utils.Logger.Err(fmt.Sprintf("Cannot load cdr stats: %v", err))
-	}
-	return cdrStats
-}
-
-func (s *Stats) GetQueueIds(in int, ids *[]string) error {
-	s.mux.Lock()
-	defer s.mux.Unlock()
-	result := make([]string, 0)
-	for id, _ := range s.queues {
-		result = append(result, id)
-	}
-	*ids = result
+// ListenAndServe loops keeps the service alive
+func (sS *StatService) ListenAndServe(exitChan chan bool) error {
+	go sS.runBackup() // start backup loop
+	e := <-exitChan
+	exitChan <- e // put back for the others listening for shutdown request
 	return nil
 }
 
-func (s *Stats) GetQueue(id string, sq *StatsQueue) error {
-	s.mux.Lock()
-	defer s.mux.Unlock()
-	q, found := s.queues[id]
-	if !found {
-		return utils.ErrNotFound
-	}
-	*sq = *q
+// Shutdown is called to shutdown the service
+func (sS *StatService) Shutdown() error {
+	utils.Logger.Info("<StatS> service shutdown initialized")
+	close(sS.stopBackup)
+	sS.storeStats()
+	utils.Logger.Info("<StatS> service shutdown complete")
 	return nil
 }
 
-func (s *Stats) GetQueueTriggers(id string, ats *ActionTriggers) error {
-	s.mux.Lock()
-	defer s.mux.Unlock()
-	q, found := s.queues[id]
-	if !found {
-		return utils.ErrNotFound
-	}
-	if q.conf.Triggers != nil {
-		*ats = q.conf.Triggers
-	} else {
-		*ats = ActionTriggers{}
-	}
-	return nil
-}
-
-func (s *Stats) GetValues(sqID string, values *map[string]float64) error {
-	s.mux.RLock()
-	defer s.mux.RUnlock()
-	if sq, ok := s.queues[sqID]; ok {
-		*values = sq.GetStats()
-		return nil
-	}
-	return utils.ErrNotFound
-}
-
-func (s *Stats) AddQueue(cs *CdrStats, out *int) error {
-	s.mux.Lock()
-	defer s.mux.Unlock()
-	if s.queues == nil {
-		s.queues = make(map[string]*StatsQueue)
-	}
-	if s.queueSavers == nil {
-		s.queueSavers = make(map[string]*queueSaver)
-	}
-	var sq *StatsQueue
-	var exists bool
-	if sq, exists = s.queues[cs.Id]; exists {
-		sq.UpdateConf(cs)
-	} else {
-		sq = NewStatsQueue(cs)
-		s.queues[cs.Id] = sq
-	}
-	// save the conf
-	if err := s.dataDB.SetCdrStats(cs); err != nil {
-		return err
-	}
-	if _, exists = s.queueSavers[sq.GetId()]; !exists {
-		s.setupQueueSaver(sq)
-	}
-	return nil
-}
-
-func (s *Stats) RemoveQueue(qID string, out *int) error {
-	s.mux.Lock()
-	defer s.mux.Unlock()
-	if s.queues == nil {
-		s.queues = make(map[string]*StatsQueue)
-	}
-	if s.queueSavers == nil {
-		s.queueSavers = make(map[string]*queueSaver)
-	}
-
-	delete(s.queues, qID)
-	delete(s.queueSavers, qID)
-
-	return nil
-}
-
-func (s *Stats) ReloadQueues(ids []string, out *int) error {
-	if len(ids) == 0 {
-		if css, err := s.dataDB.GetAllCdrStats(); err == nil {
-			s.UpdateQueues(css, nil)
-		} else {
-			return fmt.Errorf("Cannot load cdr stats: %v", err)
-		}
-	}
-	for _, id := range ids {
-		if cs, err := s.dataDB.GetCdrStats(id); err == nil {
-			s.AddQueue(cs, nil)
-		} else {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Stats) ResetQueues(ids []string, out *int) error {
-	if len(ids) == 0 {
-		for _, sq := range s.queues {
-			sq.Cdrs = make([]*QCdr, 0)
-			sq.metrics = make(map[string]Metric, len(sq.conf.Metrics))
-			for _, m := range sq.conf.Metrics {
-				if metric := CreateMetric(m); metric != nil {
-					sq.metrics[m] = metric
-				}
-			}
-		}
-	} else {
-		for _, id := range ids {
-			sq, exists := s.queues[id]
-			if !exists {
-				utils.Logger.Warning(fmt.Sprintf("Cannot reset queue id %v: Not Fund", id))
-				continue
-			}
-			sq.Cdrs = make([]*QCdr, 0)
-			sq.metrics = make(map[string]Metric, len(sq.conf.Metrics))
-			for _, m := range sq.conf.Metrics {
-				if metric := CreateMetric(m); metric != nil {
-					sq.metrics[m] = metric
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// change the existing ones
-// add new ones
-// delete the ones missing from the new list
-func (s *Stats) UpdateQueues(css []*CdrStats, out *int) error {
-	s.mux.Lock()
-	defer s.mux.Unlock()
-	oldQueues := s.queues
-	oldSavers := s.queueSavers
-	s.queues = make(map[string]*StatsQueue, len(css))
-	s.queueSavers = make(map[string]*queueSaver, len(css))
-	for _, cs := range css {
-		var sq *StatsQueue
-		var existing bool
-		if oldQueues != nil {
-			if sq, existing = oldQueues[cs.Id]; existing {
-				sq.UpdateConf(cs)
-				s.queueSavers[cs.Id] = oldSavers[cs.Id]
-				delete(oldSavers, cs.Id)
-			}
-		}
-		if sq == nil {
-			sq = NewStatsQueue(cs)
-			// load queue from storage if exists
-			if saved, err := s.dataDB.GetCdrStatsQueue(sq.GetId()); err == nil {
-				sq.Load(saved)
-			}
-			s.setupQueueSaver(sq)
-		}
-		s.queues[cs.Id] = sq
-	}
-	// stop obsolete savers
-	for _, saver := range oldSavers {
-		saver.stop()
-	}
-	return nil
-}
-
-func (s *Stats) setupQueueSaver(sq *StatsQueue) {
-	if sq == nil {
+// runBackup will regularly store resources changed to dataDB
+func (sS *StatService) runBackup() {
+	if sS.storeInterval <= 0 {
 		return
 	}
-	// setup queue saver
-	if s.queueSavers == nil {
-		s.queueSavers = make(map[string]*queueSaver)
-	}
-	var si time.Duration
-	if sq.conf != nil {
-		si = sq.conf.SaveInterval
-	}
-	if si == 0 {
-		si = s.defaultSaveInterval
-	}
-	if si > 0 {
-		s.queueSavers[sq.GetId()] = newQueueSaver(si, sq, s.dataDB)
+	for {
+		select {
+		case <-sS.stopBackup:
+			return
+		default:
+		}
+		sS.storeStats()
+		time.Sleep(sS.storeInterval)
 	}
 }
 
-func (s *Stats) AppendCDR(cdr *CDR, out *int) error {
-	s.mux.RLock()
-	defer s.mux.RUnlock()
-	for _, sq := range s.queues {
-		sq.AppendCDR(cdr)
+// storeResources represents one task of complete backup
+func (sS *StatService) storeStats() {
+	var failedSqIDs []string
+	for { // don't stop untill we store all dirty statQueues
+		sS.ssqMux.Lock()
+		sID := sS.storedStatQueues.GetOne()
+		if sID != "" {
+			delete(sS.storedStatQueues, sID)
+		}
+		sS.ssqMux.Unlock()
+		if sID == "" {
+			break // no more keys, backup completed
+		}
+		if sqIf, ok := Cache.Get(utils.CacheStatQueues, sID); !ok || sqIf == nil {
+			utils.Logger.Warning(
+				fmt.Sprintf("<%s> failed retrieving from cache stat queue with ID: %s",
+					utils.StatService, sID))
+		} else if err := sS.StoreStatQueue(sqIf.(*StatQueue)); err != nil {
+			failedSqIDs = append(failedSqIDs, sID) // record failure so we can schedule it for next backup
+		}
+		// randomize the CPU load and give up thread control
+		time.Sleep(time.Duration(rand.Intn(1000)) * time.Nanosecond)
 	}
-	return nil
+	if len(failedSqIDs) != 0 { // there were errors on save, schedule the keys for next backup
+		sS.ssqMux.Lock()
+		for _, sqID := range failedSqIDs {
+			sS.storedStatQueues[sqID] = true
+		}
+		sS.ssqMux.Unlock()
+	}
 }
 
-func (s *Stats) Stop(int, *int) error {
-	s.mux.RLock()
-	defer s.mux.RUnlock()
-	for _, saver := range s.queueSavers {
-		saver.stop()
+// StoreStatQueue stores the statQueue in DB and corrects dirty flag
+func (sS *StatService) StoreStatQueue(sq *StatQueue) (err error) {
+	if sq.dirty == nil || !*sq.dirty {
+		return
 	}
-	return nil
+	if err = sS.dm.SetStatQueue(sq); err != nil {
+		utils.Logger.Warning(
+			fmt.Sprintf("<StatS> failed saving StatQueue with ID: %s, error: %s",
+				sq.TenantID(), err.Error()))
+		return
+	}
+	*sq.dirty = false
+	return
 }
 
-func (s *Stats) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	parts := strings.Split(serviceMethod, ".")
-	if len(parts) != 2 {
-		return utils.ErrNotImplemented
+// matchingStatQueuesForEvent returns ordered list of matching resources which are active by the time of the call
+func (sS *StatService) matchingStatQueuesForEvent(ev *utils.CGREvent) (sqs StatQueues, err error) {
+	matchingSQs := make(map[string]*StatQueue)
+	sqIDs, err := matchingItemIDsForEvent(ev.Event, sS.stringIndexedFields, sS.prefixIndexedFields,
+		sS.dm, utils.CacheStatFilterIndexes, ev.Tenant)
+	if err != nil {
+		return nil, err
 	}
-	// get method
-	method := reflect.ValueOf(s).MethodByName(parts[1])
-	if !method.IsValid() {
-		return utils.ErrNotImplemented
+	lockIDs := utils.PrefixSliceItems(sqIDs.Slice(), utils.StatFilterIndexes)
+	guardian.Guardian.GuardIDs(config.CgrConfig().LockingTimeout, lockIDs...)
+	defer guardian.Guardian.UnguardIDs(lockIDs...)
+	for sqID := range sqIDs {
+		sqPrfl, err := sS.dm.GetStatQueueProfile(ev.Tenant, sqID, false, utils.NonTransactional)
+		if err != nil {
+			if err == utils.ErrNotFound {
+				continue
+			}
+			return nil, err
+		}
+		if sqPrfl.ActivationInterval != nil && ev.Time != nil &&
+			!sqPrfl.ActivationInterval.IsActiveAtTime(*ev.Time) { // not active
+			continue
+		}
+		if pass, err := sS.filterS.PassFiltersForEvent(ev.Tenant, ev.Event, sqPrfl.FilterIDs); err != nil {
+			return nil, err
+		} else if !pass {
+			continue
+		}
+		s, err := sS.dm.GetStatQueue(sqPrfl.Tenant, sqPrfl.ID, false, "")
+		if err != nil {
+			return nil, err
+		}
+		if sqPrfl.Stored && s.dirty == nil {
+			s.dirty = utils.BoolPointer(false)
+		}
+		if sqPrfl.TTL >= 0 {
+			s.ttl = utils.DurationPointer(sqPrfl.TTL)
+		}
+		s.sqPrfl = sqPrfl
+		matchingSQs[sqPrfl.ID] = s
 	}
+	// All good, convert from Map to Slice so we can sort
+	sqs = make(StatQueues, len(matchingSQs))
+	i := 0
+	for _, s := range matchingSQs {
+		sqs[i] = s
+		i++
+	}
+	sqs.Sort()
+	for i, s := range sqs {
+		if s.sqPrfl.Blocker { // blocker will stop processing
+			sqs = sqs[:i+1]
+			break
+		}
+	}
+	return
+}
 
-	// construct the params
-	params := []reflect.Value{reflect.ValueOf(args), reflect.ValueOf(reply)}
+// Call implements rpcclient.RpcClientConnection interface for internal RPC
+// here for cases when passing StatsService as rpccclient.RpcClientConnection (ie. in ResourceS)
+func (ss *StatService) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	return utils.RPCCall(ss, serviceMethod, args, reply)
+}
 
-	ret := method.Call(params)
-	if len(ret) != 1 {
-		return utils.ErrServerError
+// processEvent processes a new event, dispatching to matching queues
+// queues matching are also cached to speed up
+func (sS *StatService) processEvent(ev *utils.CGREvent) (err error) {
+	matchSQs, err := sS.matchingStatQueuesForEvent(ev)
+	if err != nil {
+		return err
 	}
-	if ret[0].Interface() == nil {
-		return nil
+	if len(matchSQs) == 0 {
+		return utils.ErrNotFound
 	}
-	err, ok := ret[0].Interface().(error)
-	if !ok {
-		return utils.ErrServerError
+	var withErrors bool
+	for _, sq := range matchSQs {
+		if err = sq.ProcessEvent(ev); err != nil {
+			utils.Logger.Warning(
+				fmt.Sprintf("<StatS> Queue: %s, ignoring event: %s, error: %s",
+					sq.TenantID(), ev.TenantID(), err.Error()))
+			withErrors = true
+		}
+		if sS.storeInterval != 0 && sq.dirty != nil { // don't save
+			if sS.storeInterval == -1 {
+				sS.StoreStatQueue(sq)
+			} else {
+				*sq.dirty = true // mark it to be saved
+				sS.ssqMux.Lock()
+				sS.storedStatQueues[sq.TenantID()] = true
+				sS.ssqMux.Unlock()
+			}
+		}
+		var thIDs []string
+		if len(sq.sqPrfl.ThresholdIDs) != 0 {
+			thIDs = sq.sqPrfl.ThresholdIDs
+		}
+		thEv := &ArgsProcessEvent{
+			ThresholdIDs: thIDs,
+			CGREvent: utils.CGREvent{
+				Tenant: sq.Tenant,
+				ID:     utils.GenUUID(),
+				Event: map[string]interface{}{
+					utils.EventType: utils.StatUpdate,
+					utils.StatID:    sq.ID}}}
+		for metricID, metric := range sq.SQMetrics {
+			thEv.Event[metricID] = metric.GetValue()
+		}
+		if sS.thdS != nil {
+			var hits int
+			if err := sS.thdS.Call(utils.ThresholdSv1ProcessEvent, thEv, &hits); err != nil &&
+				err.Error() != utils.ErrNotFound.Error() {
+				utils.Logger.Warning(
+					fmt.Sprintf("<StatS> error: %s processing event %+v with ThresholdS.", err.Error(), thEv))
+				withErrors = true
+			}
+		}
 	}
-	return err
+	if withErrors {
+		err = utils.ErrPartiallyExecuted
+	}
+	return
+}
+
+// V1ProcessEvent implements StatV1 method for processing an Event
+func (sS *StatService) V1ProcessEvent(ev *utils.CGREvent, reply *string) (err error) {
+	if missing := utils.MissingStructFields(ev, []string{"Tenant", "ID"}); len(missing) != 0 { //Params missing
+		return utils.NewErrMandatoryIeMissing(missing...)
+	}
+	if err = sS.processEvent(ev); err == nil {
+		*reply = utils.OK
+	}
+	return
+}
+
+// V1StatQueuesForEvent implements StatV1 method for processing an Event
+func (sS *StatService) V1GetStatQueuesForEvent(ev *utils.CGREvent, reply *[]string) (err error) {
+	if missing := utils.MissingStructFields(ev, []string{"Tenant", "ID"}); len(missing) != 0 { //Params missing
+		return utils.NewErrMandatoryIeMissing(missing...)
+	}
+	var sQs StatQueues
+	if sQs, err = sS.matchingStatQueuesForEvent(ev); err != nil {
+		return
+	} else {
+		ids := make([]string, len(sQs))
+		for i, sq := range sQs {
+			ids[i] = sq.ID
+		}
+		*reply = ids
+	}
+	return
+}
+
+// V1GetQueueStringMetrics returns the metrics of a Queue as string values
+func (sS *StatService) V1GetQueueStringMetrics(args *utils.TenantID, reply *map[string]string) (err error) {
+	if missing := utils.MissingStructFields(args, []string{"Tenant", "ID"}); len(missing) != 0 { //Params missing
+		return utils.NewErrMandatoryIeMissing(missing...)
+	}
+	sq, err := sS.dm.GetStatQueue(args.Tenant, args.ID, false, "")
+	if err != nil {
+		if err != utils.ErrNotFound {
+			err = utils.NewErrServerError(err)
+		}
+		return err
+	}
+	metrics := make(map[string]string, len(sq.SQMetrics))
+	for metricID, metric := range sq.SQMetrics {
+		metrics[metricID] = metric.GetStringValue("")
+	}
+	*reply = metrics
+	return
+}
+
+// V1GetFloatMetrics returns the metrics as float64 values
+func (sS *StatService) V1GetQueueFloatMetrics(args *utils.TenantID, reply *map[string]float64) (err error) {
+	if missing := utils.MissingStructFields(args, []string{"Tenant", "ID"}); len(missing) != 0 { //Params missing
+		return utils.NewErrMandatoryIeMissing(missing...)
+	}
+	sq, err := sS.dm.GetStatQueue(args.Tenant, args.ID, false, "")
+	if err != nil {
+		if err != utils.ErrNotFound {
+			err = utils.NewErrServerError(err)
+		}
+		return err
+	}
+	metrics := make(map[string]float64, len(sq.SQMetrics))
+	for metricID, metric := range sq.SQMetrics {
+		metrics[metricID] = metric.GetFloat64Value()
+	}
+	*reply = metrics
+	return
+}
+
+// V1GetQueueIDs returns list of queueIDs registered for a tenant
+func (sS *StatService) V1GetQueueIDs(tenant string, qIDs *[]string) (err error) {
+	prfx := utils.StatQueuePrefix + tenant + ":"
+	keys, err := sS.dm.DataDB().GetKeysForPrefix(prfx)
+	if err != nil {
+		return err
+	}
+	retIDs := make([]string, len(keys))
+	for i, key := range keys {
+		retIDs[i] = key[len(prfx):]
+	}
+	*qIDs = retIDs
+	return
 }

@@ -30,7 +30,7 @@ import (
 
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/sessionmanager"
+	"github.com/cgrates/cgrates/sessions"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/cgrates/rpcclient"
 )
@@ -44,12 +44,13 @@ var ( // shared vars
 	rpcPoolFirst, rpcPoolBroadcast *rpcclient.RpcClientPool
 	ral1, ral2                     *exec.Cmd
 	err                            error
-	ral1ID, ral2ID, ralRmtID       string
+	node1                          = "node1"
+	node2                          = "node2"
 )
 
 var ( // configuration opts
-	RemoteRALsAddr1 = "172.16.254.80:2012"
-	RemoteRALsAddr2 = "127.0.0.1:2012"
+	RemoteRALsAddr1 = "192.168.244.137:2012"
+	RemoteRALsAddr2 = "192.168.244.138:2012"
 )
 
 func TestRPCITLclInitCfg(t *testing.T) {
@@ -96,15 +97,13 @@ func TestRPCITLclStatusSecondEngine(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
-	} else {
-		ral2ID = status[utils.InstanceID].(string)
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
 	}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil { // Make sure second time we land on the same instance
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) != ral2ID {
-		t.Errorf("Expecting:\n%s\nReceived:\n%s", ral2ID, status[utils.InstanceID].(string))
+	} else if status[utils.NodeID].(string) != node2 {
+		t.Errorf("Expecting:\n%s\nReceived:\n%s", node2, status[utils.NodeID].(string))
 	}
 }
 
@@ -120,17 +119,15 @@ func TestRPCITLclStatusFirstInitial(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
-	} else if status[utils.InstanceID].(string) == ral2ID {
-		t.Fatalf("Should receive ralID different than second one, got: %s", status[utils.InstanceID].(string))
-	} else {
-		ral1ID = status[utils.InstanceID].(string)
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
+	} else if status[utils.NodeID].(string) == node2 {
+		t.Fatalf("Should receive ralID different than second one, got: %s", status[utils.NodeID].(string))
 	}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil { // Make sure second time we land on the same instance
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) != ral1ID {
-		t.Errorf("Expecting:\n%s\nReceived:\n%s", ral1ID, status[utils.InstanceID].(string))
+	} else if status[utils.NodeID].(string) != node1 {
+		t.Errorf("Expecting:\n%s\nReceived:\n%s", node1, status[utils.NodeID].(string))
 	}
 }
 
@@ -143,17 +140,15 @@ func TestRPCITLclStatusFirstFailover(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
-	} else if status[utils.InstanceID].(string) == ral1ID {
-		t.Fatalf("Should receive ralID different than first one, got: %s", status[utils.InstanceID].(string))
-	} else {
-		ral2ID = status[utils.InstanceID].(string)
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
+	} else if status[utils.NodeID].(string) == node1 {
+		t.Fatalf("Should receive ralID different than first one, got: %s", status[utils.NodeID].(string))
 	}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil { // Make sure second time we land on the same instance
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) != ral2ID {
-		t.Errorf("Expecting:\n%s\nReceived:\n%s", ral2ID, status[utils.InstanceID].(string))
+	} else if status[utils.NodeID].(string) != node2 {
+		t.Errorf("Expecting:\n%s\nReceived:\n%s", node2, status[utils.NodeID].(string))
 	}
 }
 
@@ -164,21 +159,19 @@ func TestRPCITLclStatusFirstFailback(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == ral2ID {
+	} else if status[utils.NodeID].(string) == node2 {
 		t.Error("Should receive new ID")
-	} else {
-		ral1ID = status[utils.InstanceID].(string)
 	}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil { // Make sure second time we land on the same instance
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) != ral1ID {
-		t.Errorf("Expecting:\n%s\nReceived:\n%s", ral1ID, status[utils.InstanceID].(string))
+	} else if status[utils.NodeID].(string) != node1 {
+		t.Errorf("Expecting:\n%s\nReceived:\n%s", node2, status[utils.NodeID].(string))
 	}
 }
 
 // Make sure it executes on the first node supporting the command
 func TestRPCITLclTDirectedRPC(t *testing.T) {
-	var sessions []*sessionmanager.ActiveSession
+	var sessions []*sessions.ActiveSession
 	if err := rpcPoolFirst.Call("SMGenericV1.GetActiveSessions", map[string]string{}, &sessions); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
@@ -204,13 +197,13 @@ func TestRPCITLclBcastStatusInitial(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolBroadcast.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
 	}
 	if err := rpcPoolBroadcast.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
 	}
 }
 
@@ -222,13 +215,13 @@ func TestRPCITLclBcastStatusNoRals1(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolBroadcast.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
 	}
 	if err := rpcPoolBroadcast.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
 	}
 }
 
@@ -250,13 +243,13 @@ func TestRPCITLclBcastStatusRALs2Up(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolBroadcast.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
 	}
 	if err := rpcPoolBroadcast.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
 	}
 }
 
@@ -267,12 +260,12 @@ func TestRPCITLclStatusBcastRALs1Up(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolBroadcast.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
+	} else if status[utils.NodeID].(string) == "" {
 		t.Error("Empty InstanceID received")
 	}
 	if err := rpcPoolBroadcast.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
+	} else if status[utils.NodeID].(string) == "" {
 		t.Error("Empty InstanceID received")
 	}
 }
@@ -340,15 +333,13 @@ func TestRPCITRmtStatusFirstInitial(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
-	} else {
-		ralRmtID = status[utils.InstanceID].(string)
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
 	}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil { // Make sure second time we land on the same instance
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) != ralRmtID {
-		t.Errorf("Expecting:\n%s\nReceived:\n%s", ralRmtID, status[utils.InstanceID].(string))
+	} else if status[utils.NodeID].(string) != node1 {
+		t.Errorf("Expecting:\n%s\nReceived:\n%s", node1, status[utils.NodeID].(string))
 	}
 }
 
@@ -366,18 +357,16 @@ func TestRPCITRmtStatusFirstFailover(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
-	} else if status[utils.InstanceID].(string) == ralRmtID {
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
+	} else if status[utils.NodeID].(string) == node1 {
 		t.Fatal("Did not failover")
-	} else {
-		ralRmtID = status[utils.InstanceID].(string)
 	}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
-	} else if status[utils.InstanceID].(string) != ralRmtID {
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
+	} else if status[utils.NodeID].(string) != node2 {
 		t.Fatal("Did not do failover")
 	}
 }
@@ -396,18 +385,16 @@ func TestRPCITRmtStatusFirstFailback(t *testing.T) {
 	var status map[string]interface{}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
-	} else if status[utils.InstanceID].(string) == ralRmtID {
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
+	} else if status[utils.NodeID].(string) == node2 {
 		t.Fatal("Did not do failback")
-	} else {
-		ralRmtID = status[utils.InstanceID].(string)
 	}
 	if err := rpcPoolFirst.Call("Responder.Status", "", &status); err != nil {
 		t.Error(err)
-	} else if status[utils.InstanceID].(string) == "" {
-		t.Error("Empty InstanceID received")
-	} else if status[utils.InstanceID].(string) != ralRmtID {
+	} else if status[utils.NodeID].(string) == "" {
+		t.Error("Empty NodeID received")
+	} else if status[utils.NodeID].(string) != node1 {
 		t.Fatal("Did not do failback")
 	}
 }

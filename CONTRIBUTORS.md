@@ -57,6 +57,12 @@ information, please see the [`CONTRIBUTING.md`](CONTRIBUTING.md) file.
 | @alin104n | Alin Ioanovici |
 | @wasimbaig | Wasim Baig |
 | @MrGab | Gabriele Proni |
+| @TeoV | Teofil Voivozeanu |
+| @paolovisintin | Paolo Visintin |
+| @linuxmaniac | Victor Seva |
+| @basitengr | Abdul Basit |
+| @ghenry | Gavin Henry |
+| @Anevo | Cezar Vulcu |
 
 <!-- to sign, include a single line above this comment containing the following text:
 | @username | First Last |

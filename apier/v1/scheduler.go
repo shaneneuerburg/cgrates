@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -115,7 +116,7 @@ type AttrsExecuteScheduledActions struct {
 
 func (self *ApierV1) ExecuteScheduledActions(attr AttrsExecuteScheduledActions, reply *string) error {
 	if attr.ActionPlanID != "" { // execute by ActionPlanID
-		apl, err := self.DataDB.GetActionPlan(attr.ActionPlanID, false, utils.NonTransactional)
+		apl, err := self.DataManager.DataDB().GetActionPlan(attr.ActionPlanID, false, utils.NonTransactional)
 		if err != nil {
 			*reply = err.Error()
 			return err
@@ -140,7 +141,7 @@ func (self *ApierV1) ExecuteScheduledActions(attr AttrsExecuteScheduledActions, 
 		}
 	}
 	if !attr.TimeStart.IsZero() && !attr.TimeEnd.IsZero() { // execute between two dates
-		actionPlans, err := self.DataDB.GetAllActionPlans()
+		actionPlans, err := self.DataManager.DataDB().GetAllActionPlans()
 		if err != nil && err != utils.ErrNotFound {
 			err := fmt.Errorf("cannot get action plans: %v", err)
 			*reply = err.Error()

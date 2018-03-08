@@ -21,28 +21,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/utils"
 )
 
 func TestSetStorageDtChrg1(t *testing.T) {
-	dataDB, _ = engine.NewMapStorageJson()
+	data, _ := engine.NewMapStorageJson()
+	dataDB = engine.NewDataManager(data)
 	engine.SetDataStorage(dataDB)
 }
 
 func TestLoadCsvTpDtChrg1(t *testing.T) {
 	timings := `TM1,*any,*any,*any,*any,00:00:00
 TM2,*any,*any,*any,*any,01:00:00`
-	rates := `RT_DATA_2c,0,0.002,10,10,0
+	rates := `RT_DATA_2c,0,0.002,10s,10s,0
 RT_DATA_1c,0,0.001,10,10,0`
 	destinationRates := `DR_DATA_1,*any,RT_DATA_2c,*up,4,0,
 DR_DATA_2,*any,RT_DATA_1c,*up,4,0,`
 	ratingPlans := `RP_DATA1,DR_DATA_1,TM1,10
 RP_DATA1,DR_DATA_2,TM2,10`
 	ratingProfiles := `*out,cgrates.org,data,*any,2012-01-01T00:00:00Z,RP_DATA1,,`
-	csvr := engine.NewTpReader(dataDB, engine.NewStringCSVStorage(',', "", timings, rates, destinationRates, ratingPlans, ratingProfiles,
-		"", "", "", "", "", "", "", "", "", "", ""), "", "")
+	csvr := engine.NewTpReader(dataDB.DataDB(), engine.NewStringCSVStorage(',', "", timings, rates, destinationRates, ratingPlans, ratingProfiles,
+		"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""), "", "")
 	if err := csvr.LoadTimings(); err != nil {
 		t.Fatal(err)
 	}
@@ -59,14 +59,15 @@ RP_DATA1,DR_DATA_2,TM2,10`
 		t.Fatal(err)
 	}
 	csvr.WriteToDatabase(false, false, false)
-	cache.Flush()
-	dataDB.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	dataDB.LoadAccountingCache(nil, nil, nil)
+	engine.Cache.Clear(nil)
+	dataDB.LoadDataDBCache(nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	if cachedRPlans := cache.CountEntries(utils.RATING_PLAN_PREFIX); cachedRPlans != 1 {
+	if cachedRPlans := len(engine.Cache.GetItemIDs(utils.CacheRatingPlans, "")); cachedRPlans != 1 {
 		t.Error("Wrong number of cached rating plans found", cachedRPlans)
 	}
-	if cachedRProfiles := cache.CountEntries(utils.RATING_PROFILE_PREFIX); cachedRProfiles != 0 {
+	if cachedRProfiles := len(engine.Cache.GetItemIDs(utils.CacheRatingProfiles, "")); cachedRProfiles != 0 {
 		t.Error("Wrong number of cached rating profiles found", cachedRProfiles)
 	}
 }
@@ -95,7 +96,7 @@ func TestGetDataCostDtChrg1(t *testing.T) {
 
 func TestGetDataCostSecondIntDtChrg1(t *testing.T) {
 	usedData := 20
-	usageDur := time.Duration(usedData) * time.Second
+	usageDur := time.Duration(usedData)
 	timeStart := time.Date(2014, 3, 4, 1, 0, 0, 0, time.Local)
 	cd := &engine.CallDescriptor{
 		Direction:     "*out",

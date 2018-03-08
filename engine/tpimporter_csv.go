@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -56,7 +57,12 @@ var fileHandlers = map[string]func(*TPCSVImporter, string) error{
 	utils.LCRS_CSV:              (*TPCSVImporter).importLcrs,
 	utils.USERS_CSV:             (*TPCSVImporter).importUsers,
 	utils.ALIASES_CSV:           (*TPCSVImporter).importAliases,
-	utils.ResourceLimitsCsv:     (*TPCSVImporter).importResourceLimits,
+	utils.ResourcesCsv:          (*TPCSVImporter).importResources,
+	utils.StatsCsv:              (*TPCSVImporter).importStats,
+	utils.ThresholdsCsv:         (*TPCSVImporter).importThresholds,
+	utils.FiltersCsv:            (*TPCSVImporter).importFilters,
+	utils.SuppliersCsv:          (*TPCSVImporter).importSuppliers,
+	utils.AttributesCsv:         (*TPCSVImporter).importAttributeProfiles,
 }
 
 func (self *TPCSVImporter) Run() error {
@@ -77,7 +83,12 @@ func (self *TPCSVImporter) Run() error {
 		path.Join(self.DirPath, utils.CDR_STATS_CSV),
 		path.Join(self.DirPath, utils.USERS_CSV),
 		path.Join(self.DirPath, utils.ALIASES_CSV),
-		path.Join(self.DirPath, utils.ResourceLimitsCsv),
+		path.Join(self.DirPath, utils.ResourcesCsv),
+		path.Join(self.DirPath, utils.StatsCsv),
+		path.Join(self.DirPath, utils.ThresholdsCsv),
+		path.Join(self.DirPath, utils.FiltersCsv),
+		path.Join(self.DirPath, utils.SuppliersCsv),
+		path.Join(self.DirPath, utils.AttributesCsv),
 	)
 	files, _ := ioutil.ReadDir(self.DirPath)
 	for _, f := range files {
@@ -347,13 +358,68 @@ func (self *TPCSVImporter) importAliases(fn string) error {
 	return self.StorDb.SetTPAliases(tps)
 }
 
-func (self *TPCSVImporter) importResourceLimits(fn string) error {
+func (self *TPCSVImporter) importResources(fn string) error {
 	if self.Verbose {
 		log.Printf("Processing file: <%s> ", fn)
 	}
-	rls, err := self.csvr.GetTPResourceLimits(self.TPid, "")
+	rls, err := self.csvr.GetTPResources(self.TPid, "")
 	if err != nil {
 		return err
 	}
-	return self.StorDb.SetTPResourceLimits(rls)
+	return self.StorDb.SetTPResources(rls)
+}
+
+func (self *TPCSVImporter) importStats(fn string) error {
+	if self.Verbose {
+		log.Printf("Processing file: <%s> ", fn)
+	}
+	sts, err := self.csvr.GetTPStats(self.TPid, "")
+	if err != nil {
+		return err
+	}
+	return self.StorDb.SetTPStats(sts)
+}
+
+func (self *TPCSVImporter) importThresholds(fn string) error {
+	if self.Verbose {
+		log.Printf("Processing file: <%s> ", fn)
+	}
+	sts, err := self.csvr.GetTPThresholds(self.TPid, "")
+	if err != nil {
+		return err
+	}
+	return self.StorDb.SetTPThresholds(sts)
+}
+
+func (self *TPCSVImporter) importFilters(fn string) error {
+	if self.Verbose {
+		log.Printf("Processing file: <%s> ", fn)
+	}
+	sts, err := self.csvr.GetTPFilters(self.TPid, "")
+	if err != nil {
+		return err
+	}
+	return self.StorDb.SetTPFilters(sts)
+}
+
+func (self *TPCSVImporter) importSuppliers(fn string) error {
+	if self.Verbose {
+		log.Printf("Processing file: <%s> ", fn)
+	}
+	rls, err := self.csvr.GetTPSuppliers(self.TPid, "")
+	if err != nil {
+		return err
+	}
+	return self.StorDb.SetTPSuppliers(rls)
+}
+
+func (self *TPCSVImporter) importAttributeProfiles(fn string) error {
+	if self.Verbose {
+		log.Printf("Processing file: <%s> ", fn)
+	}
+	rls, err := self.csvr.GetTPAttributes(self.TPid, "")
+	if err != nil {
+		return err
+	}
+	return self.StorDb.SetTPAttributes(rls)
 }

@@ -15,62 +15,340 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package migrator
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/utils"
 )
 
-func NewMigrator(dataDB engine.DataDB, dataDBType, dataDBEncoding string, storDB engine.Storage, storDBType string) *Migrator {
+func NewMigrator(dmIN *engine.DataManager, dmOut *engine.DataManager, dataDBType, dataDBEncoding string,
+	storDB engine.Storage, storDBType string, oldDataDB MigratorDataDB, oldDataDBType, oldDataDBEncoding string,
+	oldStorDB engine.Storage, oldStorDBType string, dryRun bool, sameDataDB bool, sameStorDB bool, datadb_versions bool, stordb_versions bool) (m *Migrator, err error) {
 	var mrshlr engine.Marshaler
+	var oldmrshlr engine.Marshaler
 	if dataDBEncoding == utils.MSGPACK {
 		mrshlr = engine.NewCodecMsgpackMarshaler()
 	} else if dataDBEncoding == utils.JSON {
 		mrshlr = new(engine.JSONMarshaler)
+	} else if oldDataDBEncoding == utils.MSGPACK {
+		oldmrshlr = engine.NewCodecMsgpackMarshaler()
+	} else if oldDataDBEncoding == utils.JSON {
+		oldmrshlr = new(engine.JSONMarshaler)
 	}
-	return &Migrator{dataDB: dataDB, dataDBType: dataDBType,
-		storDB: storDB, storDBType: storDBType, mrshlr: mrshlr}
+	stats := make(map[string]int)
+
+	m = &Migrator{
+		dmOut: dmOut, dataDBType: dataDBType,
+		storDB: storDB, storDBType: storDBType,
+		mrshlr: mrshlr, dmIN: dmIN,
+		oldDataDB: oldDataDB, oldDataDBType: oldDataDBType,
+		oldStorDB: oldStorDB, oldStorDBType: oldStorDBType,
+		oldmrshlr: oldmrshlr, dryRun: dryRun, sameDataDB: sameDataDB, sameStorDB: sameStorDB,
+		datadb_versions: datadb_versions, stordb_versions: stordb_versions, stats: stats,
+	}
+	return m, err
 }
 
 type Migrator struct {
-	dataDB     engine.DataDB
-	dataDBType string
-	storDB     engine.Storage
-	storDBType string
-	mrshlr     engine.Marshaler
+	dmIN            *engine.DataManager //oldatadb
+	dmOut           *engine.DataManager
+	dataDBType      string
+	storDB          engine.Storage
+	storDBType      string
+	mrshlr          engine.Marshaler
+	oldDataDB       MigratorDataDB
+	oldDataDBType   string
+	oldStorDB       engine.Storage
+	oldStorDBType   string
+	oldmrshlr       engine.Marshaler
+	dryRun          bool
+	sameDataDB      bool
+	sameStorDB      bool
+	datadb_versions bool
+	stordb_versions bool
+	stats           map[string]int
 }
 
 // Migrate implements the tasks to migrate, used as a dispatcher to the individual methods
-func (m *Migrator) Migrate(taskID string) (err error) {
-	switch taskID {
-	default: // unsupported taskID
-		err = utils.NewCGRError(utils.Migrator,
-			utils.MandatoryIEMissingCaps,
-			utils.UnsupportedMigrationTask,
-			fmt.Sprintf("task <%s> is not a supported migration task", taskID))
-	case utils.MetaSetVersions:
-		if err := m.storDB.SetVersions(engine.CurrentStorDBVersions(), false); err != nil {
-			return utils.NewCGRError(utils.Migrator,
-				utils.ServerErrorCaps,
-				err.Error(),
-				fmt.Sprintf("error: <%s> when updating CostDetails version into StorDB", err.Error()))
+func (m *Migrator) Migrate(taskIDs []string) (err error, stats map[string]int) {
+	stats = make(map[string]int)
+	for _, taskID := range taskIDs {
+		switch taskID {
+		default: // unsupported taskID
+			err = utils.NewCGRError(utils.Migrator,
+				utils.MandatoryIEMissingCaps,
+				utils.UnsupportedMigrationTask,
+				fmt.Sprintf("task <%s> is not a supported migration task", taskID))
+		case utils.MetaSetVersions:
+			if m.dryRun != true {
+				if err := m.storDB.SetVersions(engine.CurrentDBVersions(m.storDBType), true); err != nil {
+					return utils.NewCGRError(utils.Migrator,
+						utils.ServerErrorCaps,
+						err.Error(),
+						fmt.Sprintf("error: <%s> when updating CostDetails version into StorDB", err.Error())), nil
+				}
+				if err := m.dmOut.DataDB().SetVersions(engine.CurrentDBVersions(m.dataDBType), true); err != nil {
+					return utils.NewCGRError(utils.Migrator,
+						utils.ServerErrorCaps,
+						err.Error(),
+						fmt.Sprintf("error: <%s> when updating CostDetails version into StorDB", err.Error())), nil
+				}
+				if m.datadb_versions {
+					vrs, err := m.dmOut.DataDB().GetVersions(utils.TBLVersions)
+					if err != nil {
+						return err, nil
+					}
+					log.Print("After migrate, DataDB versions :", vrs)
+				}
+				if m.stordb_versions {
+					vrs, err := m.storDB.GetVersions(utils.TBLVersions)
+					if err != nil {
+						return err, nil
+					}
+					log.Print("After migrate, StorDB versions :", vrs)
+				}
+			} else {
+				log.Print("Cannot dryRun SetVersions!")
+			}
+		case utils.MetaSessionsCosts:
+			err = m.migrateSessionsCosts()
+		case utils.MetaCostDetails:
+			err = m.migrateCostDetails()
+		case utils.MetaAccounts:
+			err = m.migrateAccounts()
+		case utils.MetaActionPlans:
+			err = m.migrateActionPlans()
+		case utils.MetaActionTriggers:
+			err = m.migrateActionTriggers()
+		case utils.MetaActions:
+			err = m.migrateActions()
+		case utils.MetaSharedGroups:
+			err = m.migrateSharedGroups()
+		case utils.MetaStats:
+			err = m.migrateStats()
+		case utils.MetaThresholds:
+			err = m.migrateThresholds()
+		case utils.MetaAttributes:
+			err = m.migrateAttributeProfile()
+		//only Move
+		case utils.MetaRatingPlans:
+			err = m.migrateRatingPlans()
+		case utils.MetaRatingProfile:
+			err = m.migrateRatingProfiles()
+		case utils.MetaDestinations:
+			err = m.migrateDestinations()
+		case utils.MetaReverseDestinations:
+			err = m.migrateReverseDestinations()
+		case utils.MetaLCR:
+			err = m.migrateLCR()
+		case utils.MetaCdrStats:
+			err = m.migrateCdrStats()
+		case utils.MetaTiming:
+			err = m.migrateTimings()
+		case utils.MetaRQF:
+			err = m.migrateRequestFilter()
+		case utils.MetaResource:
+			err = m.migrateResources()
+		case utils.MetaReverseAlias:
+			err = m.migrateReverseAlias()
+		case utils.MetaAlias:
+			err = m.migrateAlias()
+		case utils.MetaUser:
+			err = m.migrateUser()
+		case utils.MetaSubscribers:
+			err = m.migrateSubscribers()
+		case utils.MetaDerivedChargersV:
+			err = m.migrateDerivedChargers()
+		case utils.MetaSuppliers:
+			err = m.migrateSupplierProfiles()
+			//TPS
+		case utils.MetaTpRatingPlans:
+			err = m.migrateTPratingplans()
+		case utils.MetaTpFilters:
+			err = m.migrateTPfilters()
+		case utils.MetaTpDestinationRates:
+			err = m.migrateTPdestinationrates()
+		case utils.MetaTpActionTriggers:
+			err = m.migrateTPactiontriggers()
+		case utils.MetaTpAccountActions:
+			err = m.migrateTPaccountacction()
+		case utils.MetaTpActionPlans:
+			err = m.migrateTPactionplans()
+		case utils.MetaTpActions:
+			err = m.migrateTPactions()
+		case utils.MetaTpDerivedChargers:
+			err = m.migrateTPderivedchargers()
+		case utils.MetaTpThresholds:
+			err = m.migrateTPthresholds()
+		case utils.MetaTpSuppliers:
+			err = m.migrateTPSuppliers()
+		case utils.MetaTpStats:
+			err = m.migrateTPstats()
+		case utils.MetaTpSharedGroups:
+			err = m.migrateTPsharedgroups()
+		case utils.MetaTpRatingProfiles:
+			err = m.migrateTPratingprofiles()
+		case utils.MetaTpResources:
+			err = m.migrateTPresources()
+		case utils.MetaTpRates:
+			err = m.migrateTPrates()
+		case utils.MetaTpTiming:
+			err = m.migrateTpTimings()
+		case utils.MetaTpAliases:
+			err = m.migrateTPaliases()
+		case utils.MetaTpUsers:
+			err = m.migrateTPusers()
+		case utils.MetaTpCdrStats:
+			err = m.migrateTPcdrstats()
+		case utils.MetaTpDestinations:
+			err = m.migrateTPDestinations()
+			//DATADB ALL
+		case utils.MetaDataDB:
+			if err := m.migrateAccounts(); err != nil {
+				log.Print("ERROR: ", utils.MetaAccounts, " ", err)
+			}
+			if err := m.migrateActionPlans(); err != nil {
+				log.Print("ERROR: ", utils.MetaActionPlans, " ", err)
+			}
+			if err := m.migrateActionTriggers(); err != nil {
+				log.Print("ERROR: ", utils.MetaActionTriggers, " ", err)
+			}
+			if err := m.migrateActions(); err != nil {
+				log.Print("ERROR: ", utils.MetaActions, " ", err)
+			}
+			if err := m.migrateSharedGroups(); err != nil {
+				log.Print("ERROR: ", utils.MetaSharedGroups, " ", err)
+			}
+			if err := m.migrateStats(); err != nil {
+				log.Print("ERROR: ", utils.MetaStats, " ", err)
+			}
+			if err := m.migrateThresholds(); err != nil {
+				log.Print("ERROR: ", utils.MetaThresholds, " ", err)
+			}
+			if err := m.migrateSupplierProfiles(); err != nil {
+				log.Print("ERROR: ", utils.MetaSuppliers, " ", err)
+			}
+			if err := m.migrateAttributeProfile(); err != nil {
+				log.Print("ERROR: ", utils.MetaAttributes, " ", err)
+			}
+			if err := m.migrateRatingPlans(); err != nil {
+				log.Print("ERROR: ", utils.MetaRatingPlans, " ", err)
+			}
+			if err := m.migrateRatingProfiles(); err != nil {
+				log.Print("ERROR: ", utils.MetaRatingProfile, " ", err)
+			}
+			if err := m.migrateDestinations(); err != nil {
+				log.Print("ERROR: ", utils.MetaDestinations, " ", err)
+			}
+			if err := m.migrateReverseDestinations(); err != nil {
+				log.Print("ERROR: ", utils.MetaReverseDestinations, " ", err)
+			}
+			if err := m.migrateLCR(); err != nil {
+				log.Print("ERROR: ", utils.MetaLCR, " ", err)
+			}
+			if err := m.migrateCdrStats(); err != nil {
+				log.Print("ERROR: ", utils.MetaCdrStats, " ", err)
+			}
+			if err := m.migrateTimings(); err != nil {
+				log.Print("ERROR: ", utils.MetaTiming, " ", err)
+			}
+			if err := m.migrateRequestFilter(); err != nil {
+				log.Print("ERROR: ", utils.MetaRQF, " ", err)
+			}
+			if err := m.migrateResources(); err != nil {
+				log.Print("ERROR: ", utils.MetaResource, " ", err)
+			}
+			if err := m.migrateReverseAlias(); err != nil {
+				log.Print("ERROR: ", utils.MetaReverseAlias, " ", err)
+			}
+			if err := m.migrateAlias(); err != nil {
+				log.Print("ERROR: ", utils.MetaAlias, " ", err)
+			}
+			if err := m.migrateUser(); err != nil {
+				log.Print("ERROR: ", utils.MetaUser, " ", err)
+			}
+			if err := m.migrateSubscribers(); err != nil {
+				log.Print("ERROR: ", utils.MetaSubscribers, " ", err)
+			}
+			if err := m.migrateDerivedChargers(); err != nil {
+				log.Print("ERROR: ", utils.MetaDerivedChargersV, " ", err)
+			}
+			err = nil
+			//STORDB ALL
+		case utils.MetaStorDB:
+			if err := m.migrateTPratingplans(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpRatingPlans, " ", err)
+			}
+			if err := m.migrateTPfilters(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpFilters, " ", err)
+			}
+			if err := m.migrateTPdestinationrates(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpDestinationRates, " ", err)
+			}
+			if err := m.migrateTPactiontriggers(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpActionTriggers, " ", err)
+			}
+			if err := m.migrateTPaccountacction(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpAccountActions, " ", err)
+			}
+			if err := m.migrateTPactionplans(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpActionPlans, " ", err)
+			}
+			if err := m.migrateTPactions(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpActions, " ", err)
+			}
+			if err := m.migrateTPderivedchargers(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpDerivedChargers, " ", err)
+			}
+			if err := m.migrateTPthresholds(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpThresholds, " ", err)
+			}
+			if err := m.migrateTPSuppliers(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpSuppliers, " ", err)
+			}
+			if err := m.migrateTPstats(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpStats, " ", err)
+			}
+			if err := m.migrateTPsharedgroups(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpSharedGroups, " ", err)
+			}
+			if err := m.migrateTPratingprofiles(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpRatingProfiles, " ", err)
+			}
+			if err := m.migrateTPresources(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpResources, " ", err)
+			}
+			if err := m.migrateTPrates(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpRates, " ", err)
+			}
+			if err := m.migrateTpTimings(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpTiming, " ", err)
+			}
+			if err := m.migrateTPaliases(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpAliases, " ", err)
+			}
+			if err := m.migrateTPusers(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpUsers, " ", err)
+			}
+			if err := m.migrateTPderivedchargers(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpDerivedChargersV, " ", err)
+			}
+			if err := m.migrateTPcdrstats(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpCdrStats, " ", err)
+			}
+			if err := m.migrateTPDestinations(); err != nil {
+				log.Print("ERROR: ", utils.MetaTpDestinations, " ", err)
+			}
+			err = nil
 		}
-	case utils.MetaCostDetails:
-		err = m.migrateCostDetails()
-	case utils.MetaAccounts:
-		err = m.migrateAccounts()
-	case "migrateActionPlans":
-		err = m.migrateActionPlans()
-	case "migrateActionTriggers":
-		err = m.migrateActionTriggers()
-	case "migrateActions":
-		err = m.migrateActions()
-	case "migrateSharedGroups":
-		err = m.migrateSharedGroups()
 	}
-
+	for k, v := range m.stats {
+		stats[k] = v
+	}
 	return
 }

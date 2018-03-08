@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -70,7 +71,7 @@ func (b *Balance) Equal(o *Balance) bool {
 		b.Blocker == o.Blocker
 }
 
-func (b *Balance) MatchFilter(o *BalanceFilter, skipIds bool) bool {
+func (b *Balance) MatchFilter(o *BalanceFilter, skipIds, skipExpiry bool) bool {
 	if o == nil {
 		return true
 	}
@@ -80,8 +81,12 @@ func (b *Balance) MatchFilter(o *BalanceFilter, skipIds bool) bool {
 	if !skipIds && o.ID != nil && *o.ID != "" {
 		return b.ID == *o.ID
 	}
-	return (o.ExpirationDate == nil || b.ExpirationDate.Equal(*o.ExpirationDate)) &&
-		(o.Weight == nil || b.Weight == *o.Weight) &&
+	if !skipExpiry {
+		if o.ExpirationDate != nil && !b.ExpirationDate.Equal(*o.ExpirationDate) {
+			return false
+		}
+	}
+	return (o.Weight == nil || b.Weight == *o.Weight) &&
 		(o.Blocker == nil || b.Blocker == *o.Blocker) &&
 		(o.Disabled == nil || b.Disabled == *o.Disabled) &&
 		(o.DestinationIDs == nil || b.DestinationIDs.Includes(*o.DestinationIDs)) &&
@@ -194,7 +199,7 @@ func (b *Balance) Clone() *Balance {
 func (b *Balance) getMatchingPrefixAndDestID(dest string) (prefix, destId string) {
 	if len(b.DestinationIDs) != 0 && b.DestinationIDs[utils.ANY] == false {
 		for _, p := range utils.SplitPrefix(dest, MIN_PREFIX_MATCH) {
-			if destIDs, err := dataStorage.GetReverseDestination(p, false, utils.NonTransactional); err == nil {
+			if destIDs, err := dm.DataDB().GetReverseDestination(p, false, utils.NonTransactional); err == nil {
 				for _, dID := range destIDs {
 					if b.DestinationIDs[dID] == true {
 						return p, dID
@@ -233,7 +238,7 @@ func (b *Balance) GetMinutesForCredit(origCD *CallDescriptor, initialCredit floa
 			ts.createIncrementsSlice()
 			if cd.MaxRate > 0 && cd.MaxRateUnit > 0 {
 				rate, _, rateUnit := ts.RateInterval.GetRateParameters(ts.GetGroupStart())
-				if rate/rateUnit.Seconds() > cd.MaxRate/cd.MaxRateUnit.Seconds() {
+				if rate/float64(rateUnit.Nanoseconds()) > cd.MaxRate/float64(cd.MaxRateUnit.Nanoseconds()) {
 					return
 				}
 			}
@@ -302,18 +307,19 @@ func (b *Balance) SetDirty() {
 	b.dirty = true
 }
 
+// debitUnits will debit units for call descriptor.
+// returns the amount debited within cc
 func (b *Balance) debitUnits(cd *CallDescriptor, ub *Account, moneyBalances Balances, count bool, dryRun, debitConnectFee bool) (cc *CallCost, err error) {
 	if !b.IsActiveAt(cd.TimeStart) || b.GetValue() <= 0 {
 		return
 	}
-	if duration, err := utils.ParseZeroRatingSubject(b.RatingSubject); err == nil {
+	if duration, err := utils.ParseZeroRatingSubject(cd.TOR, b.RatingSubject); err == nil {
 		// we have *zero based units
 		cc = cd.CreateCallCost()
 		cc.Timespans = append(cc.Timespans, &TimeSpan{
 			TimeStart: cd.TimeStart,
 			TimeEnd:   cd.TimeEnd,
 		})
-
 		ts := cc.Timespans[0]
 		ts.RoundToDuration(duration)
 		ts.RateInterval = &RateInterval{
@@ -346,9 +352,10 @@ func (b *Balance) debitUnits(cd *CallDescriptor, ub *Account, moneyBalances Bala
 		for incIndex, inc := range ts.Increments {
 			//log.Printf("INCREMENET: %+v", inc)
 
-			amount := inc.Duration.Seconds()
+			amount := float64(inc.Duration.Nanoseconds())
 			if b.Factor != nil {
-				amount = utils.Round(amount/b.Factor.GetValue(cd.TOR), globalRoundingDecimals, utils.ROUNDING_UP)
+				amount = utils.Round(amount/b.Factor.GetValue(cd.TOR),
+					globalRoundingDecimals, utils.ROUNDING_UP)
 			}
 			if b.GetValue() >= amount {
 				b.SubstractValue(amount)
@@ -371,7 +378,7 @@ func (b *Balance) debitUnits(cd *CallDescriptor, ub *Account, moneyBalances Bala
 				inc.paid = false
 				// delete the rest of the unpiad increments/timespans
 				if incIndex == 0 {
-					// cat the entire current timespan
+					// cut the entire current timespan
 					cc.Timespans = nil
 				} else {
 					ts.SplitByIncrement(incIndex)
@@ -405,7 +412,6 @@ func (b *Balance) debitUnits(cd *CallDescriptor, ub *Account, moneyBalances Bala
 			if ts.Increments == nil {
 				ts.createIncrementsSlice()
 			}
-
 			if ts.RateInterval == nil {
 				utils.Logger.Err(fmt.Sprintf("Nil RateInterval ERROR on TS: %+v, CC: %+v, from CD: %+v", ts, cc, cd))
 				return nil, errors.New("timespan with no rate interval assigned")
@@ -432,25 +438,24 @@ func (b *Balance) debitUnits(cd *CallDescriptor, ub *Account, moneyBalances Bala
 
 			maxCost, strategy := ts.RateInterval.GetMaxCost()
 			for incIndex, inc := range ts.Increments {
-
 				if tsIndex == 0 && incIndex == 0 && ts.RateInterval.Rating.ConnectFee > 0 && debitConnectFee && cc.deductConnectFee && ok {
 					// go to nextincrement
 					continue
 				}
 
 				// debit minutes and money
-				amount := inc.Duration.Seconds()
+				amount := float64(inc.Duration.Nanoseconds())
 				if b.Factor != nil {
 					amount = utils.Round(amount/b.Factor.GetValue(cd.TOR), globalRoundingDecimals, utils.ROUNDING_UP)
 				}
 				cost := inc.Cost
 				inc.paid = false
 				if strategy == utils.MAX_COST_DISCONNECT && cd.MaxCostSoFar >= maxCost {
-					// cat the entire current timespan
+					// cut the entire current timespan
 					cc.maxCostDisconect = true
 					if dryRun {
 						if incIndex == 0 {
-							// cat the entire current timespan
+							// cut the entire current timespan
 							cc.Timespans = cc.Timespans[:tsIndex]
 						} else {
 							ts.SplitByIncrement(incIndex)
@@ -482,7 +487,11 @@ func (b *Balance) debitUnits(cd *CallDescriptor, ub *Account, moneyBalances Bala
 						break
 					}
 				}
-				if (cost == 0 || moneyBal != nil) && b.GetValue() >= amount {
+				if cost != 0 && moneyBal == nil && (!dryRun || ub.AllowNegative) { // Fix for issue #685
+					utils.Logger.Warning(fmt.Sprintf("<RALs> Going negative on account %s with AllowNegative: false", cd.GetAccountKey()))
+					moneyBal = ub.GetDefaultMoneyBalance()
+				}
+				if b.GetValue() >= amount && (moneyBal != nil || cost == 0) {
 					b.SubstractValue(amount)
 					inc.BalanceInfo.Unit = &UnitInfo{
 						UUID:          b.Uuid,
@@ -512,9 +521,9 @@ func (b *Balance) debitUnits(cd *CallDescriptor, ub *Account, moneyBalances Bala
 					}
 				} else {
 					inc.paid = false
-					// delete the rest of the unpiad increments/timespans
+					// delete the rest of the unpaid increments/timespans
 					if incIndex == 0 {
-						// cat the entire current timespan
+						// cut the entire current timespan
 						cc.Timespans = cc.Timespans[:tsIndex]
 					} else {
 						ts.SplitByIncrement(incIndex)
@@ -603,11 +612,11 @@ func (b *Balance) debitMoney(cd *CallDescriptor, ub *Account, moneyBalances Bala
 			amount := inc.Cost
 			inc.paid = false
 			if strategy == utils.MAX_COST_DISCONNECT && cd.MaxCostSoFar >= maxCost {
-				// cat the entire current timespan
+				// cut the entire current timespan
 				cc.maxCostDisconect = true
 				if dryRun {
 					if incIndex == 0 {
-						// cat the entire current timespan
+						// cut the entire current timespan
 						cc.Timespans = cc.Timespans[:tsIndex]
 					} else {
 						ts.SplitByIncrement(incIndex)
@@ -657,7 +666,7 @@ func (b *Balance) debitMoney(cd *CallDescriptor, ub *Account, moneyBalances Bala
 				inc.paid = false
 				// delete the rest of the unpiad increments/timespans
 				if incIndex == 0 {
-					// cat the entire current timespan
+					// cut the entire current timespan
 					cc.Timespans = cc.Timespans[:tsIndex]
 				} else {
 					ts.SplitByIncrement(incIndex)
@@ -761,41 +770,87 @@ func (bc Balances) HasBalance(balance *Balance) bool {
 }
 
 func (bc Balances) SaveDirtyBalances(acc *Account) {
-	savedAccounts := make(map[string]bool)
+	savedAccounts := make(map[string]*Account)
 	for _, b := range bc {
 		if b.dirty {
 			// publish event
 			accountId := ""
 			allowNegative := ""
 			disabled := ""
-			if b.account != nil { // only publish modifications for balances with account set
-				//utils.LogStack()
-				accountId = b.account.ID
-				allowNegative = strconv.FormatBool(b.account.AllowNegative)
-				disabled = strconv.FormatBool(b.account.Disabled)
-				Publish(CgrEvent{
-					"EventName":            utils.EVT_ACCOUNT_BALANCE_MODIFIED,
-					"Uuid":                 b.Uuid,
-					"Id":                   b.ID,
-					"Value":                strconv.FormatFloat(b.Value, 'f', -1, 64),
-					"ExpirationDate":       b.ExpirationDate.String(),
-					"Weight":               strconv.FormatFloat(b.Weight, 'f', -1, 64),
-					"DestinationIDs":       b.DestinationIDs.String(),
-					"Directions":           b.Directions.String(),
-					"RatingSubject":        b.RatingSubject,
-					"Categories":           b.Categories.String(),
-					"SharedGroups":         b.SharedGroups.String(),
-					"TimingIDs":            b.TimingIDs.String(),
-					"Account":              accountId,
-					"AccountAllowNegative": allowNegative,
-					"AccountDisabled":      disabled,
-				})
+			if b.account == nil { // only publish modifications for balances with account set
+				continue
+			}
+			accountId = b.account.ID
+			acntTnt := utils.NewTenantID(accountId)
+			thEv := &ArgsProcessEvent{
+				CGREvent: utils.CGREvent{
+					Tenant: acntTnt.Tenant,
+					ID:     utils.GenUUID(),
+					Event: map[string]interface{}{
+						utils.EventType:   utils.BalanceUpdate,
+						utils.EventSource: utils.AccountService,
+						utils.Account:     acntTnt.ID,
+						utils.BalanceID:   b.ID,
+						utils.Units:       b.Value}}}
+			if !b.ExpirationDate.IsZero() {
+				thEv.Event[utils.ExpiryTime] = b.ExpirationDate.Format(time.RFC3339)
+			}
+			if thresholdS != nil {
+				var hits int
+				if err := thresholdS.Call(utils.ThresholdSv1ProcessEvent, thEv, &hits); err != nil &&
+					err.Error() != utils.ErrNotFound.Error() {
+					utils.Logger.Warning(
+						fmt.Sprintf("<AccountS> error: %s processing balance event %+v with ThresholdS.", err.Error(), thEv))
+				}
+			}
+			//utils.LogStack()
+
+			allowNegative = strconv.FormatBool(b.account.AllowNegative)
+			disabled = strconv.FormatBool(b.account.Disabled)
+			Publish(CgrEvent{
+				"EventName":            utils.EVT_ACCOUNT_BALANCE_MODIFIED,
+				"Uuid":                 b.Uuid,
+				"Id":                   b.ID,
+				"Value":                strconv.FormatFloat(b.Value, 'f', -1, 64),
+				"ExpirationDate":       b.ExpirationDate.String(),
+				"Weight":               strconv.FormatFloat(b.Weight, 'f', -1, 64),
+				"DestinationIDs":       b.DestinationIDs.String(),
+				"Directions":           b.Directions.String(),
+				"RatingSubject":        b.RatingSubject,
+				"Categories":           b.Categories.String(),
+				"SharedGroups":         b.SharedGroups.String(),
+				"TimingIDs":            b.TimingIDs.String(),
+				"Account":              accountId,
+				"AccountAllowNegative": allowNegative,
+				"AccountDisabled":      disabled,
+			})
+		}
+		if b.account != nil && b.account != acc && b.dirty && savedAccounts[b.account.ID] == nil {
+			dm.DataDB().SetAccount(b.account)
+			savedAccounts[b.account.ID] = b.account
+		}
+	}
+	if len(savedAccounts) != 0 && thresholdS != nil {
+		for _, acnt := range savedAccounts {
+			acntTnt := utils.NewTenantID(acnt.ID)
+			thEv := &ArgsProcessEvent{
+				CGREvent: utils.CGREvent{
+					Tenant: acntTnt.Tenant,
+					ID:     utils.GenUUID(),
+					Event: map[string]interface{}{
+						utils.EventType:     utils.AccountUpdate,
+						utils.EventSource:   utils.AccountService,
+						utils.Account:       acntTnt.ID,
+						utils.AllowNegative: acnt.AllowNegative,
+						utils.Disabled:      acnt.Disabled}}}
+			var hits int
+			if err := thresholdS.Call(utils.ThresholdSv1ProcessEvent, thEv, &hits); err != nil &&
+				err.Error() != utils.ErrNotFound.Error() {
+				utils.Logger.Warning(
+					fmt.Sprintf("<AccountS> error: %s processing account event %+v with ThresholdS.", err.Error(), thEv))
 			}
 		}
-		if b.account != nil && b.account != acc && b.dirty && savedAccounts[b.account.ID] == false {
-			dataStorage.SetAccount(b.account)
-			savedAccounts[b.account.ID] = true
-		}
+
 	}
 }
 

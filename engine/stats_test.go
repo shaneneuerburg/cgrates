@@ -18,538 +18,341 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package engine
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/utils"
 )
 
-func TestStatsQueueInit(t *testing.T) {
-	sq := NewStatsQueue(&CdrStats{Metrics: []string{ASR, ACC}})
-	if len(sq.metrics) != 2 {
-		t.Error("Expected 2 metrics got ", len(sq.metrics))
+var (
+	cloneExpTimeStats time.Time
+	expTimeStats      = time.Now().Add(time.Duration(20 * time.Minute))
+	stsserv           StatService
+	dmSTS             *DataManager
+	sqps              = []*StatQueueProfile{
+		&StatQueueProfile{
+			Tenant:    "cgrates.org",
+			ID:        "statsprofile1",
+			FilterIDs: []string{"filter7"},
+			ActivationInterval: &utils.ActivationInterval{
+				ActivationTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+			},
+			QueueLength: 10,
+			TTL:         time.Duration(10) * time.Second,
+			Metrics: []*utils.MetricWithParams{
+				&utils.MetricWithParams{
+					MetricID:   utils.MetaSum,
+					Parameters: utils.Usage,
+				},
+			},
+			ThresholdIDs: []string{},
+			Blocker:      true,
+			Stored:       true,
+			Weight:       20,
+			MinItems:     1,
+		},
+		&StatQueueProfile{
+			Tenant:    "cgrates.org",
+			ID:        "statsprofile2",
+			FilterIDs: []string{"filter8"},
+			ActivationInterval: &utils.ActivationInterval{
+				ActivationTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+			},
+			QueueLength: 10,
+			TTL:         time.Duration(10) * time.Second,
+			Metrics: []*utils.MetricWithParams{
+				&utils.MetricWithParams{
+					MetricID:   utils.MetaSum,
+					Parameters: utils.Usage,
+				},
+			},
+			ThresholdIDs: []string{},
+			Blocker:      true,
+			Stored:       true,
+			Weight:       20,
+			MinItems:     1,
+		},
+		&StatQueueProfile{
+			Tenant:    "cgrates.org",
+			ID:        "statsprofile3",
+			FilterIDs: []string{"preffilter4"},
+			ActivationInterval: &utils.ActivationInterval{
+				ActivationTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+			},
+			QueueLength: 10,
+			TTL:         time.Duration(10) * time.Second,
+			Metrics: []*utils.MetricWithParams{
+				&utils.MetricWithParams{
+					MetricID:   utils.MetaSum,
+					Parameters: utils.Usage,
+				},
+			},
+			ThresholdIDs: []string{},
+			Blocker:      true,
+			Stored:       true,
+			Weight:       20,
+			MinItems:     1,
+		},
+		&StatQueueProfile{
+			Tenant:    "cgrates.org",
+			ID:        "statsprofile4",
+			FilterIDs: []string{"defaultf4"},
+			ActivationInterval: &utils.ActivationInterval{
+				ActivationTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
+			},
+			QueueLength: 10,
+			TTL:         time.Duration(10) * time.Second,
+			Metrics: []*utils.MetricWithParams{
+				&utils.MetricWithParams{
+					MetricID:   utils.MetaSum,
+					Parameters: utils.Usage,
+				},
+			},
+			ThresholdIDs: []string{},
+			Blocker:      true,
+			Stored:       true,
+			Weight:       20,
+			MinItems:     1,
+		},
 	}
-}
+	stqs = []*StatQueue{
+		&StatQueue{Tenant: "cgrates.org", ID: "statsprofile1", sqPrfl: sqps[0]},
+		&StatQueue{Tenant: "cgrates.org", ID: "statsprofile2", sqPrfl: sqps[1]},
+		&StatQueue{Tenant: "cgrates.org", ID: "statsprofile3", sqPrfl: sqps[2]},
+		&StatQueue{Tenant: "cgrates.org", ID: "statsprofile4", sqPrfl: sqps[3]},
+	}
+	statsEvs = []*utils.CGREvent{
+		&utils.CGREvent{
+			Tenant: "cgrates.org",
+			ID:     "event1",
+			Event: map[string]interface{}{
+				"Stats":          "StatsProfile1",
+				utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
+				"UsageInterval":  "1s",
+				"PddInterval":    "1s",
+				"Weight":         "20.0",
+				utils.Usage:      time.Duration(135 * time.Second),
+				utils.COST:       123.0,
+			}},
+		&utils.CGREvent{
+			Tenant: "cgrates.org",
+			ID:     "event2",
+			Event: map[string]interface{}{
+				"Stats":          "StatsProfile2",
+				utils.AnswerTime: time.Date(2014, 7, 14, 14, 30, 0, 0, time.UTC),
+				"UsageInterval":  "1s",
+				"PddInterval":    "1s",
+				"Weight":         "21.0",
+				utils.Usage:      time.Duration(45 * time.Second),
+			}},
+		&utils.CGREvent{
+			Tenant: "cgrates.org",
+			ID:     "event3",
+			Event: map[string]interface{}{
+				"Stats":     "StatsProfilePrefix",
+				utils.Usage: time.Duration(30 * time.Second),
+			}},
+		&utils.CGREvent{
+			Tenant: "cgrates.org",
+			ID:     "event3",
+			Event: map[string]interface{}{
+				"Weight":    "200.0",
+				utils.Usage: time.Duration(65 * time.Second),
+			}},
+	}
+)
 
-func TestStatsValue(t *testing.T) {
-	sq := NewStatsQueue(&CdrStats{Metrics: []string{ASR, ACD, TCD, ACC, TCC}})
-	cdr := &CDR{
-		SetupTime:  time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		AnswerTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		Usage:      10 * time.Second,
-		Cost:       1,
+func TestStatsPopulateStatsService(t *testing.T) {
+	data, _ := NewMapStorage()
+	dmSTS = NewDataManager(data)
+	var filters1 []*FilterRule
+	var filters2 []*FilterRule
+	var preffilter []*FilterRule
+	var defaultf []*FilterRule
+	second := 1 * time.Second
+	stsserv = StatService{
+		dm:      dmSTS,
+		filterS: &FilterS{dm: dmSTS},
 	}
-	sq.AppendCDR(cdr)
-	cdr.Cost = 2
-	sq.AppendCDR(cdr)
-	cdr.Cost = 3
-	sq.AppendCDR(cdr)
-	s := sq.GetStats()
-	if s[ASR] != 100 ||
-		s[ACD] != 10 ||
-		s[TCD] != 30 ||
-		s[ACC] != 2 ||
-		s[TCC] != 6 {
-		t.Errorf("Error getting stats: %+v", s)
-	}
-}
-
-func TestStatsSimplifyCDR(t *testing.T) {
-	cdr := &CDR{
-		ToR:         "tor",
-		OriginID:    "accid",
-		OriginHost:  "cdrhost",
-		Source:      "cdrsource",
-		RequestType: "reqtype",
-		Direction:   "direction",
-		Tenant:      "tenant",
-		Category:    "category",
-		Account:     "account",
-		Subject:     "subject",
-		Destination: "12345678",
-		SetupTime:   time.Date(2014, 7, 3, 13, 43, 0, 0, time.UTC),
-		Usage:       10 * time.Second,
-		RunID:       "mri",
-		Cost:        10,
-	}
-	sq := &StatsQueue{}
-	qcdr := sq.simplifyCdr(cdr)
-	if cdr.SetupTime != qcdr.SetupTime ||
-		cdr.AnswerTime != qcdr.AnswerTime ||
-		cdr.Usage != qcdr.Usage ||
-		cdr.Cost != qcdr.Cost {
-		t.Errorf("Failed to simplify cdr: %+v", qcdr)
-	}
-}
-
-func TestAcceptCdr(t *testing.T) {
-	sq := NewStatsQueue(nil)
-	cdr := &CDR{
-		ToR:             "tor",
-		OriginID:        "accid",
-		OriginHost:      "cdrhost",
-		Source:          "cdrsource",
-		RequestType:     "reqtype",
-		Direction:       "direction",
-		Tenant:          "tenant",
-		Category:        "category",
-		Account:         "account",
-		Subject:         "subject",
-		Destination:     "0723045326",
-		SetupTime:       time.Date(2014, 7, 3, 13, 43, 0, 0, time.UTC),
-		Usage:           10 * time.Second,
-		PDD:             7 * time.Second,
-		Supplier:        "supplier1",
-		DisconnectCause: "normal",
-		RunID:           "mri",
-		Cost:            10,
-	}
-	sq.conf = &CdrStats{}
-	if sq.conf.AcceptCdr(cdr) != true {
-		t.Errorf("Should have accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{TOR: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{CdrHost: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{CdrSource: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{Direction: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{Tenant: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{Category: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{Account: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{Subject: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{Supplier: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{DisconnectCause: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{DestinationIds: []string{"test"}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{DestinationIds: []string{"NAT", "RET"}}
-	if sq.conf.AcceptCdr(cdr) != true {
-		t.Errorf("Should have accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{SetupInterval: []time.Time{time.Date(2014, 7, 3, 13, 43, 0, 1, time.UTC)}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{SetupInterval: []time.Time{time.Date(2014, 7, 3, 13, 42, 0, 0, time.UTC), time.Date(2014, 7, 3, 13, 43, 0, 0, time.UTC)}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{SetupInterval: []time.Time{time.Date(2014, 7, 3, 13, 42, 0, 0, time.UTC)}}
-	if sq.conf.AcceptCdr(cdr) != true {
-		t.Errorf("Should have accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{SetupInterval: []time.Time{time.Date(2014, 7, 3, 13, 42, 0, 0, time.UTC), time.Date(2014, 7, 3, 13, 43, 0, 1, time.UTC)}}
-	if sq.conf.AcceptCdr(cdr) != true {
-		t.Errorf("Should have accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{UsageInterval: []time.Duration{11 * time.Second}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{UsageInterval: []time.Duration{1 * time.Second, 10 * time.Second}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{PddInterval: []time.Duration{8 * time.Second}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{PddInterval: []time.Duration{3 * time.Second, 7 * time.Second}}
-	if sq.conf.AcceptCdr(cdr) == true {
-		t.Errorf("Should have NOT accepted this CDR: %+v", cdr)
-	}
-	sq.conf = &CdrStats{PddInterval: []time.Duration{3 * time.Second, 8 * time.Second}}
-	if sq.conf.AcceptCdr(cdr) != true {
-		t.Errorf("Should have accepted this CDR: %+v", cdr)
-	}
-}
-
-func TestStatsQueueIds(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	ids := []string{}
-	if err := cdrStats.GetQueueIds(0, &ids); err != nil {
-		t.Error("Errorf getting queue ids: ", err)
-	}
-	result := len(ids)
-	expected := 5
-	if result != expected {
-		t.Errorf("Errorf loading stats queues. Expected %v was %v (%v)", expected, result, ids)
-	}
-}
-
-func TestStatsAppendCdr(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	cdr := &CDR{
-		Tenant:          "cgrates.org",
-		Category:        "call",
-		AnswerTime:      time.Now(),
-		SetupTime:       time.Now(),
-		Usage:           10 * time.Second,
-		Cost:            10,
-		Supplier:        "suppl1",
-		DisconnectCause: "NORMAL_CLEARNING",
-	}
-	err := cdrStats.AppendCDR(cdr, nil)
+	ref := NewFilterIndexer(dmSTS, utils.StatQueueProfilePrefix, "cgrates.org")
+	//filter1
+	x, err := NewFilterRule(MetaString, "Stats", []string{"StatsProfile1"})
 	if err != nil {
-		t.Error("Error appending cdr to stats: ", err)
+		t.Errorf("Error: %+v", err)
 	}
-	t.Log(cdrStats.queues)
-	if len(cdrStats.queues) != 5 ||
-		len(cdrStats.queues["CDRST1"].Cdrs) != 0 ||
-		len(cdrStats.queues["CDRST2"].Cdrs) != 1 {
-		t.Error("Error appending cdr to queue: ", utils.ToIJSON(cdrStats.queues))
-	}
-}
-
-func TestStatsGetValues(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	cdr := &CDR{
-		Tenant:     "cgrates.org",
-		Category:   "call",
-		AnswerTime: time.Now(),
-		SetupTime:  time.Now(),
-		Usage:      10 * time.Second,
-		Cost:       10,
-	}
-	cdrStats.AppendCDR(cdr, nil)
-	cdr = &CDR{
-		Tenant:     "cgrates.org",
-		Category:   "call",
-		AnswerTime: time.Now(),
-		SetupTime:  time.Now(),
-		Usage:      2 * time.Second,
-		Cost:       4,
-	}
-	cdrStats.AppendCDR(cdr, nil)
-	valMap := make(map[string]float64)
-	if err := cdrStats.GetValues("CDRST2", &valMap); err != nil {
-		t.Error("Error getting metric values: ", err)
-	}
-	if len(valMap) != 2 || valMap["ACD"] != 6 || valMap["ASR"] != 100 {
-		t.Error("Error on metric map: ", valMap)
-	}
-}
-
-func TestStatsReloadQueues(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	cdr := &CDR{
-		Tenant:     "cgrates.org",
-		Category:   "call",
-		AnswerTime: time.Now(),
-		SetupTime:  time.Now(),
-		Usage:      10 * time.Second,
-		Cost:       10,
-	}
-	cdrStats.AppendCDR(cdr, nil)
-	if err := cdrStats.ReloadQueues(nil, nil); err != nil {
-		t.Error("Error reloading queues: ", err)
-	}
-	ids := []string{}
-	if err := cdrStats.GetQueueIds(0, &ids); err != nil {
-		t.Error("Error getting queue ids: ", err)
-	}
-	result := len(ids)
-	expected := 5
-	if result != expected {
-		t.Errorf("Error loading stats queues. Expected %v was %v: %v", expected, result, ids)
-	}
-	valMap := make(map[string]float64)
-	if err := cdrStats.GetValues("CDRST2", &valMap); err != nil {
-		t.Error("Error getting metric values: ", err)
-	}
-	if len(valMap) != 2 || valMap["ACD"] != 10 || valMap["ASR"] != 100 {
-		t.Error("Error on metric map: ", valMap)
-	}
-}
-
-func TestStatsReloadQueuesWithDefault(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	cdrStats.AddQueue(&CdrStats{
-		Id: utils.META_DEFAULT,
-	}, nil)
-	cdr := &CDR{
-		Tenant:     "cgrates.org",
-		Category:   "call",
-		AnswerTime: time.Now(),
-		SetupTime:  time.Now(),
-		Usage:      10 * time.Second,
-		Cost:       10,
-	}
-	cdrStats.AppendCDR(cdr, nil)
-
-	if err := cdrStats.ReloadQueues(nil, nil); err != nil {
-		t.Error("Error reloading queues: ", err)
-	}
-	ids := []string{}
-	if err := cdrStats.GetQueueIds(0, &ids); err != nil {
-		t.Error("Error getting queue ids: ", err)
-	}
-	result := len(ids)
-	expected := 6
-	if result != expected {
-		t.Errorf("Error loading stats queues. Expected %v was %v", expected, result)
-	}
-	valMap := make(map[string]float64)
-	if err := cdrStats.GetValues("CDRST2", &valMap); err != nil {
-		t.Error("Error getting metric values: ", err)
-	}
-	if len(valMap) != 2 || valMap["ACD"] != 10 || valMap["ASR"] != 100 {
-		t.Error("Error on metric map: ", valMap)
-	}
-}
-
-func TestStatsReloadQueuesWithIds(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	cdr := &CDR{
-		Tenant:     "cgrates.org",
-		Category:   "call",
-		AnswerTime: time.Now(),
-		SetupTime:  time.Now(),
-		Usage:      10 * time.Second,
-		Cost:       10,
-	}
-	cdrStats.AppendCDR(cdr, nil)
-	if err := cdrStats.ReloadQueues([]string{"CDRST1"}, nil); err != nil {
-		t.Error("Error reloading queues: ", err)
-	}
-	ids := []string{}
-	if err := cdrStats.GetQueueIds(0, &ids); err != nil {
-		t.Error("Error getting queue ids: ", err)
-	}
-	result := len(ids)
-	expected := 6
-	if result != expected {
-		t.Errorf("Error loading stats queues. Expected %v was %v", expected, result)
-	}
-	valMap := make(map[string]float64)
-	if err := cdrStats.GetValues("CDRST2", &valMap); err != nil {
-		t.Error("Error getting metric values: ", err)
-	}
-	if len(valMap) != 2 || valMap["ACD"] != 10 || valMap["ASR"] != 100 {
-		t.Error("Error on metric map: ", valMap)
-	}
-}
-
-func TestStatsSaveQueues(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	cdr := &CDR{
-		Tenant:     "cgrates.org",
-		Category:   "call",
-		AnswerTime: time.Now(),
-		SetupTime:  time.Now(),
-		Usage:      10 * time.Second,
-		Cost:       10,
-	}
-	cdrStats.AppendCDR(cdr, nil)
-	ids := []string{}
-	cdrStats.GetQueueIds(0, &ids)
-	if _, found := cdrStats.queueSavers["CDRST1"]; !found {
-		t.Error("Error creating queue savers: ", cdrStats.queueSavers)
-	}
-}
-
-func TestStatsResetQueues(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	cdr := &CDR{
-		Tenant:     "cgrates.org",
-		Category:   "call",
-		AnswerTime: time.Now(),
-		SetupTime:  time.Now(),
-		Usage:      10 * time.Second,
-		Cost:       10,
-	}
-	cdrStats.AppendCDR(cdr, nil)
-	if err := cdrStats.ResetQueues(nil, nil); err != nil {
-		t.Error("Error reloading queues: ", err)
-	}
-	ids := []string{}
-	if err := cdrStats.GetQueueIds(0, &ids); err != nil {
-		t.Error("Error getting queue ids: ", err)
-	}
-	result := len(ids)
-	expected := 6
-	if result != expected {
-		t.Errorf("Error loading stats queues. Expected %v was %v", expected, result)
-	}
-	valMap := make(map[string]float64)
-	if err := cdrStats.GetValues("CDRST2", &valMap); err != nil {
-		t.Error("Error getting metric values: ", err)
-	}
-	if len(valMap) != 2 || valMap["ACD"] != STATS_NA || valMap["ASR"] != STATS_NA {
-		t.Error("Error on metric map: ", valMap)
-	}
-}
-
-func TestStatsResetQueuesWithIds(t *testing.T) {
-	cdrStats := NewStats(dataStorage, 0)
-	cdr := &CDR{
-		Tenant:     "cgrates.org",
-		Category:   "call",
-		AnswerTime: time.Now(),
-		SetupTime:  time.Now(),
-		Usage:      10 * time.Second,
-		Cost:       10,
-	}
-	cdrStats.AppendCDR(cdr, nil)
-	if err := cdrStats.ResetQueues([]string{"CDRST1"}, nil); err != nil {
-		t.Error("Error reloading queues: ", err)
-	}
-	ids := []string{}
-	if err := cdrStats.GetQueueIds(0, &ids); err != nil {
-		t.Error("Error getting queue ids: ", err)
-	}
-	result := len(ids)
-	expected := 6
-	if result != expected {
-		t.Errorf("Error loading stats queues. Expected %v was %v", expected, result)
-	}
-	valMap := make(map[string]float64)
-	if err := cdrStats.GetValues("CDRST2", &valMap); err != nil {
-		t.Error("Error getting metric values: ", err)
-	}
-	if len(valMap) != 2 || valMap["ACD"] != 10 || valMap["ASR"] != 100 {
-		t.Error("Error on metric map: ", valMap)
-	}
-}
-
-func TestStatsSaveRestoreQeue(t *testing.T) {
-	sq := &StatsQueue{
-		conf: &CdrStats{Id: "TTT"},
-		Cdrs: []*QCdr{&QCdr{Cost: 9.0}},
-	}
-	if err := dataStorage.SetCdrStatsQueue(sq); err != nil {
-		t.Error("Error saving metric: ", err)
-	}
-	recovered, err := dataStorage.GetCdrStatsQueue(sq.GetId())
+	filters1 = append(filters1, x)
+	x, err = NewFilterRule(MetaGreaterOrEqual, "UsageInterval", []string{second.String()})
 	if err != nil {
-		t.Error("Error loading metric: ", err)
+		t.Errorf("Error: %+v", err)
 	}
-	if len(recovered.Cdrs) != 1 || recovered.Cdrs[0].Cost != sq.Cdrs[0].Cost {
-		t.Errorf("Expecting %+v got: %+v", sq.Cdrs[0], recovered.Cdrs[0])
+	filters1 = append(filters1, x)
+	x, err = NewFilterRule(MetaGreaterOrEqual, utils.Usage, []string{second.String()})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	filters1 = append(filters1, x)
+	x, err = NewFilterRule(MetaGreaterOrEqual, "Weight", []string{"9.0"})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	filters1 = append(filters1, x)
+	filter7 := &Filter{Tenant: config.CgrConfig().DefaultTenant, ID: "filter7", Rules: filters1}
+	dmSTS.SetFilter(filter7)
+	ref.IndexTPFilter(FilterToTPFilter(filter7), "statsprofile1")
+	//filter2
+	x, err = NewFilterRule(MetaString, "Stats", []string{"StatsProfile2"})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	filters2 = append(filters2, x)
+	x, err = NewFilterRule(MetaGreaterOrEqual, "PddInterval", []string{second.String()})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	filters2 = append(filters2, x)
+	x, err = NewFilterRule(MetaGreaterOrEqual, utils.Usage, []string{second.String()})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	filters2 = append(filters2, x)
+	x, err = NewFilterRule(MetaGreaterOrEqual, "Weight", []string{"15.0"})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	filters2 = append(filters2, x)
+	filter8 := &Filter{Tenant: config.CgrConfig().DefaultTenant, ID: "filter8", Rules: filters2}
+	dmSTS.SetFilter(filter8)
+	ref.IndexTPFilter(FilterToTPFilter(filter8), "statsprofile2")
+	//prefix filter
+	x, err = NewFilterRule(MetaPrefix, "Stats", []string{"StatsProfilePrefix"})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	preffilter = append(preffilter, x)
+	x, err = NewFilterRule(MetaGreaterOrEqual, utils.Usage, []string{second.String()})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	preffilter = append(preffilter, x)
+	preffilter4 := &Filter{Tenant: config.CgrConfig().DefaultTenant, ID: "preffilter4", Rules: preffilter}
+	dmSTS.SetFilter(preffilter4)
+	ref.IndexTPFilter(FilterToTPFilter(preffilter4), "statsprofile3")
+	//default filter
+	x, err = NewFilterRule(MetaGreaterOrEqual, "Weight", []string{"200.00"})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	defaultf = append(defaultf, x)
+	x, err = NewFilterRule(MetaGreaterOrEqual, utils.Usage, []string{second.String()})
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	defaultf = append(defaultf, x)
+	defaultf4 := &Filter{Tenant: config.CgrConfig().DefaultTenant, ID: "defaultf4", Rules: defaultf}
+	dmSTS.SetFilter(defaultf4)
+	ref.IndexTPFilter(FilterToTPFilter(defaultf4), "statsprofile4")
+	for _, stq := range stqs {
+		dmSTS.SetStatQueue(stq)
+	}
+	for _, sqp := range sqps {
+		dmSTS.SetStatQueueProfile(sqp, false)
+	}
+	err = ref.StoreIndexes(true, utils.NonTransactional)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
 	}
 }
 
-func TestStatsPurgeTimeOne(t *testing.T) {
-	sq := NewStatsQueue(&CdrStats{Metrics: []string{ASR, ACD, TCD, ACC, TCC}, TimeWindow: 30 * time.Minute})
-	cdr := &CDR{
-		SetupTime:  time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		AnswerTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		Usage:      10 * time.Second,
-		Cost:       1,
+func TestStatsmatchingStatQueuesForEvent(t *testing.T) {
+	msq, err := stsserv.matchingStatQueuesForEvent(statsEvs[0])
+	if err != nil {
+		t.Errorf("Error: %+v", err)
 	}
-	qcdr := sq.AppendCDR(cdr)
-	qcdr.EventTime = qcdr.SetupTime
-	s := sq.GetStats()
-	if s[ASR] != -1 ||
-		s[ACD] != -1 ||
-		s[TCD] != -1 ||
-		s[ACC] != -1 ||
-		s[TCC] != -1 {
-		t.Errorf("Error getting stats: %+v", s)
+	if !reflect.DeepEqual(stqs[0].Tenant, msq[0].Tenant) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[0].Tenant, msq[0].Tenant)
+	} else if !reflect.DeepEqual(stqs[0].ID, msq[0].ID) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[0].ID, msq[0].ID)
+	} else if !reflect.DeepEqual(stqs[0].sqPrfl, msq[0].sqPrfl) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[0].sqPrfl, msq[0].sqPrfl)
 	}
-}
-
-func TestStatsPurgeTime(t *testing.T) {
-	sq := NewStatsQueue(&CdrStats{Metrics: []string{ASR, ACD, TCD, ACC, TCC}, TimeWindow: 30 * time.Minute})
-	cdr := &CDR{
-		SetupTime:  time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		AnswerTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		Usage:      10 * time.Second,
-		Cost:       1,
+	msq, err = stsserv.matchingStatQueuesForEvent(statsEvs[1])
+	if err != nil {
+		t.Errorf("Error: %+v", err)
 	}
-	qcdr := sq.AppendCDR(cdr)
-	qcdr.EventTime = qcdr.SetupTime
-	cdr.Cost = 2
-	qcdr = sq.AppendCDR(cdr)
-	qcdr.EventTime = qcdr.SetupTime
-	cdr.Cost = 3
-	qcdr = sq.AppendCDR(cdr)
-	qcdr.EventTime = qcdr.SetupTime
-	s := sq.GetStats()
-	if s[ASR] != -1 ||
-		s[ACD] != -1 ||
-		s[TCD] != -1 ||
-		s[ACC] != -1 ||
-		s[TCC] != -1 {
-		t.Errorf("Error getting stats: %+v", s)
+	if !reflect.DeepEqual(stqs[1].Tenant, msq[0].Tenant) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[1].Tenant, msq[0].Tenant)
+	} else if !reflect.DeepEqual(stqs[1].ID, msq[0].ID) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[1].ID, msq[0].ID)
+	} else if !reflect.DeepEqual(stqs[1].sqPrfl, msq[0].sqPrfl) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[1].sqPrfl, msq[0].sqPrfl)
 	}
-}
-
-func TestStatsPurgeTimeFirst(t *testing.T) {
-	sq := NewStatsQueue(&CdrStats{Metrics: []string{ASR, ACD, TCD, ACC, TCC}, TimeWindow: 30 * time.Minute})
-	cdr := &CDR{
-		SetupTime:  time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		AnswerTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		Usage:      10 * time.Second,
-		Cost:       1,
+	msq, err = stsserv.matchingStatQueuesForEvent(statsEvs[2])
+	if err != nil {
+		t.Errorf("Error: %+v", err)
 	}
-	qcdr := sq.AppendCDR(cdr)
-	cdr.Cost = 2
-	cdr.SetupTime = time.Date(2024, 7, 14, 14, 25, 0, 0, time.UTC)
-	cdr.AnswerTime = time.Date(2024, 7, 14, 14, 25, 0, 0, time.UTC)
-	qcdr.EventTime = qcdr.SetupTime
-	sq.AppendCDR(cdr)
-	cdr.Cost = 3
-	sq.AppendCDR(cdr)
-	s := sq.GetStats()
-	if s[ASR] != 100 ||
-		s[ACD] != 10 ||
-		s[TCD] != 20 ||
-		s[ACC] != 2.5 ||
-		s[TCC] != 5 {
-		t.Errorf("Error getting stats: %+v", s)
+	if !reflect.DeepEqual(stqs[2].Tenant, msq[0].Tenant) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[2].Tenant, msq[0].Tenant)
+	} else if !reflect.DeepEqual(stqs[2].ID, msq[0].ID) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[2].ID, msq[0].ID)
+	} else if !reflect.DeepEqual(stqs[2].sqPrfl, msq[0].sqPrfl) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[2].sqPrfl, msq[0].sqPrfl)
+	}
+	msq, err = stsserv.matchingStatQueuesForEvent(statsEvs[3])
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	if !reflect.DeepEqual(stqs[3].Tenant, msq[0].Tenant) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[3].Tenant, msq[0].Tenant)
+	} else if !reflect.DeepEqual(stqs[3].ID, msq[0].ID) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[3].ID, msq[0].ID)
+	} else if !reflect.DeepEqual(stqs[3].sqPrfl, msq[0].sqPrfl) {
+		t.Errorf("Expecting: %+v, received: %+v", stqs[3].sqPrfl, msq[0].sqPrfl)
 	}
 }
 
-func TestStatsPurgeLength(t *testing.T) {
-	sq := NewStatsQueue(&CdrStats{Metrics: []string{ASR, ACD, TCD, ACC, TCC}, QueueLength: 1})
-	cdr := &CDR{
-		SetupTime:  time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		AnswerTime: time.Date(2014, 7, 14, 14, 25, 0, 0, time.UTC),
-		Usage:      10 * time.Second,
-		Cost:       1,
+func TestStatSprocessEvent(t *testing.T) {
+	stq := map[string]string{}
+	reply := ""
+	err := stsserv.V1ProcessEvent(statsEvs[0], &reply)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	} else if reply != utils.OK {
+		t.Errorf("received reply: %s", reply)
 	}
-	sq.AppendCDR(cdr)
-	cdr.Cost = 2
-	sq.AppendCDR(cdr)
-	cdr.Cost = 3
-	sq.AppendCDR(cdr)
-	s := sq.GetStats()
-	if s[ASR] != 100 ||
-		s[ACD] != 10 ||
-		s[TCD] != 10 ||
-		s[ACC] != 3 ||
-		s[TCC] != 3 {
-		t.Errorf("Error getting stats: %+v", s)
+	err = stsserv.V1GetQueueStringMetrics(&utils.TenantID{Tenant: stqs[0].Tenant, ID: stqs[0].ID}, &stq)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	err = stsserv.V1ProcessEvent(statsEvs[1], &reply)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	} else if reply != utils.OK {
+		t.Errorf("received reply: %s", reply)
+	}
+	err = stsserv.V1GetQueueStringMetrics(&utils.TenantID{Tenant: stqs[1].Tenant, ID: stqs[1].ID}, &stq)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	err = stsserv.V1ProcessEvent(statsEvs[2], &reply)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	} else if reply != utils.OK {
+		t.Errorf("received reply: %s", reply)
+	}
+	err = stsserv.V1GetQueueStringMetrics(&utils.TenantID{Tenant: stqs[2].Tenant, ID: stqs[2].ID}, &stq)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	}
+	err = stsserv.V1ProcessEvent(statsEvs[3], &reply)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
+	} else if reply != utils.OK {
+		t.Errorf("received reply: %s", reply)
+	}
+	err = stsserv.V1GetQueueStringMetrics(&utils.TenantID{Tenant: stqs[3].Tenant, ID: stqs[3].ID}, &stq)
+	if err != nil {
+		t.Errorf("Error: %+v", err)
 	}
 }

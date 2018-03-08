@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -38,9 +39,6 @@ func (self *ApierV1) GetMaxUsage(usageRecord engine.UsageRecord, maxUsage *float
 	if usageRecord.RequestType == "" {
 		usageRecord.RequestType = self.Config.DefaultReqType
 	}
-	if usageRecord.Direction == "" {
-		usageRecord.Direction = utils.OUT
-	}
 	if usageRecord.Tenant == "" {
 		usageRecord.Tenant = self.Config.DefaultTenant
 	}
@@ -56,7 +54,7 @@ func (self *ApierV1) GetMaxUsage(usageRecord engine.UsageRecord, maxUsage *float
 	if usageRecord.Usage == "" {
 		usageRecord.Usage = strconv.FormatFloat(self.Config.MaxCallDuration.Seconds(), 'f', -1, 64)
 	}
-	storedCdr, err := usageRecord.AsStoredCdr(self.Config.DefaultTimezone)
+	storedCdr, err := usageRecord.AsCDR(self.Config.DefaultTimezone)
 	if err != nil {
 		return utils.NewErrServerError(err)
 	}

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -36,7 +37,7 @@ const ACC = "ACC"
 const TCC = "TCC"
 const PDD = "PDD"
 const DDC = "DDC"
-const STATS_NA = -1
+const STATS_NA = -1.0
 
 func CreateMetric(metric string) Metric {
 	switch metric {

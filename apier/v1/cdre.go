@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -25,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"path"
 	"strconv"
@@ -265,13 +267,29 @@ func (self *ApierV1) ExportCDRs(arg ArgExportCDRs, reply *RplExportedCDRs) (err 
 	if arg.ExportID != nil && len(*arg.ExportID) != 0 {
 		exportID = *arg.ExportID
 	}
-	fileName := fmt.Sprintf("cdre_%s.%s", exportID, exportFormat)
+	var expFormat string
+	switch exportFormat {
+	case utils.MetaFileFWV:
+		expFormat = "fwv"
+	case utils.MetaFileCSV:
+		expFormat = "csv"
+	default:
+		expFormat = exportFormat
+	}
+	fileName := fmt.Sprintf("cdre_%s.%s", exportID, expFormat)
 	if arg.ExportFileName != nil && len(*arg.ExportFileName) != 0 {
 		fileName = *arg.ExportFileName
 	}
-	filePath := path.Join(eDir, fileName)
-	if exportFormat == utils.DRYRUN {
+	var filePath string
+	switch exportFormat {
+	case utils.MetaFileFWV, utils.MetaFileCSV:
+		filePath = path.Join(eDir, fileName)
+	case utils.DRYRUN:
 		filePath = utils.DRYRUN
+	default:
+		u, _ := url.Parse(eDir)
+		u.Path = path.Join(u.Path, fileName)
+		filePath = u.String()
 	}
 	usageMultiplyFactor := exportTemplate.UsageMultiplyFactor
 	for k, v := range arg.UsageMultiplyFactor {
@@ -295,7 +313,8 @@ func (self *ApierV1) ExportCDRs(arg ArgExportCDRs, reply *RplExportedCDRs) (err 
 	} else if len(cdrs) == 0 {
 		return
 	}
-	cdrexp, err := engine.NewCDRExporter(cdrs, exportTemplate, exportFormat, filePath, utils.META_NONE, exportID,
+	cdrexp, err := engine.NewCDRExporter(cdrs, exportTemplate, exportFormat,
+		filePath, utils.META_NONE, exportID,
 		synchronous, attempts, fieldSep, usageMultiplyFactor,
 		costMultiplyFactor, roundingDecimals, self.Config.HttpSkipTlsVerify, self.HTTPPoster)
 	if err != nil {

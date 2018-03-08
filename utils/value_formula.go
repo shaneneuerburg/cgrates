@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package utils
 
 import (
@@ -32,9 +33,12 @@ type ValueFormula struct {
 	Static float64
 }
 
-func ParseBalanceFilterValue(val string) (*ValueFormula, error) {
-	u, err := strconv.ParseFloat(val, 64)
-	if err == nil {
+func ParseBalanceFilterValue(tor string, val string) (*ValueFormula, error) {
+	if tor == VOICE { // VOICE balance is parsed as nanoseconds with support for time duration strings
+		if d, err := ParseDurationWithNanosecs(val); err == nil {
+			return &ValueFormula{Static: float64(d.Nanoseconds())}, err
+		}
+	} else if u, err := strconv.ParseFloat(val, 64); err == nil {
 		return &ValueFormula{Static: u}, err
 	}
 	var vf ValueFormula
@@ -107,10 +111,10 @@ func incrementalFormula(params map[string]interface{}) float64 {
 			return units / 24
 		}
 		if interval == "month" {
-			return units / ( DaysInMonth(now.Year(), now.Month()) * 24 )
+			return units / (DaysInMonth(now.Year(), now.Month()) * 24)
 		}
 		if interval == "year" {
-			return units / ( DaysInYear(now.Year()) * 24 )
+			return units / (DaysInYear(now.Year()) * 24)
 		}
 	}
 	if increment == "minute" {

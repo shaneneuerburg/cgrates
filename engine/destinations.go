@@ -15,15 +15,13 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/cgrates/cgrates/utils"
-
-	"github.com/cgrates/cgrates/history"
 )
 
 func NewDestinationFromTPDestination(tpDst *utils.TPDestination) *Destination {
@@ -65,20 +63,9 @@ func (d *Destination) AddPrefix(pfx string) {
 	d.Prefixes = append(d.Prefixes, pfx)
 }
 
-// history record method
-func (d *Destination) GetHistoryRecord(deleted bool) history.Record {
-	js, _ := json.Marshal(d)
-	return history.Record{
-		Id:       d.Id,
-		Filename: history.DESTINATIONS_FN,
-		Payload:  js,
-		Deleted:  deleted,
-	}
-}
-
 // Reverse search in cache to see if prefix belongs to destination id
 func CachedDestHasPrefix(destId, prefix string) bool {
-	if cached, err := dataStorage.GetReverseDestination(prefix, false, utils.NonTransactional); err == nil {
+	if cached, err := dm.DataDB().GetReverseDestination(prefix, false, utils.NonTransactional); err == nil {
 		return utils.IsSliceMember(cached, destId)
 	}
 	return false

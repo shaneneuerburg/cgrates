@@ -21,16 +21,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/scheduler"
 	"github.com/cgrates/cgrates/utils"
 )
 
-var dataDB3 engine.DataDB
+var dataDB3 *engine.DataManager
 
 func TestSetStorage3(t *testing.T) {
-	dataDB3, _ = engine.NewMapStorageJson()
+	data, _ := engine.NewMapStorageJson()
+	dataDB3 = engine.NewDataManager(data)
 	engine.SetDataStorage(dataDB3)
 }
 
@@ -49,7 +49,7 @@ RP_UK,DR_UK_Mobile_BIG5,ALWAYS,10`
 *out,cgrates.org,call,discounted_minutes,2013-01-06T00:00:00Z,RP_UK_Mobile_BIG5_PKG,,`
 	sharedGroups := ``
 	lcrs := ``
-	actions := `TOPUP10_AC1,*topup_reset,,,,*voice,*out,,DST_UK_Mobile_BIG5,discounted_minutes,,*unlimited,,40,10,false,false,10`
+	actions := `TOPUP10_AC1,*topup_reset,,,,*voice,*out,,DST_UK_Mobile_BIG5,discounted_minutes,,*unlimited,,40s,10,false,false,10`
 	actionPlans := `TOPUP10_AT,TOPUP10_AC1,ASAP,10`
 	actionTriggers := ``
 	accountActions := `cgrates.org,12346,TOPUP10_AT,,,`
@@ -58,8 +58,15 @@ RP_UK,DR_UK_Mobile_BIG5,ALWAYS,10`
 	users := ``
 	aliases := ``
 	resLimits := ``
-	csvr := engine.NewTpReader(dataDB3, engine.NewStringCSVStorage(',', destinations, timings, rates, destinationRates, ratingPlans, ratingProfiles,
-		sharedGroups, lcrs, actions, actionPlans, actionTriggers, accountActions, derivedCharges, cdrStats, users, aliases, resLimits), "", "")
+	stats := ``
+	thresholds := ``
+	filters := ``
+	suppliers := ``
+	aliasProfiles := ``
+	csvr := engine.NewTpReader(dataDB3.DataDB(), engine.NewStringCSVStorage(',', destinations, timings, rates,
+		destinationRates, ratingPlans, ratingProfiles, sharedGroups, lcrs, actions, actionPlans, actionTriggers,
+		accountActions, derivedCharges, cdrStats, users, aliases, resLimits, stats,
+		thresholds, filters, suppliers, aliasProfiles), "", "")
 	if err := csvr.LoadDestinations(); err != nil {
 		t.Fatal(err)
 	}
@@ -100,25 +107,26 @@ RP_UK,DR_UK_Mobile_BIG5,ALWAYS,10`
 		t.Fatal(err)
 	}
 	csvr.WriteToDatabase(false, false, false)
-	if acnt, err := dataDB3.GetAccount("cgrates.org:12346"); err != nil {
+	if acnt, err := dataDB3.DataDB().GetAccount("cgrates.org:12346"); err != nil {
 		t.Error(err)
 	} else if acnt == nil {
 		t.Error("No account saved")
 	}
-	cache.Flush()
-	dataDB3.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	dataDB3.LoadAccountingCache(nil, nil, nil)
+	engine.Cache.Clear(nil)
+	dataDB3.LoadDataDBCache(nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	if cachedDests := cache.CountEntries(utils.DESTINATION_PREFIX); cachedDests != 0 {
+	if cachedDests := len(engine.Cache.GetItemIDs(utils.CacheDestinations, "")); cachedDests != 0 {
 		t.Error("Wrong number of cached destinations found", cachedDests)
 	}
-	if cachedRPlans := cache.CountEntries(utils.RATING_PLAN_PREFIX); cachedRPlans != 2 {
+	if cachedRPlans := len(engine.Cache.GetItemIDs(utils.CacheRatingPlans, "")); cachedRPlans != 2 {
 		t.Error("Wrong number of cached rating plans found", cachedRPlans)
 	}
-	if cachedRProfiles := cache.CountEntries(utils.RATING_PROFILE_PREFIX); cachedRProfiles != 0 {
+	if cachedRProfiles := len(engine.Cache.GetItemIDs(utils.CacheRatingProfiles, "")); cachedRProfiles != 0 {
 		t.Error("Wrong number of cached rating profiles found", cachedRProfiles)
 	}
-	if cachedActions := cache.CountEntries(utils.ACTION_PREFIX); cachedActions != 0 {
+	if cachedActions := len(engine.Cache.GetItemIDs(utils.CacheActions, "")); cachedActions != 0 {
 		t.Error("Wrong number of cached actions found", cachedActions)
 	}
 }
@@ -126,11 +134,11 @@ RP_UK,DR_UK_Mobile_BIG5,ALWAYS,10`
 func TestExecuteActions3(t *testing.T) {
 	scheduler.NewScheduler(dataDB3).Reload()
 	time.Sleep(10 * time.Millisecond) // Give time to scheduler to topup the account
-	if acnt, err := dataDB3.GetAccount("cgrates.org:12346"); err != nil {
+	if acnt, err := dataDB3.DataDB().GetAccount("cgrates.org:12346"); err != nil {
 		t.Error(err)
 	} else if len(acnt.BalanceMap) != 1 {
 		t.Error("Account does not have enough balances: ", acnt.BalanceMap)
-	} else if acnt.BalanceMap[utils.VOICE][0].Value != 40 {
+	} else if acnt.BalanceMap[utils.VOICE][0].Value != 40*float64(time.Second) {
 		t.Error("Account does not have enough minutes in balance", acnt.BalanceMap[utils.VOICE][0].Value)
 	}
 }
@@ -151,14 +159,14 @@ func TestDebit3(t *testing.T) {
 	} else if cc.Cost != 0.01 {
 		t.Error("Wrong cost returned: ", cc.Cost)
 	}
-	acnt, err := dataDB3.GetAccount("cgrates.org:12346")
+	acnt, err := dataDB3.DataDB().GetAccount("cgrates.org:12346")
 	if err != nil {
 		t.Error(err)
 	}
 	if len(acnt.BalanceMap) != 2 {
 		t.Error("Wrong number of user balances found", acnt.BalanceMap)
 	}
-	if acnt.BalanceMap[utils.VOICE][0].Value != 20 {
+	if acnt.BalanceMap[utils.VOICE][0].Value != 20*float64(time.Second) {
 		t.Error("Account does not have expected minutes in balance", acnt.BalanceMap[utils.VOICE][0].Value)
 	}
 	if acnt.BalanceMap[utils.MONETARY][0].Value != -0.01 {

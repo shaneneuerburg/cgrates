@@ -33,7 +33,7 @@ import (
 	"github.com/cgrates/cgrates/apier/v2"
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/sessionmanager"
+	"github.com/cgrates/cgrates/sessions"
 	"github.com/cgrates/cgrates/utils"
 )
 
@@ -86,8 +86,8 @@ func TestA1itLoadTPFromFolder(t *testing.T) {
 		t.Error(reply)
 	}
 	time.Sleep(time.Duration(100 * time.Millisecond))
-	tStart, _ := utils.ParseDate("2017-03-03T10:39:33Z")
-	tEnd, _ := utils.ParseDate("2017-03-03T12:30:13Z") // Equivalent of 10240 which is a chunk of data charged
+	tStart := time.Date(2017, 3, 3, 10, 39, 33, 0, time.UTC)
+	tEnd := time.Date(2017, 3, 3, 10, 39, 33, 10240, time.UTC)
 	cd := engine.CallDescriptor{
 		Direction:   "*out",
 		Category:    "data1",
@@ -100,7 +100,7 @@ func TestA1itLoadTPFromFolder(t *testing.T) {
 	var cc engine.CallCost
 	if err := a1rpc.Call("Responder.GetCost", cd, &cc); err != nil {
 		t.Error("Got error on Responder.GetCost: ", err.Error())
-	} else if cc.Cost != 0.0 || cc.RatedUsage != 10240 {
+	} else if cc.Cost != 0.0 {
 		t.Errorf("Calling Responder.GetCost got callcost: %v", cc)
 	}
 }
@@ -127,69 +127,70 @@ func TestA1itAddBalance1(t *testing.T) {
 }
 
 func TestA1itDataSession1(t *testing.T) {
-	smgEv := sessionmanager.SMGenericEvent{
+	smgEv := sessions.SMGenericEvent{
 		utils.EVENT_NAME:         "INITIATE_SESSION",
 		utils.TOR:                utils.DATA,
-		utils.ACCID:              "504966119",
-		utils.DIRECTION:          utils.OUT,
-		utils.ACCOUNT:            "rpdata1",
-		utils.SUBJECT:            "rpdata1",
-		utils.DESTINATION:        "data",
-		utils.CATEGORY:           "data1",
-		utils.TENANT:             "cgrates.org",
-		utils.REQTYPE:            utils.META_PREPAID,
-		utils.SETUP_TIME:         "2017-03-03 11:39:32 +0100 CET",
-		utils.ANSWER_TIME:        "2017-03-03 11:39:32 +0100 CET",
-		utils.USAGE:              "10240",
+		utils.OriginID:           "504966119",
+		utils.Direction:          utils.OUT,
+		utils.Account:            "rpdata1",
+		utils.Subject:            "rpdata1",
+		utils.Destination:        "data",
+		utils.Category:           "data1",
+		utils.Tenant:             "cgrates.org",
+		utils.RequestType:        utils.META_PREPAID,
+		utils.SetupTime:          "2017-03-03 11:39:32 +0100 CET",
+		utils.AnswerTime:         "2017-03-03 11:39:32 +0100 CET",
+		utils.Usage:              "10240",
 		utils.SessionTTL:         "28800s",
 		utils.SessionTTLLastUsed: "0s",
 		utils.SessionTTLUsage:    "0s",
 	}
 	var maxUsage float64
-	if err := a1rpc.Call("SMGenericV1.InitiateSession", smgEv, &maxUsage); err != nil {
+	if err := a1rpc.Call(utils.SMGenericV2InitiateSession, smgEv, &maxUsage); err != nil {
 		t.Error(err)
 	} else if maxUsage != 10240 {
 		t.Error("Received: ", maxUsage)
 	}
-	smgEv = sessionmanager.SMGenericEvent{
+	smgEv = sessions.SMGenericEvent{
 		utils.EVENT_NAME:         "UPDATE_SESSION",
-		utils.ACCOUNT:            "rpdata1",
-		utils.CATEGORY:           "data1",
-		utils.DESTINATION:        "data",
-		utils.DIRECTION:          utils.OUT,
+		utils.Account:            "rpdata1",
+		utils.Category:           "data1",
+		utils.Destination:        "data",
+		utils.Direction:          utils.OUT,
 		utils.InitialOriginID:    "504966119",
 		utils.LastUsed:           "0s",
-		utils.ACCID:              "504966119-1",
-		utils.REQTYPE:            utils.META_PREPAID,
+		utils.OriginID:           "504966119-1",
+		utils.RequestType:        utils.META_PREPAID,
 		utils.SessionTTL:         "28800s",
 		utils.SessionTTLLastUsed: "2097152s",
 		utils.SessionTTLUsage:    "0s",
-		utils.SUBJECT:            "rpdata1",
-		utils.TENANT:             "cgrates.org",
+		utils.Subject:            "rpdata1",
+		utils.Tenant:             "cgrates.org",
 		utils.TOR:                utils.DATA,
-		utils.SETUP_TIME:         "2017-03-03 11:39:32 +0100 CET",
-		utils.ANSWER_TIME:        "2017-03-03 11:39:32 +0100 CET",
-		utils.USAGE:              "2097152",
+		utils.SetupTime:          "2017-03-03 11:39:32 +0100 CET",
+		utils.AnswerTime:         "2017-03-03 11:39:32 +0100 CET",
+		utils.Usage:              "2097152",
 	}
-	if err := a1rpc.Call("SMGenericV1.UpdateSession", smgEv, &maxUsage); err != nil {
+	if err := a1rpc.Call(utils.SMGenericV2UpdateSession,
+		smgEv, &maxUsage); err != nil {
 		t.Error(err)
 	} else if maxUsage != 2097152 {
 		t.Error("Bad max usage: ", maxUsage)
 	}
-	smgEv = sessionmanager.SMGenericEvent{
+	smgEv = sessions.SMGenericEvent{
 		utils.EVENT_NAME:     "TERMINATE_SESSION",
-		utils.ACCOUNT:        "rpdata1",
-		utils.CATEGORY:       "data1",
-		utils.DESTINATION:    "data",
-		utils.DIRECTION:      utils.OUT,
+		utils.Account:        "rpdata1",
+		utils.Category:       "data1",
+		utils.Destination:    "data",
+		utils.Direction:      utils.OUT,
 		utils.LastUsed:       "2202800",
-		utils.ACCID:          "504966119-1",
+		utils.OriginID:       "504966119-1",
 		utils.OriginIDPrefix: "504966119-1",
-		utils.REQTYPE:        utils.META_PREPAID,
-		utils.SETUP_TIME:     "2017-03-03 11:39:32 +0100 CET",
-		utils.ANSWER_TIME:    "2017-03-03 11:39:32 +0100 CET",
-		utils.SUBJECT:        "rpdata1",
-		utils.TENANT:         "cgrates.org",
+		utils.RequestType:    utils.META_PREPAID,
+		utils.SetupTime:      "2017-03-03 11:39:32 +0100 CET",
+		utils.AnswerTime:     "2017-03-03 11:39:32 +0100 CET",
+		utils.Subject:        "rpdata1",
+		utils.Tenant:         "cgrates.org",
 		utils.TOR:            utils.DATA,
 	}
 	var rpl string
@@ -217,7 +218,7 @@ func TestA1itDataSession1(t *testing.T) {
 			t.Error(err)
 		}
 		if len(cc.Timespans) != 3 {
-			t.Errorf("Unexpected number of timespans: %+v", cc.Timespans)
+			t.Errorf("Unexpected number of timespans: %+v", len(cc.Timespans))
 		}
 		if cc.RatedUsage != 2202800 {
 			t.Errorf("RatingUsage expected: %f received %f, callcost: %+v ", 2202800.0, cc.RatedUsage, cc)

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -25,7 +26,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"testing"
 	"time"
 
 	"github.com/cgrates/cgrates/config"
@@ -34,26 +34,36 @@ import (
 )
 
 func InitDataDb(cfg *config.CGRConfig) error {
-	dataDB, err := ConfigureDataStorage(cfg.DataDbType, cfg.DataDbHost, cfg.DataDbPort, cfg.DataDbName, cfg.DataDbUser, cfg.DataDbPass, cfg.DBDataEncoding, cfg.CacheConfig, cfg.LoadHistorySize)
+	dm, err := ConfigureDataStorage(cfg.DataDbType, cfg.DataDbHost, cfg.DataDbPort, cfg.DataDbName,
+		cfg.DataDbUser, cfg.DataDbPass, cfg.DBDataEncoding, cfg.CacheCfg(), cfg.LoadHistorySize)
 	if err != nil {
 		return err
 	}
-	if err := dataDB.Flush(""); err != nil {
+	if err := dm.DataDB().Flush(""); err != nil {
 		return err
 	}
-	dataDB.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	CheckVersion(dataDB) // Write version before starting
+	//dm.LoadDataDBCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	//	Write version before starting
+	if err := SetDBVersions(dm.dataDB); err != nil {
+		return err
+	}
 	return nil
 }
 
 func InitStorDb(cfg *config.CGRConfig) error {
+	x := []string{utils.MYSQL, utils.POSTGRES}
 	storDb, err := ConfigureLoadStorage(cfg.StorDBType, cfg.StorDBHost, cfg.StorDBPort, cfg.StorDBName, cfg.StorDBUser, cfg.StorDBPass, cfg.DBDataEncoding,
-		cfg.StorDBMaxOpenConns, cfg.StorDBMaxIdleConns, cfg.StorDBCDRSIndexes)
+		cfg.StorDBMaxOpenConns, cfg.StorDBMaxIdleConns, cfg.StorDBConnMaxLifetime, cfg.StorDBCDRSIndexes)
 	if err != nil {
 		return err
 	}
 	if err := storDb.Flush(path.Join(cfg.DataFolderPath, "storage", cfg.StorDBType)); err != nil {
 		return err
+	}
+	if utils.IsSliceMember(x, cfg.StorDBType) {
+		if err := SetDBVersions(storDb); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -76,13 +86,16 @@ func StartEngine(cfgPath string, waitEngine int) (*exec.Cmd, error) {
 	var connected bool
 	for i := 0; i < 200; i++ {
 		time.Sleep(time.Duration(fib()) * time.Millisecond)
-		if _, err := jsonrpc.Dial("tcp", cfg.RPCJSONListen); err == nil {
+		if _, err := jsonrpc.Dial("tcp", cfg.RPCJSONListen); err != nil {
+			utils.Logger.Warning(fmt.Sprintf("Error <%s> when opening test connection to: <%s>",
+				err.Error(), cfg.RPCJSONListen))
+		} else {
 			connected = true
 			break
 		}
 	}
 	if !connected {
-		return nil, fmt.Errorf("engine did not open port <%d>", cfg.RPCJSONListen)
+		return nil, fmt.Errorf("engine did not open port <%s>", cfg.RPCJSONListen)
 	}
 	return engine, nil
 }
@@ -95,20 +108,13 @@ func KillEngine(waitEngine int) error {
 	return nil
 }
 
-// KillEngineTest is included in tests to shutdown the CGRateS processes
-func KillEngineTest(t *testing.T) {
-	if err := KillEngine(100); err != nil {
-		t.Error(err)
-	}
-}
-
 func StopStartEngine(cfgPath string, waitEngine int) (*exec.Cmd, error) {
 	KillEngine(waitEngine)
 	return StartEngine(cfgPath, waitEngine)
 }
 
-func LoadTariffPlanFromFolder(tpPath, timezone string, dataDB DataDB, disable_reverse bool) error {
-	loader := NewTpReader(dataDB, NewFileCSVStorage(utils.CSV_SEP,
+func LoadTariffPlanFromFolder(tpPath, timezone string, dm *DataManager, disable_reverse bool) error {
+	loader := NewTpReader(dm.dataDB, NewFileCSVStorage(utils.CSV_SEP,
 		path.Join(tpPath, utils.DESTINATIONS_CSV),
 		path.Join(tpPath, utils.TIMINGS_CSV),
 		path.Join(tpPath, utils.RATES_CSV),
@@ -126,7 +132,12 @@ func LoadTariffPlanFromFolder(tpPath, timezone string, dataDB DataDB, disable_re
 
 		path.Join(tpPath, utils.USERS_CSV),
 		path.Join(tpPath, utils.ALIASES_CSV),
-		path.Join(tpPath, utils.ResourceLimitsCsv),
+		path.Join(tpPath, utils.ResourcesCsv),
+		path.Join(tpPath, utils.StatsCsv),
+		path.Join(tpPath, utils.ThresholdsCsv),
+		path.Join(tpPath, utils.FiltersCsv),
+		path.Join(tpPath, utils.SuppliersCsv),
+		path.Join(tpPath, utils.AttributesCsv),
 	), "", timezone)
 	if err := loader.LoadAll(); err != nil {
 		return utils.NewErrServerError(err)

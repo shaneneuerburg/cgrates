@@ -15,29 +15,45 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package utils
 
 import (
 	"fmt"
 	"log"
 	"log/syslog"
+	"reflect"
 	"runtime"
 )
 
 var Logger LoggerInterface
+var nodeID string
 
 func init() {
-	Logger = new(StdLogger)
-
-	// Attempt to connect to syslog. We'll fallback to `log` otherwise.
-	var err error
-	var l *syslog.Writer
-	l, err = syslog.New(syslog.LOG_INFO, "CGRateS ")
-	if err != nil {
-		Logger.Err(fmt.Sprintf("Could not connect to syslog: %v", err))
-	} else {
-		Logger.SetSyslog(l)
+	if Logger == nil || reflect.ValueOf(Logger).IsNil() {
+		err := Newlogger(MetaSysLog, nodeID)
+		if err != nil {
+			Logger.Err(fmt.Sprintf("Could not connect to syslog: %v", err))
+		}
 	}
+}
+
+//functie Newlogger (logger type)
+func Newlogger(loggertype, id string) (err error) {
+	Logger = new(StdLogger)
+	nodeID = id
+	var l *syslog.Writer
+	if loggertype == MetaSysLog {
+		if l, err = syslog.New(syslog.LOG_INFO, fmt.Sprintf("CGRateS <%s> ", nodeID)); err != nil {
+			return err
+		} else {
+			Logger.SetSyslog(l)
+		}
+		return nil
+	} else if loggertype != MetaStdLog {
+		return fmt.Errorf("unsuported logger: <%s>", loggertype)
+	}
+	return nil
 }
 
 type LoggerInterface interface {
@@ -53,6 +69,7 @@ type LoggerInterface interface {
 	Notice(m string) error
 	Info(m string) error
 	Debug(m string) error
+	Write(p []byte) (n int, err error)
 }
 
 // log severities following rfc3164
@@ -79,6 +96,11 @@ func (sl *StdLogger) Close() (err error) {
 	}
 	return
 }
+func (sl *StdLogger) Write(p []byte) (n int, err error) {
+	s := string(p[:])
+	fmt.Print(s)
+	return 1, nil
+}
 
 //SetSyslog sets the logger for the server
 func (sl *StdLogger) SetSyslog(l *syslog.Writer) {
@@ -103,7 +125,7 @@ func (sl *StdLogger) Alert(m string) (err error) {
 	if sl.syslog != nil {
 		sl.syslog.Alert(m)
 	} else {
-		log.Print("[ALERT]" + m)
+		log.Print("CGRateS <" + nodeID + "> [ALERT] " + m)
 	}
 	return
 }
@@ -116,7 +138,7 @@ func (sl *StdLogger) Crit(m string) (err error) {
 	if sl.syslog != nil {
 		sl.syslog.Crit(m)
 	} else {
-		log.Print("[CRITICAL]" + m)
+		log.Print("CGRateS <" + nodeID + "> [CRITICAL] " + m)
 	}
 	return
 }
@@ -129,7 +151,7 @@ func (sl *StdLogger) Debug(m string) (err error) {
 	if sl.syslog != nil {
 		sl.syslog.Debug(m)
 	} else {
-		log.Print("[DEBUG]" + m)
+		log.Print("CGRateS <" + nodeID + "> [DEBUG] " + m)
 	}
 	return
 }
@@ -142,7 +164,7 @@ func (sl *StdLogger) Emerg(m string) (err error) {
 	if sl.syslog != nil {
 		sl.syslog.Emerg(m)
 	} else {
-		log.Print("[EMERGENCY]" + m)
+		log.Print("CGRateS <" + nodeID + "> [EMERGENCY] " + m)
 	}
 	return
 }
@@ -155,7 +177,7 @@ func (sl *StdLogger) Err(m string) (err error) {
 	if sl.syslog != nil {
 		sl.syslog.Err(m)
 	} else {
-		log.Print("[ERROR]" + m)
+		log.Print("CGRateS <" + nodeID + "> [ERROR] " + m)
 	}
 	return
 }
@@ -168,7 +190,7 @@ func (sl *StdLogger) Info(m string) (err error) {
 	if sl.syslog != nil {
 		sl.syslog.Info(m)
 	} else {
-		log.Print("[INFO]" + m)
+		log.Print("CGRateS <" + nodeID + "> [INFO] " + m)
 	}
 	return
 }
@@ -181,7 +203,7 @@ func (sl *StdLogger) Notice(m string) (err error) {
 	if sl.syslog != nil {
 		sl.syslog.Notice(m)
 	} else {
-		log.Print("[NOTICE]" + m)
+		log.Print("CGRateS <" + nodeID + "> [NOTICE] " + m)
 	}
 	return
 }
@@ -195,7 +217,7 @@ func (sl *StdLogger) Warning(m string) (err error) {
 	if sl.syslog != nil {
 		sl.syslog.Warning(m)
 	} else {
-		log.Print("[WARNING]" + m)
+		log.Print("CGRateS <" + nodeID + "> [WARNING] " + m)
 	}
 	return
 }

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -23,7 +24,7 @@ import (
 
 // Creates a new alias within a tariff plan
 func (self *ApierV1) SetTPUser(attrs utils.TPUsers, reply *string) error {
-	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "Direction", "Tenant", "Category", "Account", "Subject", "Group"}); len(missing) != 0 {
+	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "UserName", "Tenant"}); len(missing) != 0 {
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	if err := self.StorDb.SetTPUsers([]*utils.TPUsers{&attrs}); err != nil {
@@ -34,21 +35,22 @@ func (self *ApierV1) SetTPUser(attrs utils.TPUsers, reply *string) error {
 }
 
 type AttrGetTPUser struct {
-	TPid   string // Tariff plan id
-	UserId string
+	TPid     string // Tariff plan id
+	Tenant   string
+	UserName string
 }
 
 // Queries specific User on Tariff plan
 func (self *ApierV1) GetTPUser(attr AttrGetTPUser, reply *utils.TPUsers) error {
-	if missing := utils.MissingStructFields(&attr, []string{"TPid"}); len(missing) != 0 { //Params missing
+	if missing := utils.MissingStructFields(&attr, []string{"TPid", "UserName", "Tenant"}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-	filter := &utils.TPUsers{TPid: attr.TPid}
-	filter.SetId(attr.UserId)
+	filter := &utils.TPUsers{TPid: attr.TPid, UserName: attr.UserName, Tenant: attr.Tenant}
 	if tms, err := self.StorDb.GetTPUsers(filter); err != nil {
-		return utils.NewErrServerError(err)
-	} else if len(tms) == 0 {
-		return utils.ErrNotFound
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = *tms[0]
 	}
@@ -66,9 +68,10 @@ func (self *ApierV1) GetTPUserIds(attrs AttrGetTPUserIds, reply *[]string) error
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	if ids, err := self.StorDb.GetTpTableIds(attrs.TPid, utils.TBLTPUsers, utils.TPDistinctIds{"tenant", "user_name"}, nil, &attrs.Paginator); err != nil {
-		return utils.NewErrServerError(err)
-	} else if ids == nil {
-		return utils.ErrNotFound
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = ids
 	}
@@ -77,11 +80,14 @@ func (self *ApierV1) GetTPUserIds(attrs AttrGetTPUserIds, reply *[]string) error
 
 // Removes specific User on Tariff plan
 func (self *ApierV1) RemTPUser(attrs AttrGetTPUser, reply *string) error {
-	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "UserId"}); len(missing) != 0 { //Params missing
+	if missing := utils.MissingStructFields(&attrs, []string{"TPid", "Tenant", "UserName"}); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
-	if err := self.StorDb.RemTpData(utils.TBLTPUsers, attrs.TPid, map[string]string{"tag": attrs.UserId}); err != nil {
-		return utils.NewErrServerError(err)
+	if err := self.StorDb.RemTpData(utils.TBLTPUsers, attrs.TPid, map[string]string{"tenant": attrs.Tenant, "user_name": attrs.UserName}); err != nil {
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = utils.OK
 	}

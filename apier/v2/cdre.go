@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v2
 
 import (
@@ -88,7 +89,16 @@ func (self *ApierV2) ExportCdrsToFile(attr AttrExportCdrsToFile, reply *Exported
 	if attr.ExportID != nil && len(*attr.ExportID) != 0 {
 		exportID = *attr.ExportID
 	}
-	fileName := fmt.Sprintf("cdre_%s.%s", exportID, exportFormat)
+	var expFormat string
+	switch exportFormat {
+	case utils.MetaFileFWV:
+		expFormat = "fwv"
+	case utils.MetaFileCSV:
+		expFormat = "csv"
+	default:
+		expFormat = exportFormat
+	}
+	fileName := fmt.Sprintf("cdre_%s.%s", exportID, expFormat)
 	if attr.ExportFileName != nil && len(*attr.ExportFileName) != 0 {
 		fileName = *attr.ExportFileName
 	}

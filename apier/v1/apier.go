@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -27,7 +28,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/guardian"
@@ -43,7 +43,7 @@ const (
 
 type ApierV1 struct {
 	StorDb      engine.LoadStorage
-	DataDB      engine.DataDB
+	DataManager *engine.DataManager
 	CdrDb       engine.CdrStorage
 	Config      *config.CGRConfig
 	Responder   *engine.Responder
@@ -55,7 +55,7 @@ type ApierV1 struct {
 }
 
 func (self *ApierV1) GetDestination(dstId string, reply *engine.Destination) error {
-	if dst, err := self.DataDB.GetDestination(dstId, false, utils.NonTransactional); err != nil {
+	if dst, err := self.DataManager.DataDB().GetDestination(dstId, false, utils.NonTransactional); err != nil {
 		return utils.ErrNotFound
 	} else {
 		*reply = *dst
@@ -71,7 +71,7 @@ type AttrRemoveDestination struct {
 func (self *ApierV1) RemoveDestination(attr AttrRemoveDestination, reply *string) (err error) {
 	for _, dstID := range attr.DestinationIDs {
 		if len(attr.Prefixes) == 0 {
-			if err = self.DataDB.RemoveDestination(dstID, utils.NonTransactional); err != nil {
+			if err = self.DataManager.DataDB().RemoveDestination(dstID, utils.NonTransactional); err != nil {
 				*reply = err.Error()
 				break
 			} else {
@@ -93,7 +93,7 @@ func (v1 *ApierV1) GetReverseDestination(prefix string, reply *[]string) (err er
 		return utils.NewErrMandatoryIeMissing("prefix")
 	}
 	var revLst []string
-	if revLst, err = v1.DataDB.GetReverseDestination(prefix, false, utils.NonTransactional); err != nil {
+	if revLst, err = v1.DataManager.DataDB().GetReverseDestination(prefix, false, utils.NonTransactional); err != nil {
 		return
 	}
 	*reply = revLst
@@ -102,7 +102,7 @@ func (v1 *ApierV1) GetReverseDestination(prefix string, reply *[]string) (err er
 
 // ComputeReverseDestinations will rebuild complete reverse destinations data
 func (v1 *ApierV1) ComputeReverseDestinations(ignr string, reply *string) (err error) {
-	if err = v1.DataDB.RebuildReverseForPrefix(utils.REVERSE_DESTINATION_PREFIX); err != nil {
+	if err = v1.DataManager.DataDB().RebuildReverseForPrefix(utils.REVERSE_DESTINATION_PREFIX); err != nil {
 		return
 	}
 	*reply = utils.OK
@@ -111,7 +111,7 @@ func (v1 *ApierV1) ComputeReverseDestinations(ignr string, reply *string) (err e
 
 // ComputeReverseAliases will rebuild complete reverse aliases data
 func (v1 *ApierV1) ComputeReverseAliases(ignr string, reply *string) (err error) {
-	if err = v1.DataDB.RebuildReverseForPrefix(utils.REVERSE_ALIASES_PREFIX); err != nil {
+	if err = v1.DataManager.DataDB().RebuildReverseForPrefix(utils.REVERSE_ALIASES_PREFIX); err != nil {
 		return
 	}
 	*reply = utils.OK
@@ -120,7 +120,7 @@ func (v1 *ApierV1) ComputeReverseAliases(ignr string, reply *string) (err error)
 
 // ComputeReverseAliases will rebuild complete reverse aliases data
 func (v1 *ApierV1) ComputeAccountActionPlans(ignr string, reply *string) (err error) {
-	if err = v1.DataDB.RebuildReverseForPrefix(utils.AccountActionPlansPrefix); err != nil {
+	if err = v1.DataManager.DataDB().RebuildReverseForPrefix(utils.AccountActionPlansPrefix); err != nil {
 		return
 	}
 	*reply = utils.OK
@@ -128,7 +128,7 @@ func (v1 *ApierV1) ComputeAccountActionPlans(ignr string, reply *string) (err er
 }
 
 func (apier *ApierV1) GetSharedGroup(sgId string, reply *engine.SharedGroup) error {
-	if sg, err := apier.DataDB.GetSharedGroup(sgId, false, utils.NonTransactional); err != nil && err != utils.ErrNotFound { // Not found is not an error here
+	if sg, err := apier.DataManager.GetSharedGroup(sgId, false, utils.NonTransactional); err != nil && err != utils.ErrNotFound { // Not found is not an error here
 		return err
 	} else {
 		if sg != nil {
@@ -144,23 +144,23 @@ func (self *ApierV1) SetDestination(attrs utils.AttrSetDestination, reply *strin
 	}
 	dest := &engine.Destination{Id: attrs.Id, Prefixes: attrs.Prefixes}
 	var oldDest *engine.Destination
-	if oldDest, err = self.DataDB.GetDestination(attrs.Id, false, utils.NonTransactional); err != nil {
+	if oldDest, err = self.DataManager.DataDB().GetDestination(attrs.Id, false, utils.NonTransactional); err != nil {
 		if err != utils.ErrNotFound {
 			return utils.NewErrServerError(err)
 		}
 	} else if !attrs.Overwrite {
 		return utils.ErrExists
 	}
-	if err := self.DataDB.SetDestination(dest, utils.NonTransactional); err != nil {
+	if err := self.DataManager.DataDB().SetDestination(dest, utils.NonTransactional); err != nil {
 		return utils.NewErrServerError(err)
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.DESTINATION_PREFIX, []string{attrs.Id}, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.DESTINATION_PREFIX, []string{attrs.Id}, true); err != nil {
 		return
 	}
-	if err = self.DataDB.UpdateReverseDestination(oldDest, dest, utils.NonTransactional); err != nil {
+	if err = self.DataManager.DataDB().UpdateReverseDestination(oldDest, dest, utils.NonTransactional); err != nil {
 		return
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.REVERSE_DESTINATION_PREFIX, dest.Prefixes, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.REVERSE_DESTINATION_PREFIX, dest.Prefixes, true); err != nil {
 		return
 	}
 	*reply = OK
@@ -168,7 +168,7 @@ func (self *ApierV1) SetDestination(attrs utils.AttrSetDestination, reply *strin
 }
 
 func (self *ApierV1) GetRatingPlan(rplnId string, reply *engine.RatingPlan) error {
-	if rpln, err := self.DataDB.GetRatingPlan(rplnId, false, utils.NonTransactional); err != nil {
+	if rpln, err := self.DataManager.GetRatingPlan(rplnId, false, utils.NonTransactional); err != nil {
 		return utils.ErrNotFound
 	} else {
 		*reply = *rpln
@@ -201,13 +201,13 @@ func (self *ApierV1) LoadDestination(attrs AttrLoadDestination, reply *string) e
 	if len(attrs.TPid) == 0 {
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
-	dbReader := engine.NewTpReader(self.DataDB, self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
+	dbReader := engine.NewTpReader(self.DataManager.DataDB(), self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
 	if loaded, err := dbReader.LoadDestinationsFiltered(attrs.ID); err != nil {
 		return utils.NewErrServerError(err)
 	} else if !loaded {
 		return utils.ErrNotFound
 	}
-	if err := self.DataDB.CacheDataFromDB(utils.DESTINATION_PREFIX, []string{attrs.ID}, true); err != nil {
+	if err := self.DataManager.CacheDataFromDB(utils.DESTINATION_PREFIX, []string{attrs.ID}, true); err != nil {
 		return utils.NewErrServerError(err)
 	}
 	*reply = OK
@@ -219,11 +219,11 @@ func (self *ApierV1) LoadDerivedChargers(attrs utils.TPDerivedChargers, reply *s
 	if len(attrs.TPid) == 0 {
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
-	dbReader := engine.NewTpReader(self.DataDB, self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
+	dbReader := engine.NewTpReader(self.DataManager.DataDB(), self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
 	if err := dbReader.LoadDerivedChargersFiltered(&attrs, true); err != nil {
 		return utils.NewErrServerError(err)
 	}
-	if err := self.DataDB.CacheDataFromDB(utils.DERIVEDCHARGERS_PREFIX, []string{attrs.GetDerivedChargersKey()}, true); err != nil {
+	if err := self.DataManager.CacheDataFromDB(utils.DERIVEDCHARGERS_PREFIX, []string{attrs.GetDerivedChargersKey()}, true); err != nil {
 		return utils.NewErrServerError(err)
 	}
 	*reply = OK
@@ -240,14 +240,11 @@ func (self *ApierV1) LoadRatingPlan(attrs AttrLoadRatingPlan, reply *string) err
 	if len(attrs.TPid) == 0 {
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
-	dbReader := engine.NewTpReader(self.DataDB, self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
+	dbReader := engine.NewTpReader(self.DataManager.DataDB(), self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
 	if loaded, err := dbReader.LoadRatingPlansFiltered(attrs.RatingPlanId); err != nil {
 		return utils.NewErrServerError(err)
 	} else if !loaded {
 		return utils.ErrNotFound
-	}
-	if err := self.DataDB.CacheDataFromDB(utils.RATING_PLAN_PREFIX, []string{attrs.RatingPlanId}, true); err != nil {
-		return utils.NewErrServerError(err)
 	}
 	*reply = OK
 	return nil
@@ -258,11 +255,8 @@ func (self *ApierV1) LoadRatingProfile(attrs utils.TPRatingProfile, reply *strin
 	if len(attrs.TPid) == 0 {
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
-	dbReader := engine.NewTpReader(self.DataDB, self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
+	dbReader := engine.NewTpReader(self.DataManager.DataDB(), self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
 	if err := dbReader.LoadRatingProfilesFiltered(&attrs); err != nil {
-		return utils.NewErrServerError(err)
-	}
-	if err := self.DataDB.CacheDataFromDB(utils.RATING_PROFILE_PREFIX, []string{attrs.KeyId()}, true); err != nil {
 		return utils.NewErrServerError(err)
 	}
 	*reply = OK
@@ -279,11 +273,8 @@ func (self *ApierV1) LoadSharedGroup(attrs AttrLoadSharedGroup, reply *string) e
 	if len(attrs.TPid) == 0 {
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
-	dbReader := engine.NewTpReader(self.DataDB, self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
+	dbReader := engine.NewTpReader(self.DataManager.DataDB(), self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
 	if err := dbReader.LoadSharedGroupsFiltered(attrs.SharedGroupId, true); err != nil {
-		return utils.NewErrServerError(err)
-	}
-	if err := self.DataDB.CacheDataFromDB(utils.SHARED_GROUP_PREFIX, []string{attrs.SharedGroupId}, true); err != nil {
 		return utils.NewErrServerError(err)
 	}
 	*reply = OK
@@ -300,7 +291,7 @@ func (self *ApierV1) LoadCdrStats(attrs AttrLoadCdrStats, reply *string) error {
 	if len(attrs.TPid) == 0 {
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
-	dbReader := engine.NewTpReader(self.DataDB, self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
+	dbReader := engine.NewTpReader(self.DataManager.DataDB(), self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
 	if err := dbReader.LoadCdrStatsFiltered(attrs.CdrStatsId, true); err != nil {
 		return utils.NewErrServerError(err)
 	}
@@ -320,7 +311,7 @@ func (self *ApierV1) LoadTariffPlanFromStorDb(attrs AttrLoadTpFromStorDb, reply 
 	if len(attrs.TPid) == 0 {
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
-	dbReader := engine.NewTpReader(self.DataDB, self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
+	dbReader := engine.NewTpReader(self.DataManager.DataDB(), self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
 	if err := dbReader.LoadAll(); err != nil {
 		return utils.NewErrServerError(err)
 	}
@@ -341,26 +332,13 @@ func (self *ApierV1) LoadTariffPlanFromStorDb(attrs AttrLoadTpFromStorDb, reply 
 	for _, prfx := range []string{
 		utils.DESTINATION_PREFIX,
 		utils.REVERSE_DESTINATION_PREFIX,
-		utils.RATING_PLAN_PREFIX,
-		utils.RATING_PROFILE_PREFIX,
-		utils.ACTION_PREFIX,
 		utils.ACTION_PLAN_PREFIX,
 		utils.AccountActionPlansPrefix,
-		utils.ACTION_TRIGGER_PREFIX,
-		utils.SHARED_GROUP_PREFIX,
 		utils.DERIVEDCHARGERS_PREFIX,
-		utils.LCR_PREFIX} {
-		loadedIDs, _ := dbReader.GetLoadedIds(prfx)
-		if err := self.DataDB.CacheDataFromDB(prfx, loadedIDs, true); err != nil {
-			return utils.NewErrServerError(err)
-		}
-	}
-	for _, prfx := range []string{
 		utils.ALIASES_PREFIX,
-		utils.REVERSE_ALIASES_PREFIX,
-		utils.ResourceLimitsPrefix} {
+		utils.REVERSE_ALIASES_PREFIX} {
 		loadedIDs, _ := dbReader.GetLoadedIds(prfx)
-		if err := self.DataDB.CacheDataFromDB(prfx, loadedIDs, true); err != nil {
+		if err := self.DataManager.CacheDataFromDB(prfx, loadedIDs, true); err != nil {
 			return utils.NewErrServerError(err)
 		}
 	}
@@ -447,7 +425,7 @@ func (self *ApierV1) SetRatingProfile(attrs AttrSetRatingProfile, reply *string)
 	keyId := tpRpf.KeyId()
 	var rpfl *engine.RatingProfile
 	if !attrs.Overwrite {
-		if rpfl, err = self.DataDB.GetRatingProfile(keyId, false, utils.NonTransactional); err != nil && err != utils.ErrNotFound {
+		if rpfl, err = self.DataManager.GetRatingProfile(keyId, false, utils.NonTransactional); err != nil && err != utils.ErrNotFound {
 			return utils.NewErrServerError(err)
 		}
 	}
@@ -459,7 +437,7 @@ func (self *ApierV1) SetRatingProfile(attrs AttrSetRatingProfile, reply *string)
 		if err != nil {
 			return fmt.Errorf(fmt.Sprintf("%s:Cannot parse activation time from %v", utils.ErrServerError.Error(), ra.ActivationTime))
 		}
-		if exists, err := self.DataDB.HasData(utils.RATING_PLAN_PREFIX, ra.RatingPlanId); err != nil {
+		if exists, err := self.DataManager.HasData(utils.RATING_PLAN_PREFIX, ra.RatingPlanId, ""); err != nil {
 			return utils.NewErrServerError(err)
 		} else if !exists {
 			return fmt.Errorf(fmt.Sprintf("%s:RatingPlanId:%s", utils.ErrNotFound.Error(), ra.RatingPlanId))
@@ -467,11 +445,8 @@ func (self *ApierV1) SetRatingProfile(attrs AttrSetRatingProfile, reply *string)
 		rpfl.RatingPlanActivations = append(rpfl.RatingPlanActivations, &engine.RatingPlanActivation{ActivationTime: at, RatingPlanId: ra.RatingPlanId,
 			FallbackKeys: utils.FallbackSubjKeys(tpRpf.Direction, tpRpf.Tenant, tpRpf.Category, ra.FallbackSubjects)})
 	}
-	if err := self.DataDB.SetRatingProfile(rpfl, utils.NonTransactional); err != nil {
+	if err := self.DataManager.SetRatingProfile(rpfl, utils.NonTransactional); err != nil {
 		return utils.NewErrServerError(err)
-	}
-	if err = self.DataDB.CacheDataFromDB(utils.RATING_PROFILE_PREFIX, []string{keyId}, true); err != nil {
-		return
 	}
 	*reply = OK
 	return nil
@@ -524,7 +499,7 @@ func (self *ApierV1) SetActions(attrs V1AttrSetActions, reply *string) (err erro
 		}
 	}
 	if !attrs.Overwrite {
-		if exists, err := self.DataDB.HasData(utils.ACTION_PREFIX, attrs.ActionsId); err != nil {
+		if exists, err := self.DataManager.HasData(utils.ACTION_PREFIX, attrs.ActionsId, ""); err != nil {
 			return utils.NewErrServerError(err)
 		} else if exists {
 			return utils.ErrExists
@@ -553,11 +528,8 @@ func (self *ApierV1) SetActions(attrs V1AttrSetActions, reply *string) (err erro
 		}
 		storeActions[idx] = a
 	}
-	if err := self.DataDB.SetActions(attrs.ActionsId, storeActions, utils.NonTransactional); err != nil {
+	if err := self.DataManager.SetActions(attrs.ActionsId, storeActions, utils.NonTransactional); err != nil {
 		return utils.NewErrServerError(err)
-	}
-	if err = self.DataDB.CacheDataFromDB(utils.ACTION_PREFIX, []string{attrs.ActionsId}, true); err != nil {
-		utils.NewErrServerError(err)
 	}
 	*reply = OK
 	return nil
@@ -569,7 +541,7 @@ func (self *ApierV1) GetActions(actsId string, reply *[]*utils.TPAction) error {
 		return fmt.Errorf("%s ActionsId: %s", utils.ErrMandatoryIeMissing.Error(), actsId)
 	}
 	acts := make([]*utils.TPAction, 0)
-	engActs, err := self.DataDB.GetActions(actsId, false, utils.NonTransactional)
+	engActs, err := self.DataManager.GetActions(actsId, false, utils.NonTransactional)
 	if err != nil {
 		return utils.NewErrServerError(err)
 	}
@@ -631,7 +603,7 @@ func (self *ApierV1) SetActionPlan(attrs AttrSetActionPlan, reply *string) (err 
 	}
 	_, err = guardian.Guardian.Guard(func() (interface{}, error) {
 		var prevAccountIDs utils.StringMap
-		if prevAP, err := self.DataDB.GetActionPlan(attrs.Id, false, utils.NonTransactional); err != nil && err != utils.ErrNotFound {
+		if prevAP, err := self.DataManager.DataDB().GetActionPlan(attrs.Id, false, utils.NonTransactional); err != nil && err != utils.ErrNotFound {
 			return 0, utils.NewErrServerError(err)
 		} else if err == nil && !attrs.Overwrite {
 			return 0, utils.ErrExists
@@ -642,7 +614,7 @@ func (self *ApierV1) SetActionPlan(attrs AttrSetActionPlan, reply *string) (err 
 			Id: attrs.Id,
 		}
 		for _, apiAtm := range attrs.ActionPlan {
-			if exists, err := self.DataDB.HasData(utils.ACTION_PREFIX, apiAtm.ActionsId); err != nil {
+			if exists, err := self.DataManager.HasData(utils.ACTION_PREFIX, apiAtm.ActionsId, ""); err != nil {
 				return 0, utils.NewErrServerError(err)
 			} else if !exists {
 				return 0, fmt.Errorf("%s:%s", utils.ErrBrokenReference.Error(), apiAtm.ActionsId)
@@ -660,19 +632,19 @@ func (self *ApierV1) SetActionPlan(attrs AttrSetActionPlan, reply *string) (err 
 				ActionsID: apiAtm.ActionsId,
 			})
 		}
-		if err := self.DataDB.SetActionPlan(ap.Id, ap, true, utils.NonTransactional); err != nil {
+		if err := self.DataManager.DataDB().SetActionPlan(ap.Id, ap, true, utils.NonTransactional); err != nil {
 			return 0, utils.NewErrServerError(err)
 		}
-		if err = self.DataDB.CacheDataFromDB(utils.ACTION_PLAN_PREFIX, []string{ap.Id}, true); err != nil {
+		if err = self.DataManager.CacheDataFromDB(utils.ACTION_PLAN_PREFIX, []string{ap.Id}, true); err != nil {
 			return 0, utils.NewErrServerError(err)
 		}
 		for acntID := range prevAccountIDs {
-			if err := self.DataDB.RemAccountActionPlans(acntID, []string{attrs.Id}); err != nil {
+			if err := self.DataManager.DataDB().RemAccountActionPlans(acntID, []string{attrs.Id}); err != nil {
 				return 0, utils.NewErrServerError(err)
 			}
 		}
 		if len(prevAccountIDs) != 0 {
-			if err = self.DataDB.CacheDataFromDB(utils.AccountActionPlansPrefix, prevAccountIDs.Slice(), true); err != nil &&
+			if err = self.DataManager.CacheDataFromDB(utils.AccountActionPlansPrefix, prevAccountIDs.Slice(), true); err != nil &&
 				err.Error() != utils.ErrNotFound.Error() {
 				return 0, utils.NewErrServerError(err)
 			}
@@ -700,7 +672,7 @@ type AttrGetActionPlan struct {
 func (self *ApierV1) GetActionPlan(attr AttrGetActionPlan, reply *[]*engine.ActionPlan) error {
 	var result []*engine.ActionPlan
 	if attr.ID == "" || attr.ID == "*" {
-		aplsMap, err := self.DataDB.GetAllActionPlans()
+		aplsMap, err := self.DataManager.DataDB().GetAllActionPlans()
 		if err != nil {
 			return err
 		}
@@ -708,7 +680,7 @@ func (self *ApierV1) GetActionPlan(attr AttrGetActionPlan, reply *[]*engine.Acti
 			result = append(result, apls)
 		}
 	} else {
-		apls, err := self.DataDB.GetActionPlan(attr.ID, false, utils.NonTransactional)
+		apls, err := self.DataManager.DataDB().GetActionPlan(attr.ID, false, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -723,7 +695,7 @@ func (self *ApierV1) LoadAccountActions(attrs utils.TPAccountActions, reply *str
 	if len(attrs.TPid) == 0 {
 		return utils.NewErrMandatoryIeMissing("TPid")
 	}
-	dbReader := engine.NewTpReader(self.DataDB, self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
+	dbReader := engine.NewTpReader(self.DataManager.DataDB(), self.StorDb, attrs.TPid, self.Config.DefaultTimezone)
 	if _, err := guardian.Guardian.Guard(func() (interface{}, error) {
 		if err := dbReader.LoadAccountActionsFiltered(&attrs); err != nil {
 			return 0, err
@@ -754,7 +726,7 @@ func (self *ApierV1) ReloadScheduler(ignore string, reply *string) error {
 
 func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (err error) {
 	if attrs.FlushAll {
-		cache.Flush()
+		engine.Cache.Clear(nil)
 		return
 	}
 	// Reload Destinations
@@ -767,7 +739,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.DESTINATION_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.DESTINATION_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// Reload ReverseDestinations
@@ -780,7 +752,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.REVERSE_DESTINATION_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.REVERSE_DESTINATION_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// RatingPlans
@@ -793,7 +765,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.RATING_PLAN_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.RATING_PLAN_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// RatingProfiles
@@ -806,7 +778,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.RATING_PROFILE_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.RATING_PROFILE_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// Actions
@@ -819,7 +791,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.ACTION_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.ACTION_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// ActionPlans
@@ -832,7 +804,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.ACTION_PLAN_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.ACTION_PLAN_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// AccountActionPlans
@@ -845,7 +817,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.AccountActionPlansPrefix, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.AccountActionPlansPrefix, dataIDs, true); err != nil {
 		return
 	}
 	// ActionTriggers
@@ -858,7 +830,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.ACTION_TRIGGER_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.ACTION_TRIGGER_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// SharedGroups
@@ -871,7 +843,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.SHARED_GROUP_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.SHARED_GROUP_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// LCR Profiles
@@ -884,7 +856,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.LCR_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.LCR_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// DerivedChargers
@@ -897,7 +869,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.DERIVEDCHARGERS_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.DERIVEDCHARGERS_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// Aliases
@@ -910,7 +882,7 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.ALIASES_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.ALIASES_PREFIX, dataIDs, true); err != nil {
 		return
 	}
 	// ReverseAliases
@@ -923,31 +895,136 @@ func (self *ApierV1) ReloadCache(attrs utils.AttrReloadCache, reply *string) (er
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.REVERSE_ALIASES_PREFIX, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.REVERSE_ALIASES_PREFIX, dataIDs, true); err != nil {
 		return
 	}
-	// ResourceLimits
+	// ResourceProfiles
 	dataIDs = make([]string, 0)
-	if attrs.ResourceLimitIDs == nil {
+	if attrs.ResourceProfileIDs == nil {
 		dataIDs = nil // Reload all
-	} else if len(*attrs.ResourceLimitIDs) > 0 {
-		dataIDs = make([]string, len(*attrs.ResourceLimitIDs))
-		for idx, dId := range *attrs.ResourceLimitIDs {
+	} else if len(*attrs.ResourceProfileIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.ResourceProfileIDs))
+		for idx, dId := range *attrs.ResourceProfileIDs {
 			dataIDs[idx] = dId
 		}
 	}
-	if err = self.DataDB.CacheDataFromDB(utils.ResourceLimitsPrefix, dataIDs, true); err != nil {
+	if err = self.DataManager.CacheDataFromDB(utils.ResourceProfilesPrefix, dataIDs, true); err != nil {
 		return
 	}
+	// Resources
+	dataIDs = make([]string, 0)
+	if attrs.ResourceIDs == nil {
+		dataIDs = nil // Reload all
+	} else if len(*attrs.ResourceIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.ResourceIDs))
+		for idx, dId := range *attrs.ResourceIDs {
+			dataIDs[idx] = dId
+		}
+	}
+	if err = self.DataManager.CacheDataFromDB(utils.ResourcesPrefix, dataIDs, true); err != nil {
+		return
+	}
+	// StatQueues
+	dataIDs = make([]string, 0)
+	if attrs.StatsQueueIDs == nil {
+		dataIDs = nil // Reload all
+	} else if len(*attrs.StatsQueueIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.StatsQueueIDs))
+		for idx, dId := range *attrs.StatsQueueIDs {
+			dataIDs[idx] = dId
+		}
+	}
+	if err = self.DataManager.CacheDataFromDB(utils.StatQueuePrefix, dataIDs, true); err != nil {
+		return
+	}
+	// StatQueueProfiles
+	dataIDs = make([]string, 0)
+	if attrs.StatsQueueProfileIDs == nil {
+		dataIDs = nil // Reload all
+	} else if len(*attrs.StatsQueueProfileIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.StatsQueueProfileIDs))
+		for idx, dId := range *attrs.StatsQueueProfileIDs {
+			dataIDs[idx] = dId
+		}
+	}
+	if err = self.DataManager.CacheDataFromDB(utils.StatQueueProfilePrefix, dataIDs, true); err != nil {
+		return
+	}
+	// Thresholds
+	dataIDs = make([]string, 0)
+	if attrs.ThresholdIDs == nil {
+		dataIDs = nil // Reload all
+	} else if len(*attrs.ThresholdIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.ThresholdIDs))
+		for idx, dId := range *attrs.ThresholdIDs {
+			dataIDs[idx] = dId
+		}
+	}
+	if err = self.DataManager.CacheDataFromDB(utils.ThresholdPrefix, dataIDs, true); err != nil {
+		return
+	}
+	// ThresholdProfiles
+	dataIDs = make([]string, 0)
+	if attrs.ThresholdProfileIDs == nil {
+		dataIDs = nil // Reload all
+	} else if len(*attrs.ThresholdProfileIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.ThresholdProfileIDs))
+		for idx, dId := range *attrs.ThresholdProfileIDs {
+			dataIDs[idx] = dId
+		}
+	}
+	if err = self.DataManager.CacheDataFromDB(utils.ThresholdProfilePrefix, dataIDs, true); err != nil {
+		return
+	}
+	// Filters
+	dataIDs = make([]string, 0)
+	if attrs.FilterIDs == nil {
+		dataIDs = nil // Reload all
+	} else if len(*attrs.FilterIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.FilterIDs))
+		for idx, dId := range *attrs.FilterIDs {
+			dataIDs[idx] = dId
+		}
+	}
+	if err = self.DataManager.CacheDataFromDB(utils.FilterPrefix, dataIDs, true); err != nil {
+		return
+	}
+	// SupplierProfile
+	dataIDs = make([]string, 0)
+	if attrs.SupplierProfileIDs == nil {
+		dataIDs = nil // Reload all
+	} else if len(*attrs.SupplierProfileIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.SupplierProfileIDs))
+		for idx, dId := range *attrs.SupplierProfileIDs {
+			dataIDs[idx] = dId
+		}
+	}
+	if err = self.DataManager.CacheDataFromDB(utils.SupplierProfilePrefix, dataIDs, true); err != nil {
+		return
+	}
+	// AttributeProfile
+	dataIDs = make([]string, 0)
+	if attrs.AttributeProfileIDs == nil {
+		dataIDs = nil // Reload all
+	} else if len(*attrs.AttributeProfileIDs) > 0 {
+		dataIDs = make([]string, len(*attrs.AttributeProfileIDs))
+		for idx, dId := range *attrs.AttributeProfileIDs {
+			dataIDs[idx] = dId
+		}
+	}
+	if err = self.DataManager.CacheDataFromDB(utils.AttributeProfilePrefix, dataIDs, true); err != nil {
+		return
+	}
+
 	*reply = utils.OK
 	return nil
 }
 
 func (self *ApierV1) LoadCache(args utils.AttrReloadCache, reply *string) (err error) {
 	if args.FlushAll {
-		cache.Flush()
+		engine.Cache.Clear(nil)
 	}
-	var dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs, alsIDs, rvAlsIDs, rlIDs []string
+	var dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs, alsIDs, rvAlsIDs, rspIDs, resIDs, stqIDs, stqpIDs, thIDs, thpIDs, fltrIDs, splpIDs, alsPrfIDs []string
 	if args.DestinationIDs == nil {
 		dstIDs = nil
 	} else {
@@ -1013,15 +1090,52 @@ func (self *ApierV1) LoadCache(args utils.AttrReloadCache, reply *string) (err e
 	} else {
 		rvAlsIDs = *args.ReverseAliasIDs
 	}
-	if args.ResourceLimitIDs == nil {
-		rlIDs = nil
+	if args.ResourceProfileIDs == nil {
+		rspIDs = nil
 	} else {
-		rlIDs = *args.ResourceLimitIDs
+		rspIDs = *args.ResourceProfileIDs
 	}
-	if err := self.DataDB.LoadRatingCache(dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs); err != nil {
-		return utils.NewErrServerError(err)
+	if args.ResourceIDs == nil {
+		resIDs = nil
+	} else {
+		resIDs = *args.ResourceIDs
 	}
-	if err := self.DataDB.LoadAccountingCache(alsIDs, rvAlsIDs, rlIDs); err != nil {
+	if args.StatsQueueIDs == nil {
+		stqIDs = nil
+	} else {
+		stqIDs = *args.StatsQueueIDs
+	}
+	if args.StatsQueueProfileIDs == nil {
+		stqpIDs = nil
+	} else {
+		stqpIDs = *args.StatsQueueProfileIDs
+	}
+	if args.ThresholdIDs == nil {
+		thIDs = nil
+	} else {
+		thIDs = *args.ThresholdIDs
+	}
+	if args.ThresholdProfileIDs == nil {
+		thpIDs = nil
+	} else {
+		thpIDs = *args.ThresholdProfileIDs
+	}
+	if args.FilterIDs == nil {
+		fltrIDs = nil
+	} else {
+		fltrIDs = *args.FilterIDs
+	}
+	if args.SupplierProfileIDs == nil {
+		splpIDs = nil
+	} else {
+		splpIDs = *args.SupplierProfileIDs
+	}
+	if args.AttributeProfileIDs == nil {
+		alsPrfIDs = nil
+	} else {
+		alsPrfIDs = *args.AttributeProfileIDs
+	}
+	if err := self.DataManager.LoadDataDBCache(dstIDs, rvDstIDs, rplIDs, rpfIDs, actIDs, aplIDs, aapIDs, atrgIDs, sgIDs, lcrIDs, dcIDs, alsIDs, rvAlsIDs, rspIDs, resIDs, stqIDs, stqpIDs, thIDs, thpIDs, fltrIDs, splpIDs, alsPrfIDs); err != nil {
 		return utils.NewErrServerError(err)
 	}
 	*reply = utils.OK
@@ -1031,120 +1145,206 @@ func (self *ApierV1) LoadCache(args utils.AttrReloadCache, reply *string) (err e
 // FlushCache wipes out cache for a prefix or completely
 func (self *ApierV1) FlushCache(args utils.AttrReloadCache, reply *string) (err error) {
 	if args.FlushAll {
-		cache.Flush()
+		engine.Cache.Clear(nil)
 		*reply = utils.OK
 		return
 	}
 	if args.DestinationIDs == nil {
-		cache.RemPrefixKey(utils.DESTINATION_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheDestinations})
 	} else if len(*args.DestinationIDs) != 0 {
 		for _, key := range *args.DestinationIDs {
-			cache.RemKey(utils.DESTINATION_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheDestinations, key, true, utils.NonTransactional)
 		}
 	}
 	if args.ReverseDestinationIDs == nil {
-		cache.RemPrefixKey(utils.REVERSE_DESTINATION_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheReverseDestinations})
 	} else if len(*args.ReverseDestinationIDs) != 0 {
 		for _, key := range *args.ReverseDestinationIDs {
-			cache.RemKey(utils.REVERSE_DESTINATION_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheReverseDestinations, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.RatingPlanIDs == nil {
-		cache.RemPrefixKey(utils.RATING_PLAN_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheRatingPlans})
 	} else if len(*args.RatingPlanIDs) != 0 {
 		for _, key := range *args.RatingPlanIDs {
-			cache.RemKey(utils.RATING_PLAN_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheRatingPlans, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.RatingProfileIDs == nil {
-		cache.RemPrefixKey(utils.RATING_PROFILE_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheRatingProfiles})
 	} else if len(*args.RatingProfileIDs) != 0 {
 		for _, key := range *args.RatingProfileIDs {
-			cache.RemKey(utils.RATING_PROFILE_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheRatingProfiles, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.ActionIDs == nil {
-		cache.RemPrefixKey(utils.ACTION_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheActions})
 	} else if len(*args.ActionIDs) != 0 {
 		for _, key := range *args.ActionIDs {
-			cache.RemKey(utils.ACTION_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheActions, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.ActionPlanIDs == nil {
-		cache.RemPrefixKey(utils.ACTION_PLAN_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheActionPlans})
 	} else if len(*args.ActionPlanIDs) != 0 {
 		for _, key := range *args.ActionPlanIDs {
-			cache.RemKey(utils.ACTION_PLAN_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheActionPlans,
+				key, true, utils.NonTransactional)
 		}
 	}
 	if args.ActionTriggerIDs == nil {
-		cache.RemPrefixKey(utils.ACTION_TRIGGER_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheActionTriggers})
 	} else if len(*args.ActionTriggerIDs) != 0 {
 		for _, key := range *args.ActionTriggerIDs {
-			cache.RemKey(utils.ACTION_TRIGGER_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheActionTriggers, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.SharedGroupIDs == nil {
-		cache.RemPrefixKey(utils.SHARED_GROUP_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheSharedGroups})
 	} else if len(*args.SharedGroupIDs) != 0 {
 		for _, key := range *args.SharedGroupIDs {
-			cache.RemKey(utils.SHARED_GROUP_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheSharedGroups, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.LCRids == nil {
-		cache.RemPrefixKey(utils.LCR_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheLCRRules})
 	} else if len(*args.LCRids) != 0 {
 		for _, key := range *args.LCRids {
-			cache.RemKey(utils.LCR_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheLCRRules, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.DerivedChargerIDs == nil {
-		cache.RemPrefixKey(utils.DERIVEDCHARGERS_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheDerivedChargers})
 	} else if len(*args.DerivedChargerIDs) != 0 {
 		for _, key := range *args.DerivedChargerIDs {
-			cache.RemKey(utils.DERIVEDCHARGERS_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheDerivedChargers, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.AliasIDs == nil {
-		cache.RemPrefixKey(utils.ALIASES_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheAliases})
 	} else if len(*args.AliasIDs) != 0 {
 		for _, key := range *args.AliasIDs {
-			cache.RemKey(utils.ALIASES_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheAliases, key,
+				true, utils.NonTransactional)
 		}
 	}
 	if args.ReverseAliasIDs == nil {
-		cache.RemPrefixKey(utils.REVERSE_ALIASES_PREFIX, true, utils.NonTransactional)
+		engine.Cache.Clear([]string{utils.CacheReverseAliases})
 	} else if len(*args.ReverseAliasIDs) != 0 {
 		for _, key := range *args.ReverseAliasIDs {
-			cache.RemKey(utils.REVERSE_ALIASES_PREFIX+key, true, utils.NonTransactional)
+			engine.Cache.Remove(utils.CacheReverseAliases, key,
+				true, utils.NonTransactional)
 		}
 	}
-	if args.ResourceLimitIDs == nil {
-		cache.RemPrefixKey(utils.ResourceLimitsPrefix, true, utils.NonTransactional)
-	} else if len(*args.ResourceLimitIDs) != 0 {
-		for _, key := range *args.ResourceLimitIDs {
-			cache.RemKey(utils.ResourceLimitsPrefix+key, true, utils.NonTransactional)
+	if args.ResourceProfileIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheResourceProfiles})
+	} else if len(*args.ResourceProfileIDs) != 0 {
+		for _, key := range *args.ResourceProfileIDs {
+			engine.Cache.Remove(utils.CacheResourceProfiles, key,
+				true, utils.NonTransactional)
 		}
 	}
+	if args.ResourceIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheResources})
+	} else if len(*args.ResourceIDs) != 0 {
+		for _, key := range *args.ResourceIDs {
+			engine.Cache.Remove(utils.CacheResources, key,
+				true, utils.NonTransactional)
+		}
+	}
+	if args.StatsQueueIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheStatQueues})
+	} else if len(*args.StatsQueueIDs) != 0 {
+		for _, key := range *args.StatsQueueIDs {
+			engine.Cache.Remove(utils.CacheStatQueues, key,
+				true, utils.NonTransactional)
+		}
+	}
+	if args.StatsQueueProfileIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheThresholdProfiles})
+	} else if len(*args.StatsQueueProfileIDs) != 0 {
+		for _, key := range *args.StatsQueueProfileIDs {
+			engine.Cache.Remove(utils.CacheThresholdProfiles, key,
+				true, utils.NonTransactional)
+		}
+	}
+	if args.ThresholdIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheThresholds})
+	} else if len(*args.ThresholdIDs) != 0 {
+		for _, key := range *args.ThresholdProfileIDs {
+			engine.Cache.Remove(utils.CacheThresholds, key,
+				true, utils.NonTransactional)
+		}
+	}
+	if args.ThresholdProfileIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheThresholdProfiles})
+	} else if len(*args.ThresholdProfileIDs) != 0 {
+		for _, key := range *args.ThresholdProfileIDs {
+			engine.Cache.Remove(utils.CacheThresholdProfiles, key,
+				true, utils.NonTransactional)
+		}
+	}
+	if args.FilterIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheFilters})
+	} else if len(*args.FilterIDs) != 0 {
+		for _, key := range *args.FilterIDs {
+			engine.Cache.Remove(utils.CacheFilters, key,
+				true, utils.NonTransactional)
+		}
+	}
+	if args.SupplierProfileIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheSupplierProfiles})
+	} else if len(*args.SupplierProfileIDs) != 0 {
+		for _, key := range *args.SupplierProfileIDs {
+			engine.Cache.Remove(utils.CacheSupplierProfiles, key,
+				true, utils.NonTransactional)
+		}
+	}
+	if args.AttributeProfileIDs == nil {
+		engine.Cache.Clear([]string{utils.CacheAttributeProfiles})
+	} else if len(*args.AttributeProfileIDs) != 0 {
+		for _, key := range *args.AttributeProfileIDs {
+			engine.Cache.Remove(utils.CacheAttributeProfiles, key,
+				true, utils.NonTransactional)
+		}
+	}
+
 	*reply = utils.OK
 	return
 }
 
 func (self *ApierV1) GetCacheStats(attrs utils.AttrCacheStats, reply *utils.CacheStats) error {
 	cs := new(utils.CacheStats)
-	cs.Destinations = cache.CountEntries(utils.DESTINATION_PREFIX)
-	cs.ReverseDestinations = cache.CountEntries(utils.REVERSE_DESTINATION_PREFIX)
-	cs.RatingPlans = cache.CountEntries(utils.RATING_PLAN_PREFIX)
-	cs.RatingProfiles = cache.CountEntries(utils.RATING_PROFILE_PREFIX)
-	cs.Actions = cache.CountEntries(utils.ACTION_PREFIX)
-	cs.ActionPlans = cache.CountEntries(utils.ACTION_PLAN_PREFIX)
-	cs.AccountActionPlans = cache.CountEntries(utils.AccountActionPlansPrefix)
-	cs.SharedGroups = cache.CountEntries(utils.SHARED_GROUP_PREFIX)
-	cs.DerivedChargers = cache.CountEntries(utils.DERIVEDCHARGERS_PREFIX)
-	cs.LcrProfiles = cache.CountEntries(utils.LCR_PREFIX)
-	cs.Aliases = cache.CountEntries(utils.ALIASES_PREFIX)
-	cs.ReverseAliases = cache.CountEntries(utils.REVERSE_ALIASES_PREFIX)
-	cs.ResourceLimits = cache.CountEntries(utils.ResourceLimitsPrefix)
+	cs.Destinations = len(engine.Cache.GetItemIDs(utils.CacheDestinations, ""))
+	cs.ReverseDestinations = len(engine.Cache.GetItemIDs(utils.CacheReverseDestinations, ""))
+	cs.RatingPlans = len(engine.Cache.GetItemIDs(utils.CacheRatingPlans, ""))
+	cs.RatingProfiles = len(engine.Cache.GetItemIDs(utils.CacheRatingProfiles, ""))
+	cs.Actions = len(engine.Cache.GetItemIDs(utils.CacheActions, ""))
+	cs.ActionPlans = len(engine.Cache.GetItemIDs(utils.CacheActionPlans, ""))
+	cs.AccountActionPlans = len(engine.Cache.GetItemIDs(utils.CacheAccountActionPlans, ""))
+	cs.SharedGroups = len(engine.Cache.GetItemIDs(utils.CacheSharedGroups, ""))
+	cs.DerivedChargers = len(engine.Cache.GetItemIDs(utils.CacheDerivedChargers, ""))
+	cs.LcrProfiles = len(engine.Cache.GetItemIDs(utils.CacheLCRRules, ""))
+	cs.Aliases = len(engine.Cache.GetItemIDs(utils.CacheAliases, ""))
+	cs.ReverseAliases = len(engine.Cache.GetItemIDs(utils.CacheReverseAliases, ""))
+	cs.ResourceProfiles = len(engine.Cache.GetItemIDs(utils.CacheResourceProfiles, ""))
+	cs.Resources = len(engine.Cache.GetItemIDs(utils.CacheResources, ""))
+	cs.StatQueues = len(engine.Cache.GetItemIDs(utils.CacheStatQueues, ""))
+	cs.StatQueueProfiles = len(engine.Cache.GetItemIDs(utils.CacheStatQueueProfiles, ""))
+	cs.Thresholds = len(engine.Cache.GetItemIDs(utils.CacheThresholds, ""))
+	cs.ThresholdProfiles = len(engine.Cache.GetItemIDs(utils.CacheThresholdProfiles, ""))
+	cs.Filters = len(engine.Cache.GetItemIDs(utils.CacheFilters, ""))
+	cs.SupplierProfiles = len(engine.Cache.GetItemIDs(utils.CacheSupplierProfiles, ""))
+	cs.AttributeProfiles = len(engine.Cache.GetItemIDs(utils.CacheAttributeProfiles, ""))
+
 	if self.CdrStatsSrv != nil {
 		var queueIds []string
 		if err := self.CdrStatsSrv.Call("CDRStatsV1.GetQueueIds", 0, &queueIds); err != nil {
@@ -1170,13 +1370,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.DestinationIDs) != 0 {
 			for _, id := range *args.DestinationIDs {
-				if _, hasIt := cache.Get(utils.DESTINATION_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheDestinations, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.DESTINATION_PREFIX) {
-				ids = append(ids, id[len(utils.DESTINATION_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheDestinations, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1188,13 +1388,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.ReverseDestinationIDs) != 0 {
 			for _, id := range *args.ReverseDestinationIDs {
-				if _, hasIt := cache.Get(utils.REVERSE_DESTINATION_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheReverseDestinations, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.REVERSE_DESTINATION_PREFIX) {
-				ids = append(ids, id[len(utils.REVERSE_DESTINATION_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheReverseDestinations, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1206,13 +1406,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.RatingPlanIDs) != 0 {
 			for _, id := range *args.RatingPlanIDs {
-				if _, hasIt := cache.Get(utils.RATING_PLAN_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheRatingPlans, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.RATING_PLAN_PREFIX) {
-				ids = append(ids, id[len(utils.RATING_PLAN_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheRatingPlans, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1224,13 +1424,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.RatingProfileIDs) != 0 {
 			for _, id := range *args.RatingProfileIDs {
-				if _, hasIt := cache.Get(utils.RATING_PROFILE_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheRatingProfiles, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.RATING_PROFILE_PREFIX) {
-				ids = append(ids, id[len(utils.RATING_PROFILE_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheRatingProfiles, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1242,13 +1442,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.ActionIDs) != 0 {
 			for _, id := range *args.ActionIDs {
-				if _, hasIt := cache.Get(utils.ACTION_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheActions, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.ACTION_PREFIX) {
-				ids = append(ids, id[len(utils.ACTION_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheActions, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1260,13 +1460,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.ActionPlanIDs) != 0 {
 			for _, id := range *args.ActionPlanIDs {
-				if _, hasIt := cache.Get(utils.ACTION_PLAN_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheActionPlans, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.ACTION_PLAN_PREFIX) {
-				ids = append(ids, id[len(utils.ACTION_PLAN_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheActionPlans, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1279,13 +1479,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.AccountActionPlanIDs) != 0 {
 			for _, id := range *args.AccountActionPlanIDs {
-				if _, hasIt := cache.Get(utils.AccountActionPlansPrefix + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheAccountActionPlans, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.AccountActionPlansPrefix) {
-				ids = append(ids, id[len(utils.AccountActionPlansPrefix):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheAccountActionPlans, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1297,13 +1497,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.ActionTriggerIDs) != 0 {
 			for _, id := range *args.ActionTriggerIDs {
-				if _, hasIt := cache.Get(utils.ACTION_TRIGGER_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheActionTriggers, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.ACTION_TRIGGER_PREFIX) {
-				ids = append(ids, id[len(utils.ACTION_TRIGGER_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheActionTriggers, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1315,13 +1515,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.SharedGroupIDs) != 0 {
 			for _, id := range *args.SharedGroupIDs {
-				if _, hasIt := cache.Get(utils.SHARED_GROUP_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheSharedGroups, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.SHARED_GROUP_PREFIX) {
-				ids = append(ids, id[len(utils.SHARED_GROUP_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheSharedGroups, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1333,13 +1533,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.LCRids) != 0 {
 			for _, id := range *args.LCRids {
-				if _, hasIt := cache.Get(utils.LCR_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheLCRRules, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.LCR_PREFIX) {
-				ids = append(ids, id[len(utils.LCR_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheLCRRules, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1351,13 +1551,14 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.DerivedChargerIDs) != 0 {
 			for _, id := range *args.DerivedChargerIDs {
-				if _, hasIt := cache.Get(utils.DERIVEDCHARGERS_PREFIX + id); hasIt {
+
+				if _, hasIt := engine.Cache.Get(utils.CacheDerivedChargers, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.DERIVEDCHARGERS_PREFIX) {
-				ids = append(ids, id[len(utils.DERIVEDCHARGERS_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheDerivedChargers, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1369,13 +1570,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.AliasIDs) != 0 {
 			for _, id := range *args.AliasIDs {
-				if _, hasIt := cache.Get(utils.ALIASES_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheAliases, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.ALIASES_PREFIX) {
-				ids = append(ids, id[len(utils.ALIASES_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheAliases, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1387,13 +1588,13 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 		var ids []string
 		if len(*args.ReverseAliasIDs) != 0 {
 			for _, id := range *args.ReverseAliasIDs {
-				if _, hasIt := cache.Get(utils.REVERSE_ALIASES_PREFIX + id); hasIt {
+				if _, hasIt := engine.Cache.Get(utils.CacheReverseAliases, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.REVERSE_ALIASES_PREFIX) {
-				ids = append(ids, id[len(utils.REVERSE_ALIASES_PREFIX):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheReverseAliases, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
@@ -1401,24 +1602,176 @@ func (v1 *ApierV1) GetCacheKeys(args utils.ArgsCacheKeys, reply *utils.ArgsCache
 			reply.ReverseAliasIDs = &ids
 		}
 	}
-	if args.ResourceLimitIDs != nil {
+	if args.ResourceProfileIDs != nil {
 		var ids []string
-		if len(*args.ResourceLimitIDs) != 0 {
-			for _, id := range *args.ResourceLimitIDs {
-				if _, hasIt := cache.Get(utils.ResourceLimitsPrefix + id); hasIt {
+		if len(*args.ResourceProfileIDs) != 0 {
+			for _, id := range *args.ResourceProfileIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheResourceProfiles, id); hasIt {
 					ids = append(ids, id)
 				}
 			}
 		} else {
-			for _, id := range cache.GetEntryKeys(utils.ResourceLimitsPrefix) {
-				ids = append(ids, id[len(utils.ResourceLimitsPrefix):])
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheResourceProfiles, "") {
+				ids = append(ids, id)
 			}
 		}
 		ids = args.Paginator.PaginateStringSlice(ids)
 		if len(ids) != 0 {
-			reply.ResourceLimitIDs = &ids
+			reply.ResourceProfileIDs = &ids
 		}
 	}
+	if args.ResourceIDs != nil {
+		var ids []string
+		if len(*args.ResourceIDs) != 0 {
+			for _, id := range *args.ResourceIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheResources, id); hasIt {
+					ids = append(ids, id)
+				}
+			}
+		} else {
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheResources, "") {
+				ids = append(ids, id)
+			}
+		}
+		ids = args.Paginator.PaginateStringSlice(ids)
+		if len(ids) != 0 {
+			reply.ResourceIDs = &ids
+		}
+	}
+
+	if args.StatsQueueIDs != nil {
+		var ids []string
+		if len(*args.StatsQueueIDs) != 0 {
+			for _, id := range *args.StatsQueueIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheStatQueues, id); hasIt {
+					ids = append(ids, id)
+				}
+			}
+		} else {
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheStatQueues, "") {
+				ids = append(ids, id)
+			}
+		}
+		ids = args.Paginator.PaginateStringSlice(ids)
+		if len(ids) != 0 {
+			reply.StatsQueueIDs = &ids
+		}
+	}
+
+	if args.StatsQueueProfileIDs != nil {
+		var ids []string
+		if len(*args.StatsQueueProfileIDs) != 0 {
+			for _, id := range *args.StatsQueueProfileIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheStatQueueProfiles, id); hasIt {
+					ids = append(ids, id)
+				}
+			}
+		} else {
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheStatQueueProfiles, "") {
+				ids = append(ids, id)
+			}
+		}
+		ids = args.Paginator.PaginateStringSlice(ids)
+		if len(ids) != 0 {
+			reply.StatsQueueProfileIDs = &ids
+		}
+	}
+
+	if args.ThresholdIDs != nil {
+		var ids []string
+		if len(*args.ThresholdIDs) != 0 {
+			for _, id := range *args.ThresholdIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheThresholds, id); hasIt {
+					ids = append(ids, id)
+				}
+			}
+		} else {
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheThresholds, "") {
+				ids = append(ids, id[len(utils.ThresholdPrefix):])
+			}
+		}
+		ids = args.Paginator.PaginateStringSlice(ids)
+		if len(ids) != 0 {
+			reply.ThresholdIDs = &ids
+		}
+	}
+
+	if args.ThresholdProfileIDs != nil {
+		var ids []string
+		if len(*args.ThresholdProfileIDs) != 0 {
+			for _, id := range *args.ThresholdProfileIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheThresholdProfiles, id); hasIt {
+					ids = append(ids, id)
+				}
+			}
+		} else {
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheThresholdProfiles, "") {
+				ids = append(ids, id)
+			}
+		}
+		ids = args.Paginator.PaginateStringSlice(ids)
+		if len(ids) != 0 {
+			reply.ThresholdProfileIDs = &ids
+		}
+	}
+
+	if args.FilterIDs != nil {
+		var ids []string
+		if len(*args.FilterIDs) != 0 {
+			for _, id := range *args.FilterIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheFilters, id); hasIt {
+					ids = append(ids, id)
+				}
+			}
+		} else {
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheFilters, "") {
+				ids = append(ids, id)
+			}
+		}
+		ids = args.Paginator.PaginateStringSlice(ids)
+		if len(ids) != 0 {
+			reply.FilterIDs = &ids
+		}
+	}
+
+	if args.SupplierProfileIDs != nil {
+		var ids []string
+		if len(*args.SupplierProfileIDs) != 0 {
+			for _, id := range *args.SupplierProfileIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheSupplierProfiles, id); hasIt {
+					ids = append(ids, id)
+				}
+			}
+		} else {
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheSupplierProfiles, "") {
+				ids = append(ids, id)
+			}
+		}
+		ids = args.Paginator.PaginateStringSlice(ids)
+		if len(ids) != 0 {
+			reply.SupplierProfileIDs = &ids
+		}
+	}
+
+	if args.AttributeProfileIDs != nil {
+		var ids []string
+		if len(*args.AttributeProfileIDs) != 0 {
+			for _, id := range *args.AttributeProfileIDs {
+				if _, hasIt := engine.Cache.Get(utils.CacheAttributeProfiles, id); hasIt {
+					ids = append(ids, id)
+				}
+			}
+		} else {
+			for _, id := range engine.Cache.GetItemIDs(utils.CacheAttributeProfiles, "") {
+				ids = append(ids, id)
+			}
+		}
+		ids = args.Paginator.PaginateStringSlice(ids)
+		if len(ids) != 0 {
+			reply.AttributeProfileIDs = &ids
+		}
+	}
+
 	return
 }
 
@@ -1434,25 +1787,31 @@ func (self *ApierV1) LoadTariffPlanFromFolder(attrs utils.AttrLoadTpFromFolder, 
 	} else if !fi.IsDir() {
 		return utils.ErrInvalidPath
 	}
-	loader := engine.NewTpReader(self.DataDB, engine.NewFileCSVStorage(utils.CSV_SEP,
-		path.Join(attrs.FolderPath, utils.DESTINATIONS_CSV),
-		path.Join(attrs.FolderPath, utils.TIMINGS_CSV),
-		path.Join(attrs.FolderPath, utils.RATES_CSV),
-		path.Join(attrs.FolderPath, utils.DESTINATION_RATES_CSV),
-		path.Join(attrs.FolderPath, utils.RATING_PLANS_CSV),
-		path.Join(attrs.FolderPath, utils.RATING_PROFILES_CSV),
-		path.Join(attrs.FolderPath, utils.SHARED_GROUPS_CSV),
-		path.Join(attrs.FolderPath, utils.LCRS_CSV),
-		path.Join(attrs.FolderPath, utils.ACTIONS_CSV),
-		path.Join(attrs.FolderPath, utils.ACTION_PLANS_CSV),
-		path.Join(attrs.FolderPath, utils.ACTION_TRIGGERS_CSV),
-		path.Join(attrs.FolderPath, utils.ACCOUNT_ACTIONS_CSV),
-		path.Join(attrs.FolderPath, utils.DERIVED_CHARGERS_CSV),
-		path.Join(attrs.FolderPath, utils.CDR_STATS_CSV),
-		path.Join(attrs.FolderPath, utils.USERS_CSV),
-		path.Join(attrs.FolderPath, utils.ALIASES_CSV),
-		path.Join(attrs.FolderPath, utils.ResourceLimitsCsv),
-	), "", self.Config.DefaultTimezone)
+	loader := engine.NewTpReader(self.DataManager.DataDB(),
+		engine.NewFileCSVStorage(utils.CSV_SEP,
+			path.Join(attrs.FolderPath, utils.DESTINATIONS_CSV),
+			path.Join(attrs.FolderPath, utils.TIMINGS_CSV),
+			path.Join(attrs.FolderPath, utils.RATES_CSV),
+			path.Join(attrs.FolderPath, utils.DESTINATION_RATES_CSV),
+			path.Join(attrs.FolderPath, utils.RATING_PLANS_CSV),
+			path.Join(attrs.FolderPath, utils.RATING_PROFILES_CSV),
+			path.Join(attrs.FolderPath, utils.SHARED_GROUPS_CSV),
+			path.Join(attrs.FolderPath, utils.LCRS_CSV),
+			path.Join(attrs.FolderPath, utils.ACTIONS_CSV),
+			path.Join(attrs.FolderPath, utils.ACTION_PLANS_CSV),
+			path.Join(attrs.FolderPath, utils.ACTION_TRIGGERS_CSV),
+			path.Join(attrs.FolderPath, utils.ACCOUNT_ACTIONS_CSV),
+			path.Join(attrs.FolderPath, utils.DERIVED_CHARGERS_CSV),
+			path.Join(attrs.FolderPath, utils.CDR_STATS_CSV),
+			path.Join(attrs.FolderPath, utils.USERS_CSV),
+			path.Join(attrs.FolderPath, utils.ALIASES_CSV),
+			path.Join(attrs.FolderPath, utils.ResourcesCsv),
+			path.Join(attrs.FolderPath, utils.StatsCsv),
+			path.Join(attrs.FolderPath, utils.ThresholdsCsv),
+			path.Join(attrs.FolderPath, utils.FiltersCsv),
+			path.Join(attrs.FolderPath, utils.SuppliersCsv),
+			path.Join(attrs.FolderPath, utils.AttributesCsv),
+		), "", self.Config.DefaultTimezone)
 	if err := loader.LoadAll(); err != nil {
 		return utils.NewErrServerError(err)
 	}
@@ -1474,26 +1833,13 @@ func (self *ApierV1) LoadTariffPlanFromFolder(attrs utils.AttrLoadTpFromFolder, 
 	for _, prfx := range []string{
 		utils.DESTINATION_PREFIX,
 		utils.REVERSE_DESTINATION_PREFIX,
-		utils.RATING_PLAN_PREFIX,
-		utils.RATING_PROFILE_PREFIX,
-		utils.ACTION_PREFIX,
 		utils.ACTION_PLAN_PREFIX,
 		utils.AccountActionPlansPrefix,
-		utils.ACTION_TRIGGER_PREFIX,
-		utils.SHARED_GROUP_PREFIX,
 		utils.DERIVEDCHARGERS_PREFIX,
-		utils.LCR_PREFIX} {
-		loadedIDs, _ := loader.GetLoadedIds(prfx)
-		if err := self.DataDB.CacheDataFromDB(prfx, loadedIDs, true); err != nil {
-			return utils.NewErrServerError(err)
-		}
-	}
-	for _, prfx := range []string{
 		utils.ALIASES_PREFIX,
-		utils.REVERSE_ALIASES_PREFIX,
-		utils.ResourceLimitsPrefix} {
+		utils.REVERSE_ALIASES_PREFIX} {
 		loadedIDs, _ := loader.GetLoadedIds(prfx)
-		if err := self.DataDB.CacheDataFromDB(prfx, loadedIDs, true); err != nil {
+		if err := self.DataManager.CacheDataFromDB(prfx, loadedIDs, true); err != nil {
 			return utils.NewErrServerError(err)
 		}
 	}
@@ -1570,7 +1916,7 @@ func (self *ApierV1) RemoveRatingProfile(attr AttrRemoveRatingProfile, reply *st
 		return utils.ErrMandatoryIeMissing
 	}
 	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
-		err := self.DataDB.RemoveRatingProfile(attr.GetId(), utils.NonTransactional)
+		err := self.DataManager.RemoveRatingProfile(attr.GetId(), utils.NonTransactional)
 		if err != nil {
 			return 0, err
 		}
@@ -1592,7 +1938,7 @@ func (self *ApierV1) GetLoadHistory(attrs utils.Paginator, reply *[]*utils.LoadI
 	} else if attrs.Limit != nil {
 		nrItems = *attrs.Limit
 	}
-	loadHist, err := self.DataDB.GetLoadHistory(nrItems, true, utils.NonTransactional)
+	loadHist, err := self.DataManager.DataDB().GetLoadHistory(nrItems, true, utils.NonTransactional)
 	if err != nil {
 		return utils.NewErrServerError(err)
 	}
@@ -1625,13 +1971,13 @@ func (self *ApierV1) RemoveActions(attr AttrRemoveActions, reply *string) error 
 	// The check could lead to very long execution time. So we decided to leave it at the user's risck.'
 	/*
 		stringMap := utils.NewStringMap(attr.ActionIDs...)
-		keys, err := self.DataDB.GetKeysForPrefix(utils.ACTION_TRIGGER_PREFIX, true)
+		keys, err := self.DataManager.DataDB().GetKeysForPrefix(utils.ACTION_TRIGGER_PREFIX, true)
 		if err != nil {
 			*reply = err.Error()
 			return err
 		}
 		for _, key := range keys {
-			getAttrs, err := self.DataDB.GetActionTriggers(key[len(utils.ACTION_TRIGGER_PREFIX):])
+			getAttrs, err := self.DataManager.DataDB().GetActionTriggers(key[len(utils.ACTION_TRIGGER_PREFIX):])
 			if err != nil {
 				*reply = err.Error()
 				return err
@@ -1645,7 +1991,7 @@ func (self *ApierV1) RemoveActions(attr AttrRemoveActions, reply *string) error 
 				}
 			}
 		}
-		allAplsMap, err := self.DataDB.GetAllActionPlans()
+		allAplsMap, err := self.DataManager.DataDB().GetAllActionPlans()
 		if err != nil && err != utils.ErrNotFound {
 			*reply = err.Error()
 			return err
@@ -1658,11 +2004,10 @@ func (self *ApierV1) RemoveActions(attr AttrRemoveActions, reply *string) error 
 					return err
 				}
 			}
-
 		}
 	*/
 	for _, aID := range attr.ActionIDs {
-		if err := self.DataDB.RemoveActions(aID, utils.NonTransactional); err != nil {
+		if err := self.DataManager.RemoveActions(aID, utils.NonTransactional); err != nil {
 			*reply = err.Error()
 			return err
 		}

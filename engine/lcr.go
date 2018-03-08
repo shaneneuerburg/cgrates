@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -92,7 +93,7 @@ func (self *LcrRequest) AsCallDescriptor(timezone string) (*CallDescriptor, erro
 	var callDur time.Duration
 	if len(self.Duration) == 0 {
 		callDur = time.Duration(1) * time.Minute
-	} else if callDur, err = utils.ParseDurationWithSecs(self.Duration); err != nil {
+	} else if callDur, err = utils.ParseDurationWithNanosecs(self.Duration); err != nil {
 		return nil, err
 	}
 	cd := &CallDescriptor{
@@ -162,7 +163,7 @@ type LCRSupplierCost struct {
 	Error          string // Not error due to JSON automatic serialization into struct
 	QOS            map[string]float64
 	qosSortParams  []string
-	supplierQueues []*StatsQueue // used for load distribution
+	supplierQueues []*CDRStatsQueue // used for load distribution
 }
 
 func (lcr *LCR) GetId() string {
@@ -197,22 +198,22 @@ func (le *LCREntry) GetQOSLimits() (minASR, maxASR float64, minPDD, maxPDD, minA
 		if maxASR, err = strconv.ParseFloat(params[1], 64); err != nil {
 			maxASR = -1
 		}
-		if minPDD, err = utils.ParseDurationWithSecs(params[2]); err != nil {
+		if minPDD, err = utils.ParseDurationWithNanosecs(params[2]); err != nil || params[2] == "" {
 			minPDD = -1
 		}
-		if maxPDD, err = utils.ParseDurationWithSecs(params[3]); err != nil {
+		if maxPDD, err = utils.ParseDurationWithNanosecs(params[3]); err != nil || params[3] == "" {
 			maxPDD = -1
 		}
-		if minACD, err = utils.ParseDurationWithSecs(params[4]); err != nil {
+		if minACD, err = utils.ParseDurationWithNanosecs(params[4]); err != nil || params[4] == "" {
 			minACD = -1
 		}
-		if maxACD, err = utils.ParseDurationWithSecs(params[5]); err != nil {
+		if maxACD, err = utils.ParseDurationWithNanosecs(params[5]); err != nil || params[5] == "" {
 			maxACD = -1
 		}
-		if minTCD, err = utils.ParseDurationWithSecs(params[6]); err != nil {
+		if minTCD, err = utils.ParseDurationWithNanosecs(params[6]); err != nil || params[6] == "" {
 			minTCD = -1
 		}
-		if maxTCD, err = utils.ParseDurationWithSecs(params[7]); err != nil {
+		if maxTCD, err = utils.ParseDurationWithNanosecs(params[7]); err != nil || params[7] == "" {
 			maxTCD = -1
 		}
 		if minACC, err = strconv.ParseFloat(params[8], 64); err != nil {
@@ -278,7 +279,7 @@ func (es LCREntriesSorter) Sort() {
 func (lcra *LCRActivation) GetLCREntryForPrefix(destination string) *LCREntry {
 	var potentials LCREntriesSorter
 	for _, p := range utils.SplitPrefix(destination, MIN_PREFIX_MATCH) {
-		if destIDs, err := dataStorage.GetReverseDestination(p, true, utils.NonTransactional); err == nil {
+		if destIDs, err := dm.DataDB().GetReverseDestination(p, true, utils.NonTransactional); err == nil {
 			for _, dId := range destIDs {
 				for _, entry := range lcra.Entries {
 					if entry.DestinationId == dId {
@@ -336,7 +337,7 @@ func (lc *LCRCost) SortLoadDistribution() {
 			}
 		}
 	}
-	supplierQueues := make(map[*LCRSupplierCost]*StatsQueue)
+	supplierQueues := make(map[*LCRSupplierCost]*CDRStatsQueue)
 	for _, supCost := range lc.SupplierCosts {
 		for _, sq := range supCost.supplierQueues {
 			if sq.conf.TimeWindow == winnerTimeWindow {

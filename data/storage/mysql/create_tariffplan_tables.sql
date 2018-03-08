@@ -45,7 +45,7 @@ CREATE TABLE `tp_rates` (
   `tpid` varchar(64) NOT NULL,
   `tag` varchar(64) NOT NULL,
   `connect_fee` decimal(7,4) NOT NULL,
-  `rate` decimal(7,4) NOT NULL,
+  `rate` decimal(10,4) NOT NULL,
   `rate_unit` varchar(16) NOT NULL,
   `rate_increment` varchar(16) NOT NULL,
   `group_interval_start` varchar(16) NOT NULL,
@@ -391,25 +391,166 @@ CREATE TABLE tp_aliases (
   UNIQUE KEY `unique_tp_aliases` (`tpid`,`direction`,`tenant`,`category`,`account`,`subject`,`context`, `target`)
 );
 
-DROP TABLE IF EXISTS tp_resource_limits;
-CREATE TABLE tp_resource_limits (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
+--
+-- Table structure for table `tp_resources`
+--
+
+DROP TABLE IF EXISTS tp_resources;
+CREATE TABLE tp_resources (
+  `pk` int(11) NOT NULL AUTO_INCREMENT,
   `tpid` varchar(64) NOT NULL,
-  `tag` varchar(64) NOT NULL,
-  `filter_type` varchar(16) NOT NULL,
-  `filter_field_name` varchar(64) NOT NULL,
-  `filter_field_values` varchar(256) NOT NULL,
+  `tenant` varchar(64) NOT NULL,
+  `id` varchar(64) NOT NULL,
+  `filter_ids` varchar(64) NOT NULL,
   `activation_interval` varchar(64) NOT NULL,
   `usage_ttl` varchar(32) NOT NULL,
   `limit` varchar(64) NOT NULL,
   `allocation_message` varchar(64) NOT NULL,
+  `blocker` BOOLEAN NOT NULL,
+  `stored` BOOLEAN NOT NULL,
   `weight` decimal(8,2) NOT NULL,
-  `action_trigger_ids` varchar(64) NOT NULL,
+  `threshold_ids` varchar(64) NOT NULL,
   `created_at` TIMESTAMP,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`pk`),
   KEY `tpid` (`tpid`),
-  UNIQUE KEY `unique_tp_resource_limits` (`tpid`, `tag`, `filter_type`, `filter_field_name`)
+  UNIQUE KEY `unique_tp_resource` (`tpid`,`tenant`, `id`,`filter_ids` )
 );
+
+--
+-- Table structure for table `tp_stats`
+--
+
+DROP TABLE IF EXISTS tp_stats;
+CREATE TABLE tp_stats (
+  `pk` int(11) NOT NULL AUTO_INCREMENT,
+  `tpid` varchar(64) NOT NULL,
+  `tenant` varchar(64) NOT NULL,
+  `id` varchar(64) NOT NULL,
+  `filter_ids` varchar(64) NOT NULL,
+  `activation_interval` varchar(64) NOT NULL,
+  `queue_length` int(11) NOT NULL,
+  `ttl` varchar(32) NOT NULL,
+  `metrics` varchar(64) NOT NULL,
+  `parameters` varchar(64) NOT NULL,
+  `blocker` BOOLEAN NOT NULL,
+  `stored` BOOLEAN NOT NULL,
+  `weight` decimal(8,2) NOT NULL,
+  `min_items` int(11) NOT NULL,
+  `threshold_ids` varchar(64) NOT NULL,
+  `created_at` TIMESTAMP,
+  PRIMARY KEY (`pk`),
+  KEY `tpid` (`tpid`),
+  UNIQUE KEY `unique_tp_stats` (`tpid`,  `tenant`, `id`, `filter_ids`)
+);
+
+--
+-- Table structure for table `tp_threshold_cfgs`
+--
+
+DROP TABLE IF EXISTS tp_thresholds;
+CREATE TABLE tp_thresholds (
+  `pk` int(11) NOT NULL AUTO_INCREMENT,
+  `tpid` varchar(64) NOT NULL,
+  `tenant` varchar(64) NOT NULL,
+  `id` varchar(64) NOT NULL,
+  `filter_ids` varchar(64) NOT NULL,
+  `activation_interval` varchar(64) NOT NULL,
+  `recurrent` BOOLEAN NOT NULL,
+  `min_hits` int(11) NOT NULL,
+  `min_sleep` varchar(16) NOT NULL,
+  `blocker` BOOLEAN NOT NULL,
+  `weight` decimal(8,2) NOT NULL,
+  `action_ids` varchar(64) NOT NULL,
+  `async` BOOLEAN NOT NULL,
+  `created_at` TIMESTAMP,
+  PRIMARY KEY (`pk`),
+  KEY `tpid` (`tpid`),
+  UNIQUE KEY `unique_tp_thresholds` (`tpid`,`tenant`, `id`,`filter_ids`,`action_ids`)
+);
+
+--
+-- Table structure for table `tp_filter`
+--
+
+DROP TABLE IF EXISTS tp_filters;
+CREATE TABLE tp_filters (
+  `pk` int(11) NOT NULL AUTO_INCREMENT,
+  `tpid` varchar(64) NOT NULL,
+  `tenant` varchar(64) NOT NULL,
+  `id` varchar(64) NOT NULL,
+  `filter_type` varchar(16) NOT NULL,
+  `filter_field_name` varchar(64) NOT NULL,
+  `filter_field_values` varchar(256) NOT NULL,
+  `activation_interval` varchar(64) NOT NULL,
+  `created_at` TIMESTAMP,
+  PRIMARY KEY (`pk`),
+  KEY `tpid` (`tpid`),
+  UNIQUE KEY `unique_tp_filters` (`tpid`,`tenant`, `id`, `filter_type`, `filter_field_name`)
+);
+
+--
+-- Table structure for table `tp_suppliers`
+--
+
+
+DROP TABLE IF EXISTS tp_suppliers;
+CREATE TABLE tp_suppliers (
+  `pk` int(11) NOT NULL AUTO_INCREMENT,
+  `tpid` varchar(64) NOT NULL,
+  `tenant` varchar(64) NOT NULL,
+  `id` varchar(64) NOT NULL,
+  `filter_ids` varchar(64) NOT NULL,
+  `activation_interval` varchar(64) NOT NULL,
+  `sorting` varchar(32) NOT NULL,
+  `sorting_parameters` varchar(64) NOT NULL,
+  `supplier_id` varchar(32) NOT NULL,
+  `supplier_filter_ids` varchar(64) NOT NULL,
+  `supplier_account_ids` varchar(64) NOT NULL,
+  `supplier_ratingplan_ids` varchar(64) NOT NULL,
+  `supplier_resource_ids` varchar(64) NOT NULL,
+  `supplier_stat_ids` varchar(64) NOT NULL,
+  `supplier_weight` decimal(8,2) NOT NULL,
+  `supplier_blocker` BOOLEAN NOT NULL,
+  `supplier_parameters` varchar(64) NOT NULL,
+  `weight` decimal(8,2) NOT NULL,
+  `created_at` TIMESTAMP,
+  PRIMARY KEY (`pk`),
+  KEY `tpid` (`tpid`),
+  UNIQUE KEY `unique_tp_suppliers` (`tpid`,`tenant`,
+    `id`,`filter_ids`,`supplier_id`,`supplier_filter_ids`,`supplier_account_ids`,
+    `supplier_ratingplan_ids`,`supplier_resource_ids`,`supplier_stat_ids` )
+);
+
+--
+-- Table structure for table `tp_attributes`
+--
+
+
+DROP TABLE IF EXISTS tp_attributes;
+CREATE TABLE tp_attributes (
+  `pk` int(11) NOT NULL AUTO_INCREMENT,
+  `tpid` varchar(64) NOT NULL,
+  `tenant` varchar(64) NOT NULL,
+  `id` varchar(64) NOT NULL,
+  `contexts` varchar(64) NOT NULL,
+  `filter_ids` varchar(64) NOT NULL,
+  `activation_interval` varchar(64) NOT NULL,
+  `field_name` varchar(64) NOT NULL,
+  `initial` varchar(64) NOT NULL,
+  `substitute` varchar(64) NOT NULL,
+  `append` BOOLEAN NOT NULL,
+  `weight` decimal(8,2) NOT NULL,
+  `created_at` TIMESTAMP,
+  PRIMARY KEY (`pk`),
+  KEY `tpid` (`tpid`),
+  UNIQUE KEY `unique_tp_attributes` (`tpid`,`tenant`,
+    `id`,`filter_ids`,`field_name`,`initial`,`substitute` )
+);
+
+--
+-- Table structure for table `versions`
+--
+
 
 DROP TABLE IF EXISTS versions;
 CREATE TABLE versions (
@@ -417,8 +558,5 @@ CREATE TABLE versions (
   `item` varchar(64) NOT NULL,
   `version` int(11) NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `item` (`item`)
+  UNIQUE KEY `id_item` (`id`,`item`)
 );
-
-
-

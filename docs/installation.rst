@@ -7,7 +7,7 @@ We recommend using source installs for advanced users familiar with Go programmi
 3.1. Using packages
 -------------------
 
-3.1.1. Debian Jessie/Wheezy
+3.1.1. Debian 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This is for the moment the only packaged and the most recommended to use method to install CGRateS.
@@ -16,11 +16,8 @@ On the server you want to install CGRateS, simply execute the following commands
 
 ::
 
-   cd /etc/apt/sources.list.d/
-   wget -O - http://apt.itsyscom.com/conf/cgrates.gpg.key|apt-key add -
-   wget http://apt.itsyscom.com/conf/cgrates.apt.list
-   apt-get update
-   apt-get install cgrates
+ wget http://www.cgrates.org/tmp_pkg/cgrates_0.9.1~rc8_amd64.deb
+ dpkg -i cgrates_0.9.1~rc8_amd64.deb
 
 Once the installation is completed, one should perform the :ref:`post-install` section in order to have the CGRateS properly set and ready to run.
 After *post-install* actions are performed, CGRateS will be configured in **/etc/cgrates/cgrates.json** and enabled in **/etc/default/cgrates**.
@@ -107,8 +104,17 @@ Once MongoDB is installed, CGRateS database needs to be set-up out of provided s
 .. _PostgreSQL: http://www.postgresql.org
 .. _MongoDB: http://www.mongodb.org
 
+3.3.2 Set versions data
+~~~~~~~~~~~~~~~~~~~~~~~
+Once database setup is completed, we need to write the versions data. To do this, run migrator tool with the parameters specific to your database. 
 
-3.3.2.Git
+Sample usage for MySQL: 
+::
+
+   cgr-migrator -stordb_passwd="CGRateS.org" -migrate="*set_versions"
+
+
+3.3.3.Git
 ~~~~~~~~~
 
 The **historys** (History Service) component will use `Git`_ to archive *tariff plan changes* in a local repository,

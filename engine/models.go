@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -397,73 +398,117 @@ func (ta *TpAlias) GetId() string {
 	return utils.ConcatenatedKey(ta.Direction, ta.Tenant, ta.Category, ta.Account, ta.Subject, ta.Context)
 }
 
-type TBLCDRs struct {
-	ID              int64
-	Cgrid           string
-	RunID           string
-	OriginHost      string
-	Source          string
-	OriginID        string
-	Tor             string
-	RequestType     string
-	Direction       string
-	Tenant          string
-	Category        string
-	Account         string
-	Subject         string
-	Destination     string
-	SetupTime       time.Time
-	Pdd             float64
-	AnswerTime      time.Time
-	Usage           float64
-	Supplier        string
-	DisconnectCause string
-	ExtraFields     string
-	Cost            float64
-	CostDetails     string
-	CostSource      string
-	AccountSummary  string
-	ExtraInfo       string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       *time.Time
+type TpResource struct {
+	PK                 uint `gorm:"primary_key"`
+	Tpid               string
+	Tenant             string  `index:"0" re:""`
+	ID                 string  `index:"1" re:""`
+	FilterIDs          string  `index:"2" re:""`
+	ActivationInterval string  `index:"3" re:""`
+	UsageTTL           string  `index:"4" re:""`
+	Limit              string  `index:"5" re:""`
+	AllocationMessage  string  `index:"6" re:""`
+	Blocker            bool    `index:"7" re:""`
+	Stored             bool    `index:"8" re:""`
+	Weight             float64 `index:"9" re:"\d+\.?\d*"`
+	ThresholdIDs       string  `index:"10" re:""`
+	CreatedAt          time.Time
 }
 
-func (t TBLCDRs) TableName() string {
-	return utils.TBLCDRs
+type TpStats struct {
+	PK                 uint `gorm:"primary_key"`
+	Tpid               string
+	Tenant             string  `index:"0" re:""`
+	ID                 string  `index:"1" re:""`
+	FilterIDs          string  `index:"2" re:""`
+	ActivationInterval string  `index:"3" re:""`
+	QueueLength        int     `index:"4" re:""`
+	TTL                string  `index:"5" re:""`
+	Metrics            string  `index:"6" re:""`
+	Parameters         string  `index:"7" re:""`
+	Blocker            bool    `index:"8" re:""`
+	Stored             bool    `index:"9" re:""`
+	Weight             float64 `index:"10" re:"\d+\.?\d*"`
+	MinItems           int     `index:"11" re:""`
+	ThresholdIDs       string  `index:"12" re:""`
+	CreatedAt          time.Time
 }
 
-type TBLSMCosts struct {
+type TpThreshold struct {
+	PK                 uint `gorm:"primary_key"`
+	Tpid               string
+	Tenant             string  `index:"0" re:""`
+	ID                 string  `index:"1" re:""`
+	FilterIDs          string  `index:"2" re:""`
+	ActivationInterval string  `index:"3" re:""`
+	Recurrent          bool    `index:"4" re:""`
+	MinHits            int     `index:"5" re:""`
+	MinSleep           string  `index:"6" re:""`
+	Blocker            bool    `index:"7" re:""`
+	Weight             float64 `index:"8" re:"\d+\.?\d*"`
+	ActionIDs          string  `index:"9" re:""`
+	Async              bool    `index:"10" re:""`
+	CreatedAt          time.Time
+}
+
+type TpFilter struct {
+	PK                 uint `gorm:"primary_key"`
+	Tpid               string
+	Tenant             string `index:"0" re:""`
+	ID                 string `index:"1" re:""`
+	FilterType         string `index:"2" re:"^\*[A-Za-z].*"`
+	FilterFieldName    string `index:"3" re:""`
+	FilterFieldValues  string `index:"4" re:""`
+	ActivationInterval string `index:"5" re:""`
+	CreatedAt          time.Time
+}
+
+type CDRsql struct {
+	ID          int64
+	Cgrid       string
+	RunID       string
+	OriginHost  string
+	Source      string
+	OriginID    string
+	TOR         string
+	RequestType string
+	Tenant      string
+	Category    string
+	Account     string
+	Subject     string
+	Destination string
+	SetupTime   time.Time
+	AnswerTime  time.Time
+	Usage       int64
+	ExtraFields string
+	CostSource  string
+	Cost        float64
+	CostDetails string
+	ExtraInfo   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   *time.Time
+}
+
+func (t CDRsql) TableName() string {
+	return utils.CDRsTBL
+}
+
+type SessionsCostsSQL struct {
 	ID          int64
 	Cgrid       string
 	RunID       string
 	OriginHost  string
 	OriginID    string
 	CostSource  string
-	Usage       float64
+	Usage       int64
 	CostDetails string
 	CreatedAt   time.Time
 	DeletedAt   *time.Time
 }
 
-func (t TBLSMCosts) TableName() string {
-	return utils.TBLSMCosts
-}
-
-type TpResourceLimit struct {
-	ID                 int64
-	Tpid               string
-	Tag                string  `index:"0" re:""`
-	FilterType         string  `index:"1" re:"^\*[A-Za-z].*"`
-	FilterFieldName    string  `index:"2" re:""`
-	FilterFieldValues  string  `index:"3" re:""`
-	ActivationInterval string  `index:"4" re:""`
-	UsageTTL           string  `index:"5" re:""`
-	Limit              string  `index:"6" re:""`
-	AllocationMessage  string  `index:"7" re:""`
-	Weight             float64 `index:"8" re:"\d+\.?\d*"`
-	ActionTriggerIds   string  `index:"9" re:""`
-	CreatedAt          time.Time
+func (t SessionsCostsSQL) TableName() string {
+	return utils.SessionsCostsTBL
 }
 
 type TBLVersion struct {
@@ -474,4 +519,42 @@ type TBLVersion struct {
 
 func (t TBLVersion) TableName() string {
 	return utils.TBLVersions
+}
+
+type TpSupplier struct {
+	PK                    uint `gorm:"primary_key"`
+	Tpid                  string
+	Tenant                string  `index:"0" re:""`
+	ID                    string  `index:"1" re:""`
+	FilterIDs             string  `index:"2" re:""`
+	ActivationInterval    string  `index:"3" re:""`
+	Sorting               string  `index:"4" re:""`
+	SortingParameters     string  `index:"5" re:""`
+	SupplierID            string  `index:"6" re:""`
+	SupplierFilterIDs     string  `index:"7" re:""`
+	SupplierAccountIDs    string  `index:"8" re:""`
+	SupplierRatingplanIDs string  `index:"9" re:""`
+	SupplierResourceIDs   string  `index:"10" re:""`
+	SupplierStatIDs       string  `index:"11" re:""`
+	SupplierWeight        float64 `index:"12" re:"\d+\.?\d*"`
+	SupplierBlocker       bool    `index:"13" re:""`
+	SupplierParameters    string  `index:"14" re:""`
+	Weight                float64 `index:"15" re:"\d+\.?\d*"`
+	CreatedAt             time.Time
+}
+
+type TPAttribute struct {
+	PK                 uint `gorm:"primary_key"`
+	Tpid               string
+	Tenant             string  `index:"0" re:""`
+	ID                 string  `index:"1" re:""`
+	Contexts           string  `index:"2" re:""`
+	FilterIDs          string  `index:"3" re:""`
+	ActivationInterval string  `index:"4" re:""`
+	FieldName          string  `index:"5" re:""`
+	Initial            string  `index:"6" re:""`
+	Substitute         string  `index:"7" re:""`
+	Append             bool    `index:"8" re:""`
+	Weight             float64 `index:"9" re:"\d+\.?\d*"`
+	CreatedAt          time.Time
 }

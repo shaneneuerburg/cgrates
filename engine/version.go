@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -24,224 +25,170 @@ import (
 	"github.com/cgrates/cgrates/utils"
 )
 
-func CheckVersion(dataDB DataDB) error {
+// Versions will keep trac of various item versions
+type Versions map[string]int64 // map[item]versionNr
+
+func CheckVersions(storage Storage) error {
 	// get current db version
-	if dataDB == nil {
-		dataDB = dataStorage
-	}
-	dbVersion, err := dataDB.GetStructVersion()
-	if err != nil {
-		if lhList, err := dataDB.GetLoadHistory(1, true, utils.NonTransactional); err != nil || len(lhList) == 0 {
-			// no data, write version
-			if err := dataDB.SetStructVersion(CurrentVersion); err != nil {
-				utils.Logger.Warning(fmt.Sprintf("Could not write current version to db: %v", err))
-			}
-		} else {
-			// has data but no version => run migration
-			msg := "Could not detect data structures version: run appropriate migration"
-			utils.Logger.Crit(msg)
+	storType := storage.GetStorageType()
+	x := CurrentDBVersions(storType)
+	dbVersion, err := storage.GetVersions(utils.TBLVersions)
+	if err == utils.ErrNotFound {
+		empty, err := storage.IsDBEmpty()
+		if err != nil {
+			return err
+		}
+		if !empty {
+			msg := "Migration needed: please backup cgrates data and run : <cgr-migrator>"
 			return errors.New(msg)
 		}
+		// no data, write version
+		if err := SetDBVersions(storage); err != nil {
+			return err
+		}
+
 	} else {
 		// comparing versions
-		if len(CurrentVersion.CompareAndMigrate(dbVersion)) > 0 {
+		message := dbVersion.Compare(x, storType)
+		if len(message) > 2 {
 			// write the new values
-			msg := "Migration needed: please backup cgr data and run cgr-loader -migrate"
-			utils.Logger.Crit(msg)
+			msg := "Migration needed: please backup cgr data and run : <" + message + ">"
 			return errors.New(msg)
 		}
 	}
 	return nil
 }
 
-var (
-	CurrentVersion = &StructVersion{
-		Destinations:    "1",
-		RatingPlans:     "1",
-		RatingProfiles:  "1",
-		Lcrs:            "1",
-		DerivedChargers: "1",
-		Actions:         "1",
-		ActionPlans:     "1",
-		ActionTriggers:  "1",
-		SharedGroups:    "1",
-		Accounts:        "1",
-		CdrStats:        "1",
-		Users:           "1",
-		Alias:           "1",
-		PubSubs:         "1",
-		LoadHistory:     "1",
-		Cdrs:            "1",
-		SMCosts:         "1",
-		ResourceLimits:  "1",
+func SetDBVersions(storage Storage) error {
+	storType := storage.GetStorageType()
+	x := CurrentDBVersions(storType)
+	// no data, write version
+	if err := storage.SetVersions(x, false); err != nil {
+		utils.Logger.Warning(fmt.Sprintf("Could not write current version to db: %v", err))
 	}
-)
+	return nil
 
-type StructVersion struct {
-	//  rating
-	Destinations    string
-	RatingPlans     string
-	RatingProfiles  string
-	Lcrs            string
-	DerivedChargers string
-	Actions         string
-	ActionPlans     string
-	ActionTriggers  string
-	SharedGroups    string
-	// accounting
-	Accounts    string
-	CdrStats    string
-	Users       string
-	Alias       string
-	PubSubs     string
-	LoadHistory string
-	// cdr
-	Cdrs           string
-	SMCosts        string
-	ResourceLimits string
 }
 
-type MigrationInfo struct {
-	Prefix         string
-	DbVersion      string
-	CurrentVersion string
+func (vers Versions) Compare(curent Versions, storType string) string {
+	var x map[string]string
+	m := map[string]string{
+		utils.Accounts:       "cgr-migrator -migrate=*accounts",
+		utils.Attributes:     "cgr-migrator -migrate=*attributes",
+		utils.Actions:        "cgr-migrator -migrate=*actions",
+		utils.ActionTriggers: "cgr-migrator -migrate=*action_triggers",
+		utils.ActionPlans:    "cgr-migrator -migrate=*action_plans",
+		utils.SharedGroups:   "cgr-migrator -migrate=*shared_groups",
+		utils.COST_DETAILS:   "cgr-migrator -migrate=*cost_details",
+	}
+	data := map[string]string{
+		utils.Accounts:       "cgr-migrator -migrate=*accounts",
+		utils.Attributes:     "cgr-migrator -migrate=*attributes",
+		utils.Actions:        "cgr-migrator -migrate=*actions",
+		utils.ActionTriggers: "cgr-migrator -migrate=*action_triggers",
+		utils.ActionPlans:    "cgr-migrator -migrate=*action_plans",
+		utils.SharedGroups:   "cgr-migrator -migrate=*shared_groups",
+	}
+	stor := map[string]string{
+		utils.COST_DETAILS:  "cgr-migrator -migrate=*cost_details",
+		utils.SessionsCosts: "cgr-migrator -migrate=*sessions_costs",
+	}
+	switch storType {
+	case utils.MONGO:
+		x = m
+	case utils.POSTGRES, utils.MYSQL:
+		x = stor
+	case utils.REDIS:
+		x = data
+	case utils.MAPSTOR:
+		x = m
+	}
+	for y, val := range x {
+		if vers[y] != curent[y] {
+			return val
+		}
+	}
+	return ""
 }
 
-func (sv *StructVersion) CompareAndMigrate(dbVer *StructVersion) []*MigrationInfo {
-	var migrationInfoList []*MigrationInfo
-	if sv.Destinations != dbVer.Destinations {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.DESTINATION_PREFIX,
-			DbVersion:      dbVer.Destinations,
-			CurrentVersion: CurrentVersion.Destinations,
-		})
-
+func CurrentDataDBVersions() Versions {
+	return Versions{
+		utils.StatS:               2,
+		utils.Accounts:            3,
+		utils.Actions:             2,
+		utils.ActionTriggers:      2,
+		utils.ActionPlans:         2,
+		utils.SharedGroups:        2,
+		utils.Thresholds:          2,
+		utils.Suppliers:           1,
+		utils.Attributes:          2,
+		utils.Timing:              1,
+		utils.RQF:                 1,
+		utils.Resource:            1,
+		utils.ReverseAlias:        1,
+		utils.Alias:               1,
+		utils.User:                1,
+		utils.Subscribers:         1,
+		utils.DerivedChargersV:    1,
+		utils.CdrStats:            1,
+		utils.Destinations:        1,
+		utils.ReverseDestinations: 1,
+		utils.LCR:                 1,
+		utils.RatingPlan:          1,
+		utils.RatingProfile:       1,
 	}
-	if sv.RatingPlans != dbVer.RatingPlans {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.RATING_PLAN_PREFIX,
-			DbVersion:      dbVer.RatingPlans,
-			CurrentVersion: CurrentVersion.RatingPlans,
-		})
-	}
-	if sv.RatingProfiles != dbVer.RatingProfiles {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.RATING_PROFILE_PREFIX,
-			DbVersion:      dbVer.RatingProfiles,
-			CurrentVersion: CurrentVersion.RatingProfiles,
-		})
-	}
-	if sv.Lcrs != dbVer.Lcrs {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.LCR_PREFIX,
-			DbVersion:      dbVer.Lcrs,
-			CurrentVersion: CurrentVersion.Lcrs,
-		})
-	}
-	if sv.DerivedChargers != dbVer.DerivedChargers {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.DERIVEDCHARGERS_PREFIX,
-			DbVersion:      dbVer.DerivedChargers,
-			CurrentVersion: CurrentVersion.DerivedChargers,
-		})
-	}
-	if sv.Actions != dbVer.Actions {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.ACTION_PREFIX,
-			DbVersion:      dbVer.Actions,
-			CurrentVersion: CurrentVersion.Actions,
-		})
-	}
-	if sv.ActionPlans != dbVer.ActionPlans {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.ACTION_PLAN_PREFIX,
-			DbVersion:      dbVer.ActionPlans,
-			CurrentVersion: CurrentVersion.ActionPlans,
-		})
-	}
-	if sv.ActionTriggers != dbVer.ActionTriggers {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.ACTION_TRIGGER_PREFIX,
-			DbVersion:      dbVer.ActionTriggers,
-			CurrentVersion: CurrentVersion.ActionTriggers,
-		})
-	}
-	if sv.SharedGroups != dbVer.SharedGroups {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.SHARED_GROUP_PREFIX,
-			DbVersion:      dbVer.SharedGroups,
-			CurrentVersion: CurrentVersion.SharedGroups,
-		})
-	}
-	if sv.Accounts != dbVer.Accounts {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.ACCOUNT_PREFIX,
-			DbVersion:      dbVer.Accounts,
-			CurrentVersion: CurrentVersion.Accounts,
-		})
-	}
-	if sv.CdrStats != dbVer.CdrStats {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.CDR_STATS_PREFIX,
-			DbVersion:      dbVer.CdrStats,
-			CurrentVersion: CurrentVersion.CdrStats,
-		})
-	}
-	if sv.Users != dbVer.Users {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.USERS_PREFIX,
-			DbVersion:      dbVer.Users,
-			CurrentVersion: CurrentVersion.Users,
-		})
-	}
-	if sv.Alias != dbVer.Alias {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.ALIASES_PREFIX,
-			DbVersion:      dbVer.Alias,
-			CurrentVersion: CurrentVersion.Alias,
-		})
-	}
-	if sv.PubSubs != dbVer.PubSubs {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.PUBSUB_SUBSCRIBERS_PREFIX,
-			DbVersion:      dbVer.PubSubs,
-			CurrentVersion: CurrentVersion.PubSubs,
-		})
-	}
-	if sv.LoadHistory != dbVer.LoadHistory {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.LOADINST_KEY,
-			DbVersion:      dbVer.LoadHistory,
-			CurrentVersion: CurrentVersion.LoadHistory,
-		})
-	}
-	if sv.Cdrs != dbVer.Cdrs {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.CDRS_SOURCE,
-			DbVersion:      dbVer.RatingPlans,
-			CurrentVersion: CurrentVersion.RatingPlans,
-		})
-	}
-	if sv.SMCosts != dbVer.SMCosts {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.SMG,
-			DbVersion:      dbVer.SMCosts,
-			CurrentVersion: CurrentVersion.SMCosts,
-		})
-	}
-	if sv.ResourceLimits != dbVer.ResourceLimits {
-		migrationInfoList = append(migrationInfoList, &MigrationInfo{
-			Prefix:         utils.ResourceLimitsPrefix,
-			DbVersion:      dbVer.ResourceLimits,
-			CurrentVersion: CurrentVersion.ResourceLimits,
-		})
-	}
-	return migrationInfoList
 }
 
 func CurrentStorDBVersions() Versions {
-	return Versions{utils.COST_DETAILS: 2, utils.Accounts: 2}
+	return Versions{
+		utils.COST_DETAILS:       2,
+		utils.SessionsCosts:      2,
+		utils.TpRatingPlans:      1,
+		utils.TpFilters:          1,
+		utils.TpDestinationRates: 1,
+		utils.TpActionTriggers:   1,
+		utils.TpAccountActionsV:  1,
+		utils.TpActionPlans:      1,
+		utils.TpActions:          1,
+		utils.TpDerivedCharges:   1,
+		utils.TpThresholds:       1,
+		utils.TpSuppliers:        1,
+		utils.TpStats:            1,
+		utils.TpSharedGroups:     1,
+		utils.TpRatingProfiles:   1,
+		utils.TpResources:        1,
+		utils.TpRates:            1,
+		utils.TpTiming:           1,
+		utils.TpResource:         1,
+		utils.TpAliases:          1,
+		utils.TpUsers:            1,
+		utils.TpDerivedChargersV: 1,
+		utils.TpCdrStats:         1,
+		utils.TpDestinations:     1,
+		utils.TpRatingPlan:       1,
+		utils.TpRatingProfile:    1,
+	}
 }
 
-// Versions will keep trac of various item versions
-type Versions map[string]int64 // map[item]versionNr
+func CurrentDBVersions(storType string) Versions {
+	dataDbVersions := CurrentDataDBVersions()
+	storDbVersions := CurrentStorDBVersions()
+
+	allVersions := make(Versions)
+	for k, v := range dataDbVersions {
+		allVersions[k] = v
+	}
+	for k, v := range storDbVersions {
+		allVersions[k] = v
+	}
+
+	switch storType {
+	case utils.MONGO, utils.MAPSTOR:
+		return allVersions
+	case utils.POSTGRES, utils.MYSQL:
+		return storDbVersions
+	case utils.REDIS:
+		return dataDbVersions
+	}
+	return nil
+}

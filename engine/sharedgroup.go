@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -96,7 +97,7 @@ func (sg *SharedGroup) GetBalances(destination, category, direction, balanceType
 		if ubId == ub.ID { // skip the initiating user
 			nUb = ub
 		} else {
-			nUb, _ = dataStorage.GetAccount(ubId)
+			nUb, _ = dm.DataDB().GetAccount(ubId)
 			if nUb == nil || nUb.Disabled {
 				continue
 			}

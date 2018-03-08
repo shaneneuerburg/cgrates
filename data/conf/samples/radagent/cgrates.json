@@ -74,20 +74,32 @@
 	"indexes": ["SubscriberId"],
 },
 
-"sm_generic": {
+"resources": {
+	"enabled": true,
+},
+
+"attributes": {
+	"enabled": true,
+},
+
+"suppliers": {
+	"enabled": true,
+},
+
+"sessions": {
 	"enabled": true,
 	"debit_interval": "10s",
 },
 
 "radius_agent": {
 	"enabled": true,
-	"sm_generic_conns": [
+	"sessions_conns": [
 		{"address": "127.0.0.1:2012", "transport": "*json"}								// connection towards SMG component for session management
 	],
 	"request_processors": [
 		{
 			"id": "KamailioAuth",
-			"request_filter": "*radReqType(*radAuthReq)",
+			"request_filter": "*radReqType(*radAuth)",
 			"request_fields":[
 				{"tag": "RequestType", "field_id": "RequestType", "type": "*constant", 
 					"value": "*prepaid", "mandatory": true},	
@@ -104,7 +116,7 @@
 			],
 			"reply_fields":[
 				{"tag": "MaxUsage", "field_id": "SIP-AVP", "type": "*composed", 
-					"value": "^session_max_time#;~*cgrMaxUsage:s/(\\d*)\\d{9}$/$1/", "mandatory": true},
+					"value": "^session_max_time#;~*cgrReply>MaxUsage:s/(\\d*)\\d{9}$/$1/", "mandatory": true},
 			],
 		},
 		{

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package utils
 
 import (
@@ -115,13 +116,13 @@ type RateSlot struct {
 // Used to set the durations we need out of strings
 func (self *RateSlot) SetDurations() error {
 	var err error
-	if self.rateUnitDur, err = ParseDurationWithSecs(self.RateUnit); err != nil {
+	if self.rateUnitDur, err = ParseDurationWithNanosecs(self.RateUnit); err != nil {
 		return err
 	}
-	if self.rateIncrementDur, err = ParseDurationWithSecs(self.RateIncrement); err != nil {
+	if self.rateIncrementDur, err = ParseDurationWithNanosecs(self.RateIncrement); err != nil {
 		return err
 	}
-	if self.groupIntervalStartDur, err = ParseDurationWithSecs(self.GroupIntervalStart); err != nil {
+	if self.groupIntervalStartDur, err = ParseDurationWithNanosecs(self.GroupIntervalStart); err != nil {
 		return err
 	}
 	return nil
@@ -667,7 +668,15 @@ type ArgsCache struct {
 	DerivedChargerIDs     *[]string
 	AliasIDs              *[]string
 	ReverseAliasIDs       *[]string
-	ResourceLimitIDs      *[]string
+	ResourceProfileIDs    *[]string
+	ResourceIDs           *[]string
+	StatsQueueIDs         *[]string
+	StatsQueueProfileIDs  *[]string
+	ThresholdIDs          *[]string
+	ThresholdProfileIDs   *[]string
+	FilterIDs             *[]string
+	SupplierProfileIDs    *[]string
+	AttributeProfileIDs   *[]string
 }
 
 // Data used to do remote cache reloads via api
@@ -702,7 +711,15 @@ type CacheStats struct {
 	Users               int
 	Aliases             int
 	ReverseAliases      int
-	ResourceLimits      int
+	ResourceProfiles    int
+	Resources           int
+	StatQueues          int
+	StatQueueProfiles   int
+	Thresholds          int
+	ThresholdProfiles   int
+	Filters             int
+	SupplierProfiles    int
+	AttributeProfiles   int
 }
 
 type AttrExpFileCdrs struct {
@@ -723,7 +740,6 @@ type AttrExpFileCdrs struct {
 	CdrHosts                   []string // If provided, it will filter cdrhost
 	CdrSources                 []string // If provided, it will filter cdrsource
 	ReqTypes                   []string // If provided, it will fiter reqtype
-	Directions                 []string // If provided, it will fiter direction
 	Tenants                    []string // If provided, it will filter tenant
 	Categories                 []string // If provided, it will filter çategory
 	Accounts                   []string // If provided, it will filter account
@@ -748,7 +764,6 @@ func (self *AttrExpFileCdrs) AsCDRsFilter(timezone string) (*CDRsFilter, error) 
 		OriginHosts:         self.CdrHosts,
 		Sources:             self.CdrSources,
 		RequestTypes:        self.ReqTypes,
-		Directions:          self.Directions,
 		Tenants:             self.Tenants,
 		Categories:          self.Categories,
 		Accounts:            self.Accounts,
@@ -791,8 +806,9 @@ type ExportedFileCdrs struct {
 }
 
 type AttrGetCdrs struct {
-	CgrIds              []string // If provided, it will filter based on the cgrids present in list
-	MediationRunIds     []string // If provided, it will filter on mediation runid
+	CgrIds          []string // If provided, it will filter based on the cgrids present in list
+	MediationRunIds []string // If provided, it will filter on mediation runid
+
 	TORs                []string // If provided, filter on TypeOfRecord
 	CdrHosts            []string // If provided, it will filter cdrhost
 	CdrSources          []string // If provided, it will filter cdrsource
@@ -822,7 +838,6 @@ func (self *AttrGetCdrs) AsCDRsFilter(timezone string) (*CDRsFilter, error) {
 		OriginHosts:         self.CdrHosts,
 		Sources:             self.CdrSources,
 		RequestTypes:        self.ReqTypes,
-		Directions:          self.Directions,
 		Tenants:             self.Tenants,
 		Categories:          self.Categories,
 		Accounts:            self.Accounts,
@@ -866,7 +881,6 @@ type AttrRateCdrs struct {
 	CdrHosts            []string // If provided, it will filter cdrhost
 	CdrSources          []string // If provided, it will filter cdrsource
 	ReqTypes            []string // If provided, it will fiter reqtype
-	Directions          []string // If provided, it will fiter direction
 	Tenants             []string // If provided, it will filter tenant
 	Categories          []string // If provided, it will filter çategory
 	Accounts            []string // If provided, it will filter account
@@ -889,7 +903,6 @@ func (attrRateCDRs *AttrRateCdrs) AsCDRsFilter(timezone string) (*CDRsFilter, er
 		Sources:             attrRateCDRs.CdrSources,
 		ToRs:                attrRateCDRs.TORs,
 		RequestTypes:        attrRateCDRs.ReqTypes,
-		Directions:          attrRateCDRs.Directions,
 		Tenants:             attrRateCDRs.Tenants,
 		Categories:          attrRateCDRs.Categories,
 		Accounts:            attrRateCDRs.Accounts,
@@ -992,6 +1005,8 @@ type CDRsFilter struct {
 	NotCGRIDs              []string          // Filter specific CgrIds out
 	RunIDs                 []string          // If provided, it will filter on mediation runid
 	NotRunIDs              []string          // Filter specific runIds out
+	OriginIDs              []string          // If provided, it will filter on OriginIDs
+	NotOriginIDs           []string          // Filter specific OriginIDs out
 	OriginHosts            []string          // If provided, it will filter cdrhost
 	NotOriginHosts         []string          // Filter out specific cdr hosts
 	Sources                []string          // If provided, it will filter cdrsource
@@ -1000,8 +1015,6 @@ type CDRsFilter struct {
 	NotToRs                []string          // Filter specific TORs out
 	RequestTypes           []string          // If provided, it will fiter reqtype
 	NotRequestTypes        []string          // Filter out specific request types
-	Directions             []string          // If provided, it will fiter direction
-	NotDirections          []string          // Filter out specific directions
 	Tenants                []string          // If provided, it will filter tenant
 	NotTenants             []string          // If provided, it will filter tenant
 	Categories             []string          // If provided, it will filter çategory
@@ -1012,10 +1025,6 @@ type CDRsFilter struct {
 	NotSubjects            []string          // Filter out specific subjects
 	DestinationPrefixes    []string          // If provided, it will filter on destination prefix
 	NotDestinationPrefixes []string          // Filter out specific destination prefixes
-	Suppliers              []string          // If provided, it will filter the supplier
-	NotSuppliers           []string          // Filter out specific suppliers
-	DisconnectCauses       []string          // Filter for disconnect Cause
-	NotDisconnectCauses    []string          // Filter out specific disconnect causes
 	Costs                  []float64         // Query based on costs specified
 	NotCosts               []float64         // Filter out specific costs out from result
 	ExtraFields            map[string]string // Query based on extra fields content
@@ -1032,8 +1041,6 @@ type CDRsFilter struct {
 	UpdatedAtEnd           *time.Time        // End interval, smaller than
 	MinUsage               string            // Start of the usage interval (>=)
 	MaxUsage               string            // End of the usage interval (<)
-	MinPDD                 string            // Start of the pdd interval (>=)
-	MaxPDD                 string            // End of the pdd interval (<)
 	MinCost                *float64          // Start of the cost interval (>=)
 	MaxCost                *float64          // End of the usage interval (<)
 	Unscoped               bool              // Include soft-deleted records in results
@@ -1048,6 +1055,8 @@ type RPCCDRsFilter struct {
 	NotCGRIDs              []string          // Filter specific CgrIds out
 	RunIDs                 []string          // If provided, it will filter on mediation runid
 	NotRunIDs              []string          // Filter specific runIds out
+	OriginIDs              []string          // If provided, it will filter on OriginIDs
+	NotOriginIDs           []string          // Filter specific OriginIDs out
 	OriginHosts            []string          // If provided, it will filter cdrhost
 	NotOriginHosts         []string          // Filter out specific cdr hosts
 	Sources                []string          // If provided, it will filter cdrsource
@@ -1056,8 +1065,6 @@ type RPCCDRsFilter struct {
 	NotToRs                []string          // Filter specific TORs out
 	RequestTypes           []string          // If provided, it will fiter reqtype
 	NotRequestTypes        []string          // Filter out specific request types
-	Directions             []string          // If provided, it will fiter direction
-	NotDirections          []string          // Filter out specific directions
 	Tenants                []string          // If provided, it will filter tenant
 	NotTenants             []string          // If provided, it will filter tenant
 	Categories             []string          // If provided, it will filter çategory
@@ -1068,10 +1075,6 @@ type RPCCDRsFilter struct {
 	NotSubjects            []string          // Filter out specific subjects
 	DestinationPrefixes    []string          // If provided, it will filter on destination prefix
 	NotDestinationPrefixes []string          // Filter out specific destination prefixes
-	Suppliers              []string          // If provided, it will filter the supplier
-	NotSuppliers           []string          // Filter out specific suppliers
-	DisconnectCauses       []string          // Filter for disconnect Cause
-	NotDisconnectCauses    []string          // Filter out specific disconnect causes
 	Costs                  []float64         // Query based on costs specified
 	NotCosts               []float64         // Filter out specific costs out from result
 	ExtraFields            map[string]string // Query based on extra fields content
@@ -1088,8 +1091,6 @@ type RPCCDRsFilter struct {
 	UpdatedAtEnd           string            // End interval, smaller than
 	MinUsage               string            // Start of the usage interval (>=)
 	MaxUsage               string            // End of the usage interval (<)
-	MinPDD                 string            // Start of the pdd interval (>=)
-	MaxPDD                 string            // End of the pdd interval (<)
 	MinCost                *float64          // Start of the cost interval (>=)
 	MaxCost                *float64          // End of the usage interval (<)
 	Paginator                                // Add pagination
@@ -1101,6 +1102,8 @@ func (self *RPCCDRsFilter) AsCDRsFilter(timezone string) (*CDRsFilter, error) {
 		NotCGRIDs:              self.NotCGRIDs,
 		RunIDs:                 self.RunIDs,
 		NotRunIDs:              self.NotRunIDs,
+		OriginIDs:              self.OriginIDs,
+		NotOriginIDs:           self.NotOriginIDs,
 		ToRs:                   self.ToRs,
 		NotToRs:                self.NotToRs,
 		OriginHosts:            self.OriginHosts,
@@ -1109,8 +1112,6 @@ func (self *RPCCDRsFilter) AsCDRsFilter(timezone string) (*CDRsFilter, error) {
 		NotSources:             self.NotSources,
 		RequestTypes:           self.RequestTypes,
 		NotRequestTypes:        self.NotRequestTypes,
-		Directions:             self.Directions,
-		NotDirections:          self.NotDirections,
 		Tenants:                self.Tenants,
 		NotTenants:             self.NotTenants,
 		Categories:             self.Categories,
@@ -1121,23 +1122,17 @@ func (self *RPCCDRsFilter) AsCDRsFilter(timezone string) (*CDRsFilter, error) {
 		NotSubjects:            self.NotSubjects,
 		DestinationPrefixes:    self.DestinationPrefixes,
 		NotDestinationPrefixes: self.NotDestinationPrefixes,
-		Suppliers:              self.Suppliers,
-		NotSuppliers:           self.NotSuppliers,
-		DisconnectCauses:       self.DisconnectCauses,
-		NotDisconnectCauses:    self.NotDisconnectCauses,
-		Costs:                  self.Costs,
-		NotCosts:               self.NotCosts,
-		ExtraFields:            self.ExtraFields,
-		NotExtraFields:         self.NotExtraFields,
-		OrderIDStart:           self.OrderIDStart,
-		OrderIDEnd:             self.OrderIDEnd,
-		MinUsage:               self.MinUsage,
-		MaxUsage:               self.MaxUsage,
-		MinPDD:                 self.MinPDD,
-		MaxPDD:                 self.MaxPDD,
-		MinCost:                self.MinCost,
-		MaxCost:                self.MaxCost,
-		Paginator:              self.Paginator,
+		Costs:          self.Costs,
+		NotCosts:       self.NotCosts,
+		ExtraFields:    self.ExtraFields,
+		NotExtraFields: self.NotExtraFields,
+		OrderIDStart:   self.OrderIDStart,
+		OrderIDEnd:     self.OrderIDEnd,
+		MinUsage:       self.MinUsage,
+		MaxUsage:       self.MaxUsage,
+		MinCost:        self.MinCost,
+		MaxCost:        self.MaxCost,
+		Paginator:      self.Paginator,
 	}
 	if len(self.SetupTimeStart) != 0 {
 		if sTimeStart, err := ParseTimeDetectLayout(self.SetupTimeStart, timezone); err != nil {
@@ -1261,22 +1256,19 @@ type AttrSetBalance struct {
 	Disabled       *bool
 }
 
-type TPResourceLimit struct {
+type TPResource struct {
 	TPid               string
-	ID                 string                // Identifier of this limit
-	Filters            []*TPRequestFilter    // Filters for the request
+	Tenant             string
+	ID                 string // Identifier of this limit
+	FilterIDs          []string
 	ActivationInterval *TPActivationInterval // Time when this limit becomes active/expires
 	UsageTTL           string
 	Limit              string // Limit value
 	AllocationMessage  string
+	Blocker            bool // blocker flag to stop processing on filters matched
+	Stored             bool
 	Weight             float64  // Weight to sort the ResourceLimits
-	ActionTriggerIDs   []string // Thresholds to check after changing Limit
-}
-
-type TPRequestFilter struct {
-	Type      string   // Filter type (*string, *timing, *rsr_filters, *cdr_stats)
-	FieldName string   // Name of the field providing us the Values to check (used in case of some )
-	Values    []string // Filter definition
+	ThresholdIDs       []string // Thresholds to check after changing Limit
 }
 
 // TPActivationInterval represents an activation interval for an item
@@ -1286,14 +1278,29 @@ type TPActivationInterval struct {
 }
 
 type AttrRLsCache struct {
-	LoadID           string
-	ResourceLimitIDs []string
+	LoadID      string
+	ResourceIDs []string
 }
 
-type AttrRLsResourceUsage struct {
-	Event   map[string]interface{}
-	UsageID string // ResourceUsage Identifier
-	Units   float64
+type ArgRSv1ResourceUsage struct {
+	CGREvent
+	UsageID  string // ResourceUsage Identifier
+	UsageTTL *time.Duration
+	Units    float64
+}
+
+func (args *ArgRSv1ResourceUsage) TenantID() string {
+	return ConcatenatedKey(args.CGREvent.Tenant, args.UsageID)
+}
+
+type ArgsComputeFilterIndexes struct {
+	Tenant       string
+	Context      string
+	AttributeIDs *[]string
+	ResourceIDs  *[]string
+	StatIDs      *[]string
+	SupplierIDs  *[]string
+	ThresholdIDs *[]string
 }
 
 // AsActivationTime converts TPActivationInterval into ActivationInterval
@@ -1313,7 +1320,7 @@ type ActivationInterval struct {
 }
 
 func (ai *ActivationInterval) IsActiveAtTime(atTime time.Time) bool {
-	return ai.ActivationTime.Before(atTime) &&
+	return (ai.ActivationTime.IsZero() || ai.ActivationTime.Before(atTime)) &&
 		(ai.ExpiryTime.IsZero() || ai.ExpiryTime.After(atTime))
 }
 
@@ -1321,4 +1328,97 @@ func (ai *ActivationInterval) IsActiveAtTime(atTime time.Time) bool {
 type AttrDisconnectSession struct {
 	EventStart map[string]interface{}
 	Reason     string
+}
+
+// TPStats is used in APIs to manage remotely offline Stats config
+type TPStats struct {
+	TPid               string
+	Tenant             string
+	ID                 string
+	FilterIDs          []string
+	ActivationInterval *TPActivationInterval
+	QueueLength        int
+	TTL                string
+	Metrics            []*MetricWithParams
+	Blocker            bool // blocker flag to stop processing on filters matched
+	Stored             bool
+	Weight             float64
+	MinItems           int
+	ThresholdIDs       []string
+}
+
+type MetricWithParams struct {
+	MetricID   string
+	Parameters string
+}
+
+type TPThreshold struct {
+	TPid               string
+	Tenant             string
+	ID                 string
+	FilterIDs          []string
+	ActivationInterval *TPActivationInterval // Time when this limit becomes active and expires
+	Recurrent          bool
+	MinHits            int
+	MinSleep           string
+	Blocker            bool    // blocker flag to stop processing on filters matched
+	Weight             float64 // Weight to sort the thresholds
+	ActionIDs          []string
+	Async              bool
+}
+
+type TPFilterProfile struct {
+	TPid               string
+	Tenant             string
+	ID                 string
+	Filters            []*TPFilter
+	ActivationInterval *TPActivationInterval // Time when this limit becomes active and expires
+}
+
+type TPFilter struct {
+	Type      string   // Filter type (*string, *timing, *rsr_filters, *cdr_stats)
+	FieldName string   // Name of the field providing us the Values to check (used in case of some )
+	Values    []string // Filter definition
+}
+
+type TPSupplier struct {
+	ID                 string // SupplierID
+	FilterIDs          []string
+	AccountIDs         []string
+	RatingPlanIDs      []string // used when computing price
+	ResourceIDs        []string // queried in some strategies
+	StatIDs            []string // queried in some strategies
+	Weight             float64
+	Blocker            bool
+	SupplierParameters string
+}
+
+type TPSupplierProfile struct {
+	TPid               string
+	Tenant             string
+	ID                 string
+	FilterIDs          []string
+	ActivationInterval *TPActivationInterval // Time when this limit becomes active and expires
+	Sorting            string
+	SortingParameters  []string
+	Suppliers          []*TPSupplier
+	Weight             float64
+}
+
+type TPAttribute struct {
+	FieldName  string
+	Initial    string
+	Substitute string
+	Append     bool
+}
+
+type TPAttributeProfile struct {
+	TPid               string
+	Tenant             string
+	ID                 string
+	FilterIDs          []string
+	ActivationInterval *TPActivationInterval // Time when this limit becomes active and expires
+	Contexts           []string              // bind this TPAttribute to multiple context
+	Attributes         []*TPAttribute
+	Weight             float64
 }

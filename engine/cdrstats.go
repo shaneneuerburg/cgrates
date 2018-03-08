@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -104,9 +105,6 @@ func (cs *CdrStats) AcceptCdr(cdr *CDR) bool {
 	if len(cs.ReqType) > 0 && !utils.IsSliceMember(cs.ReqType, cdr.RequestType) {
 		return false
 	}
-	if len(cs.Direction) > 0 && !utils.IsSliceMember(cs.Direction, cdr.Direction) {
-		return false
-	}
 	if len(cs.Tenant) > 0 && !utils.IsSliceMember(cs.Tenant, cdr.Tenant) {
 		return false
 	}
@@ -122,7 +120,7 @@ func (cs *CdrStats) AcceptCdr(cdr *CDR) bool {
 	if len(cs.DestinationIds) > 0 {
 		found := false
 		for _, p := range utils.SplitPrefix(cdr.Destination, MIN_PREFIX_MATCH) {
-			if destIDs, err := dataStorage.GetReverseDestination(p, false, utils.NonTransactional); err == nil {
+			if destIDs, err := dm.DataDB().GetReverseDestination(p, false, utils.NonTransactional); err == nil {
 				for _, idID := range destIDs {
 					if utils.IsSliceMember(cs.DestinationIds, idID) {
 						found = true
@@ -148,20 +146,6 @@ func (cs *CdrStats) AcceptCdr(cdr *CDR) bool {
 		if len(cs.UsageInterval) > 1 && cdr.Usage >= cs.UsageInterval[1] {
 			return false
 		}
-	}
-	if len(cs.PddInterval) > 0 {
-		if cdr.PDD < cs.PddInterval[0] {
-			return false
-		}
-		if len(cs.PddInterval) > 1 && cdr.PDD >= cs.PddInterval[1] {
-			return false
-		}
-	}
-	if len(cs.Supplier) > 0 && !utils.IsSliceMember(cs.Supplier, cdr.Supplier) {
-		return false
-	}
-	if len(cs.DisconnectCause) > 0 && !utils.IsSliceMember(cs.DisconnectCause, cdr.DisconnectCause) {
-		return false
 	}
 	if len(cs.MediationRunIds) > 0 && !utils.IsSliceMember(cs.MediationRunIds, cdr.RunID) {
 		return false

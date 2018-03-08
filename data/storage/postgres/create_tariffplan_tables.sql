@@ -43,7 +43,7 @@ CREATE TABLE tp_rates (
   tpid VARCHAR(64) NOT NULL,
   tag VARCHAR(64) NOT NULL,
   connect_fee NUMERIC(7,4) NOT NULL,
-  rate NUMERIC(7,4) NOT NULL,
+  rate NUMERIC(10,4) NOT NULL,
   rate_unit VARCHAR(16) NOT NULL,
   rate_increment VARCHAR(16) NOT NULL,
   group_interval_start VARCHAR(16) NOT NULL,
@@ -368,50 +368,183 @@ CREATE INDEX tpusers_idx ON tp_users (tpid,tenant,user_name);
 
 DROP TABLE IF EXISTS tp_aliases;
 CREATE TABLE tp_aliases (
-  "id" SERIAL PRIMARY KEY,
-  "tpid" varchar(64) NOT NULL,
-  "direction" varchar(8) NOT NULL,
-  "tenant" varchar(64) NOT NULL,
-  "category" varchar(64) NOT NULL,
-  "account" varchar(64) NOT NULL,
-  "subject" varchar(64) NOT NULL,
-  "destination_id" varchar(64) NOT NULL,
-  "context" varchar(64) NOT NULL,
-  "target" varchar(64) NOT NULL,
-  "original" varchar(64) NOT NULL,
-  "alias" varchar(64) NOT NULL,
-  "weight" NUMERIC(8,2) NOT NULL,
-  "created_at" TIMESTAMP WITH TIME ZONE
+  id SERIAL PRIMARY KEY,
+  tpid varchar(64) NOT NULL,
+  direction varchar(8) NOT NULL,
+  tenant varchar(64) NOT NULL,
+  category varchar(64) NOT NULL,
+  account varchar(64) NOT NULL,
+  subject varchar(64) NOT NULL,
+  destination_id varchar(64) NOT NULL,
+  context varchar(64) NOT NULL,
+  target varchar(64) NOT NULL,
+  original varchar(64) NOT NULL,
+  alias varchar(64) NOT NULL,
+  weight NUMERIC(8,2) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE
 );
 CREATE INDEX tpaliases_tpid_idx ON tp_aliases (tpid);
-CREATE INDEX tpaliases_idx ON tp_aliases ("tpid","direction","tenant","category","account","subject","context","target");
+CREATE INDEX tpaliases_idx ON tp_aliases (tpid,direction,tenant,category,account,subject,context,target);
 
-DROP TABLE IF EXISTS tp_resource_limits;
-CREATE TABLE tp_resource_limits (
-  "id" SERIAL PRIMARY KEY,
+
+--
+-- Table structure for table `tp_resources`
+--
+
+DROP TABLE IF EXISTS tp_resources;
+CREATE TABLE tp_resources (
+  "pk" SERIAL PRIMARY KEY,
   "tpid" varchar(64) NOT NULL,
-  "tag" varchar(64) NOT NULL,
-  "filter_type" varchar(16) NOT NULL,
-  "filter_field_name" varchar(64) NOT NULL,
-  "filter_field_values" varchar(256) NOT NULL,
+  "tenant"varchar(64) NOT NULL,
+  "id" varchar(64) NOT NULL,
+  "filter_ids" varchar(64) NOT NULL,
   "activation_interval" varchar(64) NOT NULL,
   "usage_ttl" varchar(32) NOT NULL,
   "limit" varchar(64) NOT NULL,
   "allocation_message" varchar(64) NOT NULL,
-  "weight" decimal(8,2) NOT NULL,
-  "action_trigger_ids" varchar(64) NOT NULL,
+  "blocker" BOOLEAN NOT NULL,
+  "stored" BOOLEAN NOT NULL,
+  "weight" NUMERIC(8,2) NOT NULL,
+  "threshold_ids" varchar(64) NOT NULL,
   "created_at" TIMESTAMP WITH TIME ZONE
 );
-CREATE INDEX tp_resource_limits_idx ON tp_resource_limits (tpid);
-CREATE INDEX tp_resource_limits_unique ON tp_resource_limits  ("tpid", "tag", "filter_type", "filter_field_name");
+CREATE INDEX tp_resources_idx ON tp_resources (tpid);
+CREATE INDEX tp_resources_unique ON tp_resources  ("tpid",  "tenant", "id", "filter_ids");
+
+
+--
+-- Table structure for table `tp_stats`
+--
+
+DROP TABLE IF EXISTS tp_stats;
+CREATE TABLE tp_stats (
+  "pk" SERIAL PRIMARY KEY,
+  "tpid" varchar(64) NOT NULL,
+  "tenant"varchar(64) NOT NULL,
+  "id" varchar(64) NOT NULL,
+  "filter_ids" varchar(64) NOT NULL,
+  "activation_interval" varchar(64) NOT NULL,
+  "queue_length" INTEGER NOT NULL,
+  "ttl" varchar(32) NOT NULL,
+  "metrics" varchar(64) NOT NULL,
+  "parameters" varchar(64) NOT NULL,
+  "blocker" BOOLEAN NOT NULL,
+  "stored" BOOLEAN NOT NULL,
+  "weight" decimal(8,2) NOT NULL,
+  "min_items" INTEGER NOT NULL,
+  "threshold_ids" varchar(64) NOT NULL,
+  "created_at" TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX tp_stats_idx ON tp_stats (tpid);
+CREATE INDEX tp_stats_unique ON tp_stats  ("tpid","tenant", "id", "filter_ids");
+
+--
+-- Table structure for table `tp_threshold_cfgs`
+--
+
+DROP TABLE IF EXISTS tp_thresholds;
+CREATE TABLE tp_thresholds (
+  "pk" SERIAL PRIMARY KEY,
+  "tpid" varchar(64) NOT NULL,
+  "tenant"varchar(64) NOT NULL,
+  "id" varchar(64) NOT NULL,
+  "filter_ids" varchar(64) NOT NULL,
+  "activation_interval" varchar(64) NOT NULL,
+  "recurrent" BOOLEAN NOT NULL,
+  "min_hits" INTEGER NOT NULL,
+  "min_sleep" varchar(16) NOT NULL,
+  "blocker" BOOLEAN NOT NULL,
+  "weight" decimal(8,2) NOT NULL,
+  "action_ids" varchar(64) NOT NULL,
+  "async" BOOLEAN NOT NULL,
+  "created_at" TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX tp_thresholds_idx ON tp_thresholds (tpid);
+CREATE INDEX tp_thresholds_unique ON tp_thresholds  ("tpid","tenant", "id","filter_ids","action_ids");
+
+--
+-- Table structure for table `tp_filter`
+--
+
+DROP TABLE IF EXISTS tp_filters;
+CREATE TABLE tp_filters (
+  "pk" SERIAL PRIMARY KEY,
+  "tpid" varchar(64) NOT NULL,
+  "tenant" varchar(64) NOT NULL,
+  "id" varchar(64) NOT NULL,
+  "filter_type" varchar(16) NOT NULL,
+  "filter_field_name" varchar(64) NOT NULL,
+  "filter_field_values" varchar(256) NOT NULL,
+  "activation_interval" varchar(64) NOT NULL,
+  "created_at" TIMESTAMP WITH TIME ZONE
+);
+  CREATE INDEX tp_filters_idx ON tp_filters (tpid);
+  CREATE INDEX tp_filters_unique ON tp_filters  ("tpid","tenant", "id", "filter_type", "filter_field_name");
+
+--
+-- Table structure for table `tp_suppliers`
+--
+
+DROP TABLE IF EXISTS tp_suppliers;
+CREATE TABLE tp_suppliers (
+  "pk" SERIAL PRIMARY KEY,
+  "tpid" varchar(64) NOT NULL,
+  "tenant"varchar(64) NOT NULL,
+  "id" varchar(64) NOT NULL,
+  "filter_ids" varchar(64) NOT NULL,
+  "activation_interval" varchar(64) NOT NULL,
+  "sorting" varchar(32) NOT NULL,
+  "sorting_parameters" varchar(64) NOT NULL,
+  "supplier_id" varchar(32) NOT NULL,
+  "supplier_filter_ids" varchar(64) NOT NULL,
+  "supplier_account_ids" varchar(64) NOT NULL,
+  "supplier_ratingplan_ids" varchar(64) NOT NULL,
+  "supplier_resource_ids" varchar(64) NOT NULL,
+  "supplier_stat_ids" varchar(64) NOT NULL,
+  "supplier_weight" decimal(8,2) NOT NULL,
+  "supplier_blocker" BOOLEAN NOT NULL,
+  "supplier_parameters" varchar(64) NOT NULL,
+  "weight" decimal(8,2) NOT NULL,
+  "created_at" TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX tp_suppliers_idx ON tp_suppliers (tpid);
+CREATE INDEX tp_suppliers_unique ON tp_suppliers  ("tpid",  "tenant", "id",
+  "filter_ids","supplier_id","supplier_filter_ids","supplier_account_ids",
+  "supplier_ratingplan_ids","supplier_resource_ids","supplier_stat_ids");
+
+  --
+  -- Table structure for table `tp_attributes`
+  --
+
+  DROP TABLE IF EXISTS tp_attributes;
+  CREATE TABLE tp_attributes (
+    "pk" SERIAL PRIMARY KEY,
+    "tpid" varchar(64) NOT NULL,
+    "tenant"varchar(64) NOT NULL,
+    "id" varchar(64) NOT NULL,
+    "contexts" varchar(64) NOT NULL,
+    "filter_ids" varchar(64) NOT NULL,
+    "activation_interval" varchar(64) NOT NULL,
+    "field_name" varchar(64) NOT NULL,
+    "initial" varchar(64) NOT NULL,
+    "substitute" varchar(64) NOT NULL,
+    "append" BOOLEAN NOT NULL,
+    "weight" decimal(8,2) NOT NULL,
+    "created_at" TIMESTAMP WITH TIME ZONE
+  );
+  CREATE INDEX tp_attributes_ids ON tp_attributes (tpid);
+  CREATE INDEX tp_attributes_unique ON tp_attributes  ("tpid",  "tenant", "id",
+    "filter_ids","field_name","initial","substitute");
+
+
+--
+-- Table structure for table `versions`
+--
 
 DROP TABLE IF EXISTS versions;
 CREATE TABLE versions (
   "id" SERIAL PRIMARY KEY,
   "item" varchar(64) NOT NULL,
   "version" INTEGER NOT NULL,
-  UNIQUE (item)
+  UNIQUE ("id","item")
 );
-
-
-

@@ -12,13 +12,15 @@ imports:
 - name: github.com/cgrates/aringo
   version: 47cdb110c5ff42bddf2b801dc5ae8ceb15d2d602
 - name: github.com/cgrates/fsock
-  version: a8ffdbdfc8440016df008ba91e6f05f806d7a69f
+  version: 5b60f0d72ff4f8885289bffab55435e5b8adfb55
 - name: github.com/cgrates/kamevapi
-  version: a376b1f937ba959857929fa3e111c0f3243278c0
+  version: e4dfe7d6cb5bb0872111fe7d61af0e1a19eda485
+- name: github.com/cgrates/ltcache
+  version: d3381f22fae3c21703341cf13aad50f116862ebd
 - name: github.com/cgrates/osipsdagram
   version: 3d6beed663452471dec3ca194137a30d379d9e8f
 - name: github.com/cgrates/radigo
-  version: b3ea6cb087f3ecdc1b4e611df206521d96af1472
+  version: 69d4269e21990c0f120b8e60d5b75d533db7f3dd
 - name: github.com/cgrates/rpcclient
   version: dddae42e9344e877627cd4b7aba075d63b452c0b
 - name: github.com/ChrisTrenkamp/goxpath
@@ -54,17 +56,13 @@ imports:
   - diam/sm/smparser
   - diam/sm/smpeer
 - name: github.com/go-sql-driver/mysql
-  version: 0b58b37b664c21f3010e836f1b931e1d0b0b0685
+  version: bc14601d1bd56421dd60f561e6052c9ed77f9daf
 - name: github.com/gorhill/cronexpr
   version: f0984319b44273e83de132089ae42b1810f4933b
-- name: github.com/hashicorp/golang-lru
-  version: 0a025b7e63adc15a622f29b0b2c4c3848243bbf6
-  subpackages:
-  - simplelru
 - name: github.com/jinzhu/gorm
-  version: 0f2ceb5a775714a46bc344976324e3e439f8cdcc
+  version: 48e41440afa6a741a3e345f2cfbabca08f6fb1ac
 - name: github.com/jinzhu/inflection
-  version: 74387dc39a75e970e7a3ae6a3386b5bd2e5c5cff
+  version: 1c35d901db3da928c72a72d8458480cc9ade058f
 - name: github.com/kr/pty
   version: ce7fa45920dc37a92de8377972e52bc55ffa8d57
 - name: github.com/lib/pq
@@ -72,7 +70,7 @@ imports:
   subpackages:
   - oid
 - name: github.com/mediocregopher/radix.v2
-  version: bb6eabf33bf82d38e985e2757cc13ffdc80818a4
+  version: dbcfd490034f823788edc555737247e9ba628b6c
   subpackages:
   - pool
   - redis
@@ -118,8 +116,8 @@ imports:
   - transform
 - name: gopkg.in/fsnotify.v1
   version: a8a77c9133d2d6fd8334f3260d06f60e8d80a5fb
-- name: gopkg.in/mgo.v2
-  version: 3f83fa5005286a7fe593b055f0d7771a7dce4655
+- name: github.com/cgrates/mgo
+  version: 8c7a1328d9b01236687f383e686a9c610441ddc7
   subpackages:
   - bson
   - internal/json

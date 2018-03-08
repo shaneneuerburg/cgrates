@@ -39,12 +39,28 @@
 	},
 ],
 
-"sm_freeswitch": {
+"sessions": {
+	"enabled": true,						// enable Rater service: <true|false>
+},
+
+"freeswitch_agent": {
 	"enabled": true,				// starts SessionManager service: <true|false>
 	"event_socket_conns":[					// instantiate connections to multiple FreeSWITCH servers
 		{"address": "1.2.3.4:8021", "password": "ClueCon", "reconnects": 5},
 		{"address": "2.3.4.5:8021", "password": "ClueCon", "reconnects": 5},
 	],
+},
+
+"resources": {
+	"enabled": true,
+},
+
+"suppliers": {
+	"enabled": true,
+},
+
+"attributes": {
+	"enabled": true,
 },
 
 }

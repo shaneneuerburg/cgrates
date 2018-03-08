@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -23,7 +24,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/utils"
@@ -46,6 +46,8 @@ const (
 	FS_SIP_REQUSER        = "sip_req_user" // Apps like FusionPBX do not set dialed_extension, alternative being destination_number but that comes in customer profile, not in vars
 	FS_PROGRESS_MEDIAMSEC = "progress_mediamsec"
 	FS_PROGRESSMS         = "progressmsec"
+	FsUsername            = "username"
+	FsIPv4                = "FreeSWITCH-IPv4"
 )
 
 func NewFSCdr(body []byte, cgrCfg *config.CGRConfig) (*FSCdr, error) {
@@ -70,9 +72,9 @@ type FSCdr struct {
 	body   map[string]interface{} // keeps the loaded body for extra field search
 }
 
-func (fsCdr FSCdr) getCGRID(timezone string) string {
-	setupTime, _ := utils.ParseTimeDetectLayout(fsCdr.vars[FS_SETUP_TIME], timezone)
-	return utils.Sha1(fsCdr.vars[FS_UUID], setupTime.UTC().String())
+func (fsCdr FSCdr) getCGRID() string {
+	return utils.Sha1(fsCdr.vars[FS_UUID],
+		utils.FirstNonEmpty(fsCdr.vars[utils.CGRHost], fsCdr.vars[FsIPv4]))
 }
 
 func (fsCdr FSCdr) getExtraFields() map[string]string {
@@ -122,28 +124,33 @@ func (fsCdr FSCdr) searchExtraField(field string, body map[string]interface{}) (
 	return
 }
 
-func (fsCdr FSCdr) AsStoredCdr(timezone string) *CDR {
+// firstDefined will return first defined or search for dfltFld
+func (fsCdr FSCdr) firstDefined(fldNames []string, dfltFld string) (val string) {
+	var has bool
+	for _, fldName := range fldNames {
+		if val, has = fsCdr.vars[fldName]; has {
+			return
+		}
+	}
+	return fsCdr.searchExtraField(dfltFld, fsCdr.body)
+}
+
+func (fsCdr FSCdr) AsCDR(timezone string) *CDR {
 	storCdr := new(CDR)
-	storCdr.CGRID = fsCdr.getCGRID(timezone)
+	storCdr.CGRID = fsCdr.getCGRID()
 	storCdr.ToR = utils.VOICE
 	storCdr.OriginID = fsCdr.vars[FS_UUID]
-	storCdr.OriginHost = fsCdr.vars[FS_IP]
+	storCdr.OriginHost = utils.FirstNonEmpty(fsCdr.vars[utils.CGRHost], fsCdr.vars[FS_IP])
 	storCdr.Source = FS_CDR_SOURCE
 	storCdr.RequestType = utils.FirstNonEmpty(fsCdr.vars[utils.CGR_REQTYPE], fsCdr.cgrCfg.DefaultReqType)
-	storCdr.Direction = utils.OUT
 	storCdr.Tenant = utils.FirstNonEmpty(fsCdr.vars[utils.CGR_TENANT], fsCdr.cgrCfg.DefaultTenant)
 	storCdr.Category = utils.FirstNonEmpty(fsCdr.vars[utils.CGR_CATEGORY], fsCdr.cgrCfg.DefaultCategory)
-	storCdr.Account = utils.FirstNonEmpty(fsCdr.vars[utils.CGR_ACCOUNT], fsCdr.vars[FS_USERNAME])
-	storCdr.Subject = utils.FirstNonEmpty(fsCdr.vars[utils.CGR_SUBJECT], fsCdr.vars[utils.CGR_ACCOUNT], fsCdr.vars[FS_USERNAME])
+	storCdr.Account = fsCdr.firstDefined([]string{utils.CGR_ACCOUNT, FS_USERNAME}, FsUsername)
+	storCdr.Subject = fsCdr.firstDefined([]string{utils.CGR_SUBJECT, utils.CGR_ACCOUNT, FS_USERNAME}, FsUsername)
 	storCdr.Destination = utils.FirstNonEmpty(fsCdr.vars[utils.CGR_DESTINATION], fsCdr.vars[FS_CALL_DEST_NR], fsCdr.vars[FS_SIP_REQUSER])
 	storCdr.SetupTime, _ = utils.ParseTimeDetectLayout(fsCdr.vars[FS_SETUP_TIME], timezone) // Not interested to process errors, should do them if necessary in a previous step
-	pddStr := utils.FirstNonEmpty(fsCdr.vars[FS_PROGRESS_MEDIAMSEC], fsCdr.vars[FS_PROGRESSMS])
-	pddStr += "ms"
-	storCdr.PDD, _ = time.ParseDuration(pddStr)
 	storCdr.AnswerTime, _ = utils.ParseTimeDetectLayout(fsCdr.vars[FS_ANSWER_TIME], timezone)
 	storCdr.Usage, _ = utils.ParseDurationWithSecs(fsCdr.vars[FS_DURATION])
-	storCdr.Supplier = fsCdr.vars[utils.CGR_SUPPLIER]
-	storCdr.DisconnectCause = utils.FirstNonEmpty(fsCdr.vars[utils.CGR_DISCONNECT_CAUSE], fsCdr.vars["hangup_cause"])
 	storCdr.ExtraFields = fsCdr.getExtraFields()
 	storCdr.Cost = -1
 	return storCdr

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package utils
 
 import (
@@ -65,4 +66,12 @@ func AvgNegative(values []float64) float64 {
 		return -1 // return -1 if no data
 	}
 	return Avg(values)
+}
+
+func PrefixSliceItems(slc []string, prfx string) (out []string) {
+	out = make([]string, len(slc))
+	for i, itm := range slc {
+		out[i] = prfx + itm
+	}
+	return
 }

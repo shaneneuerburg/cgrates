@@ -15,14 +15,15 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package migrator
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/utils"
-	"gopkg.in/mgo.v2/bson"
 )
 
 type v1Action struct {
@@ -38,97 +39,99 @@ type v1Action struct {
 
 type v1Actions []*v1Action
 
-func (m *Migrator) migrateActions() (err error) {
-	switch m.dataDBType {
-	case utils.REDIS:
-		var acts engine.Actions
-		var actv1keys []string
-		actv1keys, err = m.dataDB.GetKeysForPrefix(utils.ACTION_PREFIX)
-		if err != nil {
-			return
-		}
-		for _, actv1key := range actv1keys {
-			v1act, err := m.getV1ActionFromDB(actv1key)
-			if err != nil {
-				return err
-			}
-			act := v1act.AsAction()
-			acts = append(acts, act)
-		}
-		if err := m.dataDB.SetActions(acts[0].Id, acts, utils.NonTransactional); err != nil {
-			return err
-		}
-
-		// All done, update version wtih current one
-		vrs := engine.Versions{utils.ACTION_PREFIX: engine.CurrentStorDBVersions()[utils.ACTION_PREFIX]}
-		if err = m.dataDB.SetVersions(vrs, false); err != nil {
-			return utils.NewCGRError(utils.Migrator,
-				utils.ServerErrorCaps,
-				err.Error(),
-				fmt.Sprintf("error: <%s> when updating Accounts version into StorDB", err.Error()))
-		}
-
-		return
-	case utils.MONGO:
-		dataDB := m.dataDB.(*engine.MongoStorage)
-		mgoDB := dataDB.DB()
-		defer mgoDB.Session.Close()
-		var acts engine.Actions
-		var v1act v1Action
-		iter := mgoDB.C(utils.ACTION_PREFIX).Find(nil).Iter()
-		for iter.Next(&v1act) {
-			act := v1act.AsAction()
-			acts = append(acts, act)
-		}
-		if err := m.dataDB.SetActions(acts[0].Id, acts, utils.NonTransactional); err != nil {
-			return err
-		}
-		// All done, update version wtih current one
-		vrs := engine.Versions{utils.ACTION_PREFIX: engine.CurrentStorDBVersions()[utils.ACTION_PREFIX]}
-		if err = m.dataDB.SetVersions(vrs, false); err != nil {
-			return utils.NewCGRError(utils.Migrator,
-				utils.ServerErrorCaps,
-				err.Error(),
-				fmt.Sprintf("error: <%s> when updating Accounts version into StorDB", err.Error()))
-		}
-		return
-
-	default:
-		return utils.NewCGRError(utils.Migrator,
-			utils.ServerErrorCaps,
-			utils.UnsupportedDB,
-			fmt.Sprintf("error: unsupported: <%s> for migrateActions method", m.dataDBType))
+func (m *Migrator) migrateCurrentActions() (err error) {
+	var ids []string
+	ids, err = m.dmIN.DataDB().GetKeysForPrefix(utils.ACTION_PREFIX)
+	if err != nil {
+		return err
 	}
+	for _, id := range ids {
+		idg := strings.TrimPrefix(id, utils.ACTION_PREFIX)
+		acts, err := m.dmIN.GetActions(idg, true, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if acts != nil {
+			if m.dryRun != true {
+				if err := m.dmOut.SetActions(idg, acts, utils.NonTransactional); err != nil {
+					return err
+				}
+				m.stats[utils.Actions] += 1
+			}
+		}
+	}
+	return
 }
 
-func (m *Migrator) getV1ActionFromDB(key string) (v1act *v1Action, err error) {
-	switch m.dataDBType {
-	case utils.REDIS:
-		dataDB := m.dataDB.(*engine.RedisStorage)
-		if strVal, err := dataDB.Cmd("GET", key).Bytes(); err != nil {
-			return nil, err
-		} else {
-			v1act := &v1Action{Id: key}
-			if err := m.mrshlr.Unmarshal(strVal, v1act); err != nil {
-				return nil, err
+func (m *Migrator) migrateV1Actions() (err error) {
+	var v1ACs *v1Actions
+	var acts engine.Actions
+	for {
+		v1ACs, err = m.oldDataDB.getV1Actions()
+		if err != nil && err != utils.ErrNoMoreData {
+			return err
+		}
+		if err == utils.ErrNoMoreData {
+			break
+		}
+		if *v1ACs != nil {
+			for _, v1ac := range *v1ACs {
+				act := v1ac.AsAction()
+				acts = append(acts, act)
+
 			}
-			return v1act, nil
+			if !m.dryRun {
+				if err := m.dmOut.SetActions(acts[0].Id, acts, utils.NonTransactional); err != nil {
+					return err
+				}
+				m.stats[utils.Actions] += 1
+			}
 		}
-	case utils.MONGO:
-		dataDB := m.dataDB.(*engine.MongoStorage)
-		mgoDB := dataDB.DB()
-		defer mgoDB.Session.Close()
-		v1act := new(v1Action)
-		if err := mgoDB.C(utils.ACTION_PREFIX).Find(bson.M{"id": key}).One(v1act); err != nil {
-			return nil, err
-		}
-		return v1act, nil
-	default:
-		return nil, utils.NewCGRError(utils.Migrator,
-			utils.ServerErrorCaps,
-			utils.UnsupportedDB,
-			fmt.Sprintf("error: unsupported: <%s> for getV1ActionPlansFromDB method", m.dataDBType))
 	}
+	if !m.dryRun {
+		// All done, update version wtih current one
+		vrs := engine.Versions{utils.Actions: engine.CurrentStorDBVersions()[utils.Actions]}
+		if err = m.dmOut.DataDB().SetVersions(vrs, false); err != nil {
+			return utils.NewCGRError(utils.Migrator,
+				utils.ServerErrorCaps,
+				err.Error(),
+				fmt.Sprintf("error: <%s> when updating Actions version into dataDB", err.Error()))
+		}
+	}
+	return
+}
+
+func (m *Migrator) migrateActions() (err error) {
+	var vrs engine.Versions
+	current := engine.CurrentDataDBVersions()
+	vrs, err = m.dmOut.DataDB().GetVersions(utils.TBLVersions)
+	if err != nil {
+		return utils.NewCGRError(utils.Migrator,
+			utils.ServerErrorCaps,
+			err.Error(),
+			fmt.Sprintf("error: <%s> when querying oldDataDB for versions", err.Error()))
+	} else if len(vrs) == 0 {
+		return utils.NewCGRError(utils.Migrator,
+			utils.MandatoryIEMissingCaps,
+			utils.UndefinedVersion,
+			"version number is not defined for ActionTriggers model")
+	}
+	switch vrs[utils.Actions] {
+	case current[utils.Actions]:
+		if m.sameDataDB {
+			return
+		}
+		if err := m.migrateCurrentActions(); err != nil {
+			return err
+		}
+		return
+
+	case 1:
+		if err := m.migrateV1Actions(); err != nil {
+			return err
+		}
+	}
+	return
 }
 
 func (v1Act v1Action) AsAction() (act *engine.Action) {

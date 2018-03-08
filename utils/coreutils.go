@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package utils
 
 import (
@@ -40,6 +41,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cgrates/rpcclient"
 )
 
 func NewCounter(start, limit int64) *Counter {
@@ -162,6 +165,7 @@ func ParseTimeDetectLayout(tmStr string, timezone string) (time.Time, error) {
 	rfc3339Rule := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.+$`)
 	sqlRule := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$`)
 	gotimeRule := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.?\d*\s[+,-]\d+\s\w+$`)
+	gotimeRule2 := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\.?\d*\s[+,-]\d+\s[+,-]\d+$`)
 	fsTimestamp := regexp.MustCompile(`^\d{16}$`)
 	astTimestamp := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d*[+,-]\d+$`)
 	unixTimestampRule := regexp.MustCompile(`^\d{10}$`)
@@ -176,6 +180,8 @@ func ParseTimeDetectLayout(tmStr string, timezone string) (time.Time, error) {
 		return time.Parse(time.RFC3339, tmStr)
 	case gotimeRule.MatchString(tmStr):
 		return time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", tmStr)
+	case gotimeRule2.MatchString(tmStr):
+		return time.Parse("2006-01-02 15:04:05.999999999 -0700 -0700", tmStr)
 	case sqlRule.MatchString(tmStr):
 		return time.ParseInLocation("2006-01-02 15:04:05", tmStr, loc)
 	case fsTimestamp.MatchString(tmStr):
@@ -202,6 +208,14 @@ func ParseTimeDetectLayout(tmStr string, timezone string) (time.Time, error) {
 		return time.ParseInLocation("20060102150405.999", tmStr, loc)
 	case tmStr == "*now":
 		return time.Now(), nil
+	case strings.HasPrefix(tmStr, "+"):
+		tmStr = strings.TrimPrefix(tmStr, "+")
+		if tmStrTmp, err := time.ParseDuration(tmStr); err != nil {
+			return nilTime, err
+		} else {
+			return time.Now().Add(tmStrTmp), nil
+		}
+
 	}
 	return nilTime, errors.New("Unsupported time format")
 }
@@ -265,9 +279,26 @@ func CopyHour(src, dest time.Time) time.Time {
 }
 
 // Parses duration, considers s as time unit if not provided, seconds as float to specify subunits
-func ParseDurationWithSecs(durStr string) (time.Duration, error) {
-	if _, err := strconv.ParseFloat(durStr, 64); err == nil { // Seconds format considered
+func ParseDurationWithSecs(durStr string) (d time.Duration, err error) {
+	if durStr == "" {
+		return
+	}
+	if _, err = strconv.ParseFloat(durStr, 64); err == nil { // Seconds format considered
 		durStr += "s"
+	}
+	return time.ParseDuration(durStr)
+}
+
+// Parses duration, considers s as time unit if not provided, seconds as float to specify subunits
+func ParseDurationWithNanosecs(durStr string) (d time.Duration, err error) {
+	if durStr == "" {
+		return
+	}
+	if durStr == UNLIMITED {
+		durStr = "-1"
+	}
+	if _, err = strconv.ParseFloat(durStr, 64); err == nil { // Seconds format considered
+		durStr += "ns"
 	}
 	return time.ParseDuration(durStr)
 }
@@ -284,15 +315,26 @@ func MinDuration(d1, d2 time.Duration) time.Duration {
 	return d2
 }
 
-func ParseZeroRatingSubject(rateSubj string) (time.Duration, error) {
+// ParseZeroRatingSubject will parse the subject in the balance
+// returns duration if able to extract it from subject
+// returns error if not able to parse duration (ie: if ratingSubject is standard one)
+func ParseZeroRatingSubject(tor, rateSubj string) (time.Duration, error) {
 	rateSubj = strings.TrimSpace(rateSubj)
 	if rateSubj == "" || rateSubj == ANY {
-		rateSubj = ZERO_RATING_SUBJECT_PREFIX + "1s"
+		switch tor {
+		case VOICE:
+			rateSubj = ZERO_RATING_SUBJECT_PREFIX + "1s"
+		default:
+			rateSubj = ZERO_RATING_SUBJECT_PREFIX + "1ns"
+		}
 	}
 	if !strings.HasPrefix(rateSubj, ZERO_RATING_SUBJECT_PREFIX) {
 		return 0, errors.New("malformed rating subject: " + rateSubj)
 	}
 	durStr := rateSubj[len(ZERO_RATING_SUBJECT_PREFIX):]
+	if _, err := strconv.ParseFloat(durStr, 64); err == nil { // No time unit, postpend
+		durStr += "ns"
+	}
 	return time.ParseDuration(durStr)
 }
 
@@ -415,14 +457,6 @@ func BoolPointer(b bool) *bool {
 	return &b
 }
 
-func StringSlicePointer(slc []string) *[]string {
-	return &slc
-}
-
-func Float64SlicePointer(slc []float64) *[]float64 {
-	return &slc
-}
-
 func StringMapPointer(sm StringMap) *StringMap {
 	return &sm
 }
@@ -457,34 +491,6 @@ func ToJSON(v interface{}) string {
 
 func LogFull(v interface{}) {
 	log.Print(ToIJSON(v))
-}
-
-// Used to convert from generic interface type towards string value
-func ConvertIfaceToString(fld interface{}) (string, bool) {
-	var strVal string
-	var converted bool
-	switch fld.(type) {
-	case string:
-		strVal = fld.(string)
-		converted = true
-	case int:
-		strVal = strconv.Itoa(fld.(int))
-		converted = true
-	case int64:
-		strVal = strconv.FormatInt(fld.(int64), 10)
-		converted = true
-	case bool:
-		strVal = strconv.FormatBool(fld.(bool))
-		converted = true
-	case []uint8:
-		var byteVal []byte
-		if byteVal, converted = fld.([]byte); converted {
-			strVal = string(byteVal)
-		}
-	default: // Maybe we are lucky and the value converts to string
-		strVal, converted = fld.(string)
-	}
-	return strVal, converted
 }
 
 // Simple object cloner, b should be a pointer towards a value into which we want to decode
@@ -737,4 +743,90 @@ func GetCGRVersion() (vers string) {
 	}
 	//CGRateS 0.9.1~rc8 git+73014da (2016-12-30T19:48:09+01:00)
 	return fmt.Sprintf("%s %s git+%s (%s)", CGRateS, VERSION, commitHash[:7], commitDate.Format(time.RFC3339))
+}
+
+// AppendToFile is a convenience function to be used for appending to an already existing file
+func AppendToFile(fName, text string) error {
+	f, err := os.OpenFile(fName, os.O_APPEND|os.O_WRONLY, 0666)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(text); err != nil {
+		return err
+	}
+	f.Sync()
+	f.Close()
+	return nil
+}
+
+func NewTenantID(tntID string) *TenantID {
+	if strings.Index(tntID, CONCATENATED_KEY_SEP) == -1 { // no :, ID without Tenant
+		return &TenantID{ID: tntID}
+	}
+	tIDSplt := strings.Split(tntID, CONCATENATED_KEY_SEP)
+	if len(tIDSplt) == 1 { // only Tenant present
+		return &TenantID{Tenant: tIDSplt[0]}
+	}
+	return &TenantID{Tenant: tIDSplt[0], ID: tIDSplt[1]}
+}
+
+type TenantID struct {
+	Tenant string
+	ID     string
+}
+
+func (tID *TenantID) TenantID() string {
+	return ConcatenatedKey(tID.Tenant, tID.ID)
+}
+
+// RPCCall is a generic method calling RPC on a struct instance
+// serviceMethod is assumed to be in the form InstanceV1.Method
+// where V1Method will become RPC method called on instance
+func RPCCall(inst interface{}, serviceMethod string, args interface{}, reply interface{}) error {
+	methodSplit := strings.Split(serviceMethod, ".")
+	if len(methodSplit) != 2 {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	method := reflect.ValueOf(inst).MethodByName(methodSplit[0][len(methodSplit[0])-2:] + methodSplit[1])
+	if !method.IsValid() {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	params := []reflect.Value{reflect.ValueOf(args), reflect.ValueOf(reply)}
+	ret := method.Call(params)
+	if len(ret) != 1 {
+		return ErrServerError
+	}
+	if ret[0].Interface() == nil {
+		return nil
+	}
+	err, ok := ret[0].Interface().(error)
+	if !ok {
+		return ErrServerError
+	}
+	return err
+}
+
+// ApierRPCCall implements generic RPCCall for APIer instances
+func APIerRPCCall(inst interface{}, serviceMethod string, args interface{}, reply interface{}) error {
+	methodSplit := strings.Split(serviceMethod, ".")
+	if len(methodSplit) != 2 {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	method := reflect.ValueOf(inst).MethodByName(methodSplit[1])
+	if !method.IsValid() {
+		return rpcclient.ErrUnsupporteServiceMethod
+	}
+	params := []reflect.Value{reflect.ValueOf(args), reflect.ValueOf(reply)}
+	ret := method.Call(params)
+	if len(ret) != 1 {
+		return ErrServerError
+	}
+	if ret[0].Interface() == nil {
+		return nil
+	}
+	err, ok := ret[0].Interface().(error)
+	if !ok {
+		return ErrServerError
+	}
+	return err
 }

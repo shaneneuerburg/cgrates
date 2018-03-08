@@ -20,12 +20,11 @@ package engine
 import (
 	"testing"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/utils"
 )
 
 func init() {
-	aliasService = NewAliasHandler(dataStorage)
+	aliasService = NewAliasHandler(dm)
 }
 func TestAliasesGetAlias(t *testing.T) {
 	alias := Alias{}
@@ -225,51 +224,51 @@ func TestAliasesLoadAlias(t *testing.T) {
 
 func TestAliasesCache(t *testing.T) {
 	key := "*out:cgrates.org:call:remo:remo:*rating"
-	_, err := dataStorage.GetAlias(key, false, utils.NonTransactional)
+	_, err := dm.DataDB().GetAlias(key, false, utils.NonTransactional)
 	if err != nil {
 		t.Error("Error getting alias: ", err)
 	}
-	a, found := cache.Get(utils.ALIASES_PREFIX + key)
+	a, found := Cache.Get(utils.CacheAliases, key)
 	if !found || a == nil {
 		//log.Printf("Test: %+v", cache.GetEntriesKeys(utils.REVERSE_ALIASES_PREFIX))
 		t.Error("Error getting alias from cache: ", err, a)
 	}
 	rKey1 := "minuAccount*rating"
-	_, err = dataStorage.GetReverseAlias(rKey1, false, utils.NonTransactional)
+	_, err = dm.DataDB().GetReverseAlias(rKey1, false, utils.NonTransactional)
 	if err != nil {
 		t.Error("Error getting reverse alias: ", err)
 	}
-	ra1, found := cache.Get(utils.REVERSE_ALIASES_PREFIX + rKey1)
+	ra1, found := Cache.Get(utils.CacheReverseAliases, rKey1)
 	if !found || len(ra1.([]string)) != 2 {
 		t.Error("Error getting reverse alias 1: ", ra1)
 	}
 	rKey2 := "minuSubject*rating"
-	_, err = dataStorage.GetReverseAlias(rKey2, false, utils.NonTransactional)
+	_, err = dm.DataDB().GetReverseAlias(rKey2, false, utils.NonTransactional)
 	if err != nil {
 		t.Error("Error getting reverse alias: ", err)
 	}
-	ra2, found := cache.Get(utils.REVERSE_ALIASES_PREFIX + rKey2)
+	ra2, found := Cache.Get(utils.CacheReverseAliases, rKey2)
 	if !found || len(ra2.([]string)) != 2 {
 		t.Error("Error getting reverse alias 2: ", ra2)
 	}
-	dataStorage.RemoveAlias(key, utils.NonTransactional)
-	a, found = cache.Get(utils.ALIASES_PREFIX + key)
+	dm.DataDB().RemoveAlias(key, utils.NonTransactional)
+	a, found = Cache.Get(utils.CacheAliases, key)
 	if found {
 		t.Error("Error getting alias from cache: ", found)
 	}
-	_, err = dataStorage.GetReverseAlias(rKey1, false, utils.NonTransactional)
+	_, err = dm.DataDB().GetReverseAlias(rKey1, false, utils.NonTransactional)
 	if err != nil {
 		t.Error("Error getting reverse alias: ", err)
 	}
-	ra1, found = cache.Get(utils.REVERSE_ALIASES_PREFIX + rKey1)
+	ra1, found = Cache.Get(utils.CacheReverseAliases, rKey1)
 	if !found || len(ra1.([]string)) != 1 {
 		t.Error("Error getting reverse alias 1: ", ra1)
 	}
-	_, err = dataStorage.GetReverseAlias(rKey2, false, utils.NonTransactional)
+	_, err = dm.DataDB().GetReverseAlias(rKey2, false, utils.NonTransactional)
 	if err != nil {
 		t.Error("Error getting reverse alias: ", err)
 	}
-	ra2, found = cache.Get(utils.REVERSE_ALIASES_PREFIX + rKey2)
+	ra2, found = Cache.Get(utils.CacheReverseAliases, rKey2)
 	if !found || len(ra2.([]string)) != 1 {
 		t.Error("Error getting reverse alias 2: ", ra2)
 	}

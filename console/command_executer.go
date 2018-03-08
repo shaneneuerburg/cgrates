@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package console
 
 import (
@@ -24,6 +25,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/cgrates/cgrates/utils"
 )
@@ -63,27 +65,33 @@ func (ce *CommandExecuter) clientArgs(iface interface{}) (args []string) {
 		iface = val.Interface()
 	}
 	typ := reflect.TypeOf(iface)
-	for i := 0; i < typ.NumField(); i++ {
-		valField := val.Field(i)
-		typeField := typ.Field(i)
-		//log.Printf("%v (%v : %v)", typeField.Name, valField.Kind(), typeField.PkgPath)
-		if len(typeField.PkgPath) > 0 { //unexported field
-			continue
-		}
-		switch valField.Kind() {
-		case reflect.Ptr, reflect.Struct:
-			if valField.Kind() == reflect.Ptr {
-				valField = reflect.New(valField.Type().Elem()).Elem()
-				if valField.Kind() != reflect.Struct {
-					//log.Printf("Here: %v (%v)", typeField.Name, valField.Kind())
+	if val.Kind() == reflect.Struct {
+		for i := 0; i < typ.NumField(); i++ {
+			valField := val.Field(i)
+			typeField := typ.Field(i)
+			//log.Printf("%v (%v : %v)", typeField.Name, valField.Kind(), typeField.PkgPath)
+			if len(typeField.PkgPath) > 0 { //unexported field
+				continue
+			}
+			switch valField.Kind() {
+			case reflect.Ptr, reflect.Struct:
+				if valField.Kind() == reflect.Ptr {
+					valField = reflect.New(valField.Type().Elem()).Elem()
+					if valField.Kind() != reflect.Struct {
+						//log.Printf("Here: %v (%v)", typeField.Name, valField.Kind())
+						args = append(args, typeField.Name)
+						continue
+					}
+				}
+				valInterf := valField.Interface()
+				if _, canCast := valInterf.(time.Time); canCast {
 					args = append(args, typeField.Name)
 					continue
 				}
+				args = append(args, ce.clientArgs(valInterf)...)
+			default:
+				args = append(args, typeField.Name)
 			}
-			args = append(args, ce.clientArgs(valField.Interface())...)
-
-		default:
-			args = append(args, typeField.Name)
 		}
 	}
 	return
@@ -99,7 +107,7 @@ func (ce *CommandExecuter) LocalExecute() string {
 }
 
 func ToJSON(line string) (jsn []byte) {
-	if !strings.Contains(line, "=") {
+	if !strings.Contains(line, "=") && line != "" {
 		line = fmt.Sprintf("Item=\"%s\"", line)
 	}
 	jsn = append(jsn, '{')

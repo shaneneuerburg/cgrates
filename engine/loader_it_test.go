@@ -22,6 +22,7 @@ package engine
 import (
 	"flag"
 	"path"
+	"reflect"
 	"testing"
 
 	"github.com/cgrates/cgrates/config"
@@ -29,9 +30,10 @@ import (
 )
 
 // Globals used
-var dataDbCsv, dataDbStor, dataDbApier DataDB // Each dataDb will have it's own sources to collect data
+var dataDbCsv, dataDbStor, dataDbApier *DataManager // Each dataDb will have it's own sources to collect data
 var storDb LoadStorage
 var lCfg *config.CGRConfig
+var loader *TpReader
 
 var tpCsvScenario = flag.String("tp_scenario", "testtp", "Use this scenario folder to import tp csv data from")
 
@@ -53,7 +55,7 @@ func TestLoaderITConnDataDbs(t *testing.T) {
 		lCfg.DataDbUser, lCfg.DataDbPass, lCfg.DBDataEncoding, nil, 1); err != nil {
 		t.Fatal("Error on dataDb connection: ", err.Error())
 	}
-	for _, db := range []Storage{dataDbCsv, dataDbStor, dataDbApier, dataDbCsv, dataDbStor, dataDbApier} {
+	for _, db := range []Storage{dataDbCsv.DataDB(), dataDbStor.DataDB(), dataDbApier.DataDB(), dataDbCsv.DataDB(), dataDbStor.DataDB(), dataDbApier.DataDB()} {
 		if err = db.Flush(""); err != nil {
 			t.Fatal("Error when flushing datadb")
 		}
@@ -62,7 +64,8 @@ func TestLoaderITConnDataDbs(t *testing.T) {
 
 // Create/reset storage tariff plan tables, used as database connectin establishment also
 func TestLoaderITCreateStorTpTables(t *testing.T) {
-	db, err := NewMySQLStorage(lCfg.StorDBHost, lCfg.StorDBPort, lCfg.StorDBName, lCfg.StorDBUser, lCfg.StorDBPass, lCfg.StorDBMaxOpenConns, lCfg.StorDBMaxIdleConns)
+	db, err := NewMySQLStorage(lCfg.StorDBHost, lCfg.StorDBPort, lCfg.StorDBName,
+		lCfg.StorDBUser, lCfg.StorDBPass, lCfg.StorDBMaxOpenConns, lCfg.StorDBMaxIdleConns, lCfg.StorDBConnMaxLifetime)
 	if err != nil {
 		t.Error("Error on opening database connection: ", err)
 		return
@@ -77,14 +80,14 @@ func TestLoaderITCreateStorTpTables(t *testing.T) {
 }
 
 // Loads data from csv files in tp scenario to dataDbCsv
-func TestLoaderITLoadFromCSV(t *testing.T) {
+func TestLoaderITRemoveLoad(t *testing.T) {
 	/*var err error
 	for fn, v := range FileValidators {
 		if err = ValidateCSVData(path.Join(*dataDir, "tariffplans", *tpCsvScenario, fn), v.Rule); err != nil {
 			t.Error("Failed validating data: ", err.Error())
 		}
 	}*/
-	loader := NewTpReader(dataDbCsv, NewFileCSVStorage(utils.CSV_SEP,
+	loader = NewTpReader(dataDbCsv.DataDB(), NewFileCSVStorage(utils.CSV_SEP,
 		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.DESTINATIONS_CSV),
 		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.TIMINGS_CSV),
 		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.RATES_CSV),
@@ -101,7 +104,12 @@ func TestLoaderITLoadFromCSV(t *testing.T) {
 		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.CDR_STATS_CSV),
 		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.USERS_CSV),
 		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ALIASES_CSV),
-		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ResourceLimitsCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ResourcesCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.StatsCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ThresholdsCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.FiltersCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.SuppliersCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.AttributesCsv),
 	), "", "")
 
 	if err = loader.LoadDestinations(); err != nil {
@@ -146,12 +154,343 @@ func TestLoaderITLoadFromCSV(t *testing.T) {
 	if err = loader.LoadAliases(); err != nil {
 		t.Error("Failed loading aliases: ", err.Error())
 	}
-	if err = loader.LoadResourceLimits(); err != nil {
-		t.Error("Failed loading resource limits: ", err.Error())
+	if err = loader.LoadFilters(); err != nil {
+		t.Error("Failed loading filters: ", err.Error())
+	}
+	if err = loader.LoadResourceProfiles(); err != nil {
+		t.Error("Failed loading resource profiles: ", err.Error())
+	}
+	if err = loader.LoadStats(); err != nil {
+		t.Error("Failed loading stats: ", err.Error())
+	}
+	if err = loader.LoadThresholds(); err != nil {
+		t.Error("Failed loading thresholds: ", err.Error())
+	}
+	if err = loader.LoadSupplierProfiles(); err != nil {
+		t.Error("Failed loading Supplier profiles: ", err.Error())
+	}
+	if err = loader.LoadAttributeProfiles(); err != nil {
+		t.Error("Failed loading Alias profiles: ", err.Error())
 	}
 	if err := loader.WriteToDatabase(true, false, false); err != nil {
 		t.Error("Could not write data into dataDb: ", err.Error())
 	}
+	if err := loader.RemoveFromDatabase(false, true); err != nil {
+		t.Error("Could not write data into dataDb: ", err.Error())
+	}
+}
+
+// Loads data from csv files in tp scenario to dataDbCsv
+func TestLoaderITLoadFromCSV(t *testing.T) {
+	/*var err error
+	for fn, v := range FileValidators {
+		if err = ValidateCSVData(path.Join(*dataDir, "tariffplans", *tpCsvScenario, fn), v.Rule); err != nil {
+			t.Error("Failed validating data: ", err.Error())
+		}
+	}*/
+	loader = NewTpReader(dataDbCsv.DataDB(), NewFileCSVStorage(utils.CSV_SEP,
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.DESTINATIONS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.TIMINGS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.RATES_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.DESTINATION_RATES_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.RATING_PLANS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.RATING_PROFILES_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.SHARED_GROUPS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.LCRS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ACTIONS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ACTION_PLANS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ACTION_TRIGGERS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ACCOUNT_ACTIONS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.DERIVED_CHARGERS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.CDR_STATS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.USERS_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ALIASES_CSV),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ResourcesCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.StatsCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.ThresholdsCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.FiltersCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.SuppliersCsv),
+		path.Join(*dataDir, "tariffplans", *tpCsvScenario, utils.AttributesCsv),
+	), "", "")
+
+	if err = loader.LoadDestinations(); err != nil {
+		t.Error("Failed loading destinations: ", err.Error())
+	}
+	if err = loader.LoadTimings(); err != nil {
+		t.Error("Failed loading timings: ", err.Error())
+	}
+	if err = loader.LoadRates(); err != nil {
+		t.Error("Failed loading rates: ", err.Error())
+	}
+	if err = loader.LoadDestinationRates(); err != nil {
+		t.Error("Failed loading destination rates: ", err.Error())
+	}
+	if err = loader.LoadRatingPlans(); err != nil {
+		t.Error("Failed loading rating plans: ", err.Error())
+	}
+	if err = loader.LoadRatingProfiles(); err != nil {
+		t.Error("Failed loading rating profiles: ", err.Error())
+	}
+	if err = loader.LoadActions(); err != nil {
+		t.Error("Failed loading actions: ", err.Error())
+	}
+	if err = loader.LoadActionPlans(); err != nil {
+		t.Error("Failed loading action timings: ", err.Error())
+	}
+	if err = loader.LoadActionTriggers(); err != nil {
+		t.Error("Failed loading action triggers: ", err.Error())
+	}
+	if err = loader.LoadAccountActions(); err != nil {
+		t.Error("Failed loading account actions: ", err.Error())
+	}
+	if err = loader.LoadDerivedChargers(); err != nil {
+		t.Error("Failed loading derived chargers: ", err.Error())
+	}
+	if err = loader.LoadLCRs(); err != nil {
+		t.Error("Failed loading lcr rules: ", err.Error())
+	}
+	if err = loader.LoadUsers(); err != nil {
+		t.Error("Failed loading users: ", err.Error())
+	}
+	if err = loader.LoadAliases(); err != nil {
+		t.Error("Failed loading aliases: ", err.Error())
+	}
+	if err = loader.LoadFilters(); err != nil {
+		t.Error("Failed loading filters: ", err.Error())
+	}
+	if err = loader.LoadResourceProfiles(); err != nil {
+		t.Error("Failed loading resource profiles: ", err.Error())
+	}
+	if err = loader.LoadStats(); err != nil {
+		t.Error("Failed loading stats: ", err.Error())
+	}
+	if err = loader.LoadThresholds(); err != nil {
+		t.Error("Failed loading thresholds: ", err.Error())
+	}
+	if err = loader.LoadSupplierProfiles(); err != nil {
+		t.Error("Failed loading Supplier profiles: ", err.Error())
+	}
+	if err = loader.LoadAttributeProfiles(); err != nil {
+		t.Error("Failed loading Alias profiles: ", err.Error())
+	}
+	if err := loader.WriteToDatabase(true, false, false); err != nil {
+		t.Error("Could not write data into dataDb: ", err.Error())
+	}
+}
+
+func TestLoaderITWriteToDatabase(t *testing.T) {
+	for k, as := range loader.actions {
+		rcv, err := loader.dm.GetActions(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetActions: ", err.Error())
+		}
+		if !reflect.DeepEqual(as[0], rcv[0]) {
+			t.Errorf("Expecting: %v, received: %v", as[0], rcv[0])
+		}
+	}
+
+	for k, ap := range loader.actionPlans {
+		rcv, err := loader.dm.DataDB().GetActionPlan(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetActionPlan: ", err.Error())
+		}
+		if !reflect.DeepEqual(ap.Id, rcv.Id) {
+			t.Errorf("Expecting: %v, received: %v", ap.Id, rcv.Id)
+		}
+	}
+
+	for k, atrs := range loader.actionsTriggers {
+		rcv, err := loader.dm.GetActionTriggers(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetActionTriggers: ", err.Error())
+		}
+		if !reflect.DeepEqual(atrs[0].ActionsID, rcv[0].ActionsID) {
+			t.Errorf("Expecting: %v, received: %v", atrs[0].ActionsID, rcv[0].ActionsID)
+		}
+	}
+
+	for k, ub := range loader.accountActions {
+		rcv, err := loader.dm.DataDB().GetAccount(k)
+		if err != nil {
+			t.Error("Failed GetAccount: ", err.Error())
+		}
+		if !reflect.DeepEqual(ub.GetID(), rcv.GetID()) {
+			t.Errorf("Expecting: %v, received: %v", ub.GetID(), rcv.GetID())
+		}
+	}
+
+	for k, d := range loader.destinations {
+		rcv, err := loader.dm.DataDB().GetDestination(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetDestination: ", err.Error())
+		}
+		if !reflect.DeepEqual(d, rcv) {
+			t.Errorf("Expecting: %v, received: %v", d, rcv)
+		}
+	}
+
+	for k, tm := range loader.timings {
+		rcv, err := loader.dm.GetTiming(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetTiming: ", err.Error())
+		}
+		if !reflect.DeepEqual(tm, rcv) {
+			t.Errorf("Expecting: %v, received: %v", tm, rcv)
+		}
+	}
+
+	for k, rp := range loader.ratingPlans {
+		rcv, err := loader.dm.GetRatingPlan(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetRatingPlan: ", err.Error())
+		}
+		if !reflect.DeepEqual(rp.Id, rcv.Id) {
+			t.Errorf("Expecting: %v, received: %v", rp.Id, rcv.Id)
+		}
+	}
+
+	for k, rp := range loader.ratingProfiles {
+		rcv, err := loader.dm.GetRatingProfile(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetRatingProfile: ", err.Error())
+		}
+		if !reflect.DeepEqual(rp, rcv) {
+			t.Errorf("Expecting: %v, received: %v", rp, rcv)
+		}
+	}
+
+	for k, sg := range loader.sharedGroups {
+		rcv, err := loader.dm.GetSharedGroup(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetSharedGroup: ", err.Error())
+		}
+		if !reflect.DeepEqual(sg, rcv) {
+			t.Errorf("Expecting: %v, received: %v", sg, rcv)
+		}
+	}
+
+	for k, lcr := range loader.lcrs {
+		rcv, err := loader.dm.GetLCR(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetLCR: ", err.Error())
+		}
+		if !reflect.DeepEqual(lcr, rcv) {
+			t.Errorf("Expecting: %v, received: %v", lcr, rcv)
+		}
+	}
+
+	for k, dcs := range loader.derivedChargers {
+		rcv, err := loader.dm.GetDerivedChargers(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetDerivedChargers: ", err.Error())
+		}
+		if !reflect.DeepEqual(dcs.DestinationIDs, rcv.DestinationIDs) {
+			t.Errorf("Expecting: %v, received: %v", dcs.DestinationIDs, rcv.DestinationIDs)
+		}
+	}
+
+	for k, sq := range loader.cdrStats {
+		rcv, err := loader.dm.GetCdrStats(k)
+		// t.Log(utils.ToIJSON(sq))
+		// t.Log(utils.ToIJSON(rcv))
+		t.Log(k)
+		if err != nil {
+			t.Error("Failed GetCdrStats: ", err.Error())
+		}
+		if !reflect.DeepEqual(sq, rcv) {
+			t.Errorf("Expecting: %v, received: %v", sq, rcv)
+		}
+	}
+
+	for k, u := range loader.users {
+		rcv, err := loader.dm.GetUser(k)
+		if err != nil {
+			t.Error("Failed GetUser: ", err.Error())
+		}
+		if !reflect.DeepEqual(u, rcv) {
+			t.Errorf("Expecting: %v, received: %v", u, rcv)
+		}
+	}
+
+	for k, al := range loader.aliases {
+		rcv, err := loader.dm.DataDB().GetAlias(k, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetAlias: ", err.Error())
+		}
+		if !reflect.DeepEqual(al, rcv) {
+			t.Errorf("Expecting: %v, received: %v", al, rcv)
+		}
+	}
+
+	for tenantid, rl := range loader.resProfiles {
+		rcv, err := loader.dm.GetResourceProfile(tenantid.Tenant, tenantid.ID, true, utils.NonTransactional)
+		if err != nil {
+			t.Error("Failed GetResourceProfile: ", err.Error())
+		}
+		rlT, err := APItoResource(rl, "UTC")
+		if err != nil {
+			t.Error(err)
+		}
+		if !reflect.DeepEqual(rlT, rcv) {
+			t.Errorf("Expecting: %v, received: %v", rlT, rcv)
+		}
+	}
+	for tenantid, st := range loader.sqProfiles {
+		rcv, err := loader.dm.GetStatQueueProfile(tenantid.Tenant, tenantid.ID, true, utils.NonTransactional)
+		if err != nil {
+			t.Errorf("Failed GetStatsQueue, tenant: %s, id: %s,  error: %s ", tenantid.Tenant, tenantid.ID, err.Error())
+		}
+		sts, err := APItoStats(st, "UTC")
+		if err != nil {
+			t.Error(err)
+		}
+		if !reflect.DeepEqual(sts, rcv) {
+			t.Errorf("Expecting: %v, received: %v", sts, rcv)
+		}
+	}
+
+	for tenatid, th := range loader.thProfiles {
+		rcv, err := loader.dm.GetThresholdProfile(tenatid.Tenant, tenatid.ID, true, utils.NonTransactional)
+		if err != nil {
+			t.Errorf("Failed GetThresholdProfile, tenant: %s, id: %s,  error: %s ", th.Tenant, th.ID, err.Error())
+		}
+		sts, err := APItoThresholdProfile(th, "UTC")
+		if err != nil {
+			t.Error(err)
+		}
+		if !reflect.DeepEqual(sts, rcv) {
+			t.Errorf("Expecting: %v, received: %v", sts, rcv)
+		}
+	}
+
+	for tenatid, th := range loader.sppProfiles {
+		rcv, err := loader.dm.GetSupplierProfile(tenatid.Tenant, tenatid.ID, true, utils.NonTransactional)
+		if err != nil {
+			t.Errorf("Failed GetSupplierProfile, tenant: %s, id: %s,  error: %s ", th.Tenant, th.ID, err.Error())
+		}
+		sts, err := APItoSupplierProfile(th, "UTC")
+		if err != nil {
+			t.Error(err)
+		}
+		if !reflect.DeepEqual(sts, rcv) {
+			t.Errorf("Expecting: %v, received: %v", sts, rcv)
+		}
+	}
+
+	for tenatid, attrPrf := range loader.attributeProfiles {
+		rcv, err := loader.dm.GetAttributeProfile(tenatid.Tenant, tenatid.ID, true, utils.NonTransactional)
+		if err != nil {
+			t.Errorf("Failed GetAttributeProfile, tenant: %s, id: %s,  error: %s ", attrPrf.Tenant, attrPrf.ID, err.Error())
+		}
+		sts, err := APItoAttributeProfile(attrPrf, "UTC")
+		if err != nil {
+			t.Error(err)
+		}
+		if !reflect.DeepEqual(sts, rcv) {
+			t.Errorf("Expecting: %v, received: %v", sts, rcv)
+		}
+	}
+
 }
 
 // Imports data from csv files in tpScenario to storDb
@@ -166,7 +505,7 @@ func TestLoaderITImportToStorDb(t *testing.T) {
 	if err := csvImporter.Run(); err != nil {
 		t.Error("Error when importing tpdata to storDb: ", err)
 	}
-	if tpids, err := storDb.GetTpIds(); err != nil {
+	if tpids, err := storDb.GetTpIds(""); err != nil {
 		t.Error("Error when querying storDb for imported data: ", err)
 	} else if len(tpids) != 1 || tpids[0] != utils.TEST_SQL {
 		t.Errorf("Data in storDb is different than expected %v", tpids)
@@ -176,7 +515,7 @@ func TestLoaderITImportToStorDb(t *testing.T) {
 // Loads data from storDb into dataDb
 func TestLoaderITLoadFromStorDb(t *testing.T) {
 
-	loader := NewTpReader(dataDbStor, storDb, utils.TEST_SQL, "")
+	loader := NewTpReader(dataDbStor.DataDB(), storDb, utils.TEST_SQL, "")
 	if err := loader.LoadDestinations(); err != nil && err.Error() != utils.NotFoundCaps {
 		t.Error("Failed loading destinations: ", err.Error())
 	}
@@ -222,7 +561,7 @@ func TestLoaderITLoadFromStorDb(t *testing.T) {
 }
 
 func TestLoaderITLoadIndividualProfiles(t *testing.T) {
-	loader := NewTpReader(dataDbApier, storDb, utils.TEST_SQL, "")
+	loader := NewTpReader(dataDbApier.DataDB(), storDb, utils.TEST_SQL, "")
 	// Load ratingPlans. This will also set destination keys
 	if rps, err := storDb.GetTPRatingPlans(utils.TEST_SQL, "", nil); err != nil {
 		t.Fatal("Could not retrieve rating plans")

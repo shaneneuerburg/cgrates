@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 // This file deals with tp_rate_profiles management over APIs
@@ -45,15 +46,16 @@ type AttrGetTPRatingProfileByLoadId struct {
 func (self *ApierV1) GetTPRatingProfilesByLoadId(attrs utils.TPRatingProfile, reply *[]*utils.TPRatingProfile) error {
 	mndtryFlds := []string{"TPid", "LoadId"}
 	if len(attrs.Subject) != 0 { // If Subject provided as filter, make all related fields mandatory
-		mndtryFlds = append(mndtryFlds, "Tenant", "TOR", "Direction", "Subject")
+		mndtryFlds = append(mndtryFlds, "Tenant", "Category", "Direction", "Subject")
 	}
 	if missing := utils.MissingStructFields(&attrs, mndtryFlds); len(missing) != 0 { //Params missing
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	if rps, err := self.StorDb.GetTPRatingProfiles(&attrs); err != nil {
-		return utils.NewErrServerError(err)
-	} else if rps == nil {
-		return utils.ErrNotFound
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		reply = &rps
 	}
@@ -67,13 +69,14 @@ func (self *ApierV1) GetTPRatingProfileLoadIds(attrs utils.AttrTPRatingProfileId
 	}
 	if ids, err := self.StorDb.GetTpTableIds(attrs.TPid, utils.TBLTPRateProfiles, utils.TPDistinctIds{"loadid"}, map[string]string{
 		"tenant":    attrs.Tenant,
-		"tor":       attrs.Category,
+		"category":  attrs.Category,
 		"direction": attrs.Direction,
 		"subject":   attrs.Subject,
 	}, new(utils.Paginator)); err != nil {
-		return utils.NewErrServerError(err)
-	} else if ids == nil {
-		return utils.ErrNotFound
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = ids
 	}
@@ -95,9 +98,10 @@ func (self *ApierV1) GetTPRatingProfile(attrs AttrGetTPRatingProfile, reply *uti
 		return err
 	}
 	if rpfs, err := self.StorDb.GetTPRatingProfiles(tmpRpf); err != nil {
-		return utils.NewErrServerError(err)
-	} else if len(rpfs) == 0 {
-		return utils.ErrNotFound
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = *rpfs[0]
 	}
@@ -115,9 +119,10 @@ func (self *ApierV1) GetTPRatingProfileIds(attrs AttrGetTPRatingProfileIds, repl
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	if ids, err := self.StorDb.GetTpTableIds(attrs.TPid, utils.TBLTPRateProfiles, utils.TPDistinctIds{"loadid", "direction", "tenant", "category", "subject"}, nil, &attrs.Paginator); err != nil {
-		return utils.NewErrServerError(err)
-	} else if ids == nil {
-		return utils.ErrNotFound
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = ids
 	}

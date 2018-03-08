@@ -21,15 +21,15 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/utils"
 )
 
-var dbAcntActs engine.DataDB
+var dbAcntActs *engine.DataManager
 
 func TestAcntActsSetStorage(t *testing.T) {
-	dbAcntActs, _ = engine.NewMapStorageJson()
+	data, _ := engine.NewMapStorageJson()
+	dbAcntActs = engine.NewDataManager(data)
 	engine.SetDataStorage(dbAcntActs)
 }
 
@@ -42,7 +42,7 @@ func TestAcntActsLoadCsv(t *testing.T) {
 	ratingProfiles := ``
 	sharedGroups := ``
 	lcrs := ``
-	actions := `TOPUP10_AC,*topup_reset,,,,*voice,*out,,*any,,,*unlimited,,10,10,false,false,10
+	actions := `TOPUP10_AC,*topup_reset,,,,*voice,*out,,*any,,,*unlimited,,10s,10,false,false,10
 DISABLE_ACNT,*disable_account,,,,,,,,,,,,,,false,false,10
 ENABLE_ACNT,*enable_account,,,,,,,,,,,,,,false,false,10`
 	actionPlans := `TOPUP10_AT,TOPUP10_AC,ASAP,10`
@@ -53,19 +53,27 @@ ENABLE_ACNT,*enable_account,,,,,,,,,,,,,,false,false,10`
 	users := ``
 	aliases := ``
 	resLimits := ``
-	csvr := engine.NewTpReader(dbAcntActs, engine.NewStringCSVStorage(',', destinations, timings, rates, destinationRates, ratingPlans, ratingProfiles,
-		sharedGroups, lcrs, actions, actionPlans, actionTriggers, accountActions, derivedCharges, cdrStats, users, aliases, resLimits), "", "")
+	stats := ``
+	thresholds := ``
+	filters := ``
+	suppliers := ``
+	aliasProfiles := ``
+	csvr := engine.NewTpReader(dbAcntActs.DataDB(), engine.NewStringCSVStorage(',', destinations, timings,
+		rates, destinationRates, ratingPlans, ratingProfiles, sharedGroups, lcrs,
+		actions, actionPlans, actionTriggers, accountActions, derivedCharges, cdrStats,
+		users, aliases, resLimits, stats, thresholds, filters, suppliers, aliasProfiles), "", "")
 	if err := csvr.LoadAll(); err != nil {
 		t.Fatal(err)
 	}
 	csvr.WriteToDatabase(false, false, false)
 
-	cache.Flush()
-	dbAcntActs.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	dbAcntActs.LoadAccountingCache(nil, nil, nil)
+	engine.Cache.Clear(nil)
+	dbAcntActs.LoadDataDBCache(nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	expectAcnt := &engine.Account{ID: "cgrates.org:1"}
-	if acnt, err := dbAcntActs.GetAccount("cgrates.org:1"); err != nil {
+	if acnt, err := dbAcntActs.DataDB().GetAccount("cgrates.org:1"); err != nil {
 		t.Error(err)
 	} else if acnt == nil {
 		t.Error("No account created")
@@ -84,7 +92,7 @@ func TestAcntActsDisableAcnt(t *testing.T) {
 		t.Error(err)
 	}
 	expectAcnt := &engine.Account{ID: "cgrates.org:1", Disabled: true}
-	if acnt, err := dbAcntActs.GetAccount(acnt1Tag); err != nil {
+	if acnt, err := dbAcntActs.DataDB().GetAccount(acnt1Tag); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expectAcnt, acnt) {
 		t.Errorf("Expecting: %+v, received: %+v", utils.ToJSON(expectAcnt), utils.ToJSON(acnt))
@@ -101,7 +109,7 @@ func TestAcntActsEnableAcnt(t *testing.T) {
 		t.Error(err)
 	}
 	expectAcnt := &engine.Account{ID: "cgrates.org:1", Disabled: false}
-	if acnt, err := dbAcntActs.GetAccount(acnt1Tag); err != nil {
+	if acnt, err := dbAcntActs.DataDB().GetAccount(acnt1Tag); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(expectAcnt, acnt) {
 		t.Errorf("Expecting: %+v, received: %+v", expectAcnt, acnt)

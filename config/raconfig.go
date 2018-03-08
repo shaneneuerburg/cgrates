@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package config
 
 import (
@@ -28,7 +29,7 @@ type RadiusAgentCfg struct {
 	ListenAcct         string
 	ClientSecrets      map[string]string
 	ClientDictionaries map[string]string
-	SMGenericConns     []*HaPoolConfig
+	SessionSConns      []*HaPoolConfig
 	CreateCDR          bool
 	CDRRequiresSession bool
 	Timezone           string
@@ -67,11 +68,11 @@ func (self *RadiusAgentCfg) loadFromJsonCfg(jsnCfg *RadiusAgentJsonCfg) error {
 			self.ClientDictionaries[k] = v
 		}
 	}
-	if jsnCfg.Sm_generic_conns != nil {
-		self.SMGenericConns = make([]*HaPoolConfig, len(*jsnCfg.Sm_generic_conns))
-		for idx, jsnHaCfg := range *jsnCfg.Sm_generic_conns {
-			self.SMGenericConns[idx] = NewDfltHaPoolConfig()
-			self.SMGenericConns[idx].loadFromJsonCfg(jsnHaCfg)
+	if jsnCfg.Sessions_conns != nil {
+		self.SessionSConns = make([]*HaPoolConfig, len(*jsnCfg.Sessions_conns))
+		for idx, jsnHaCfg := range *jsnCfg.Sessions_conns {
+			self.SessionSConns[idx] = NewDfltHaPoolConfig()
+			self.SessionSConns[idx].loadFromJsonCfg(jsnHaCfg)
 		}
 	}
 	if jsnCfg.Create_cdr != nil {

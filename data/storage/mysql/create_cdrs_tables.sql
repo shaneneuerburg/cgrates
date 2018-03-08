@@ -5,30 +5,25 @@
 DROP TABLE IF EXISTS cdrs;
 CREATE TABLE cdrs (
   id int(11) NOT NULL AUTO_INCREMENT,
-  cgrid char(40) NOT NULL,
+  cgrid varchar(40) NOT NULL,
   run_id  varchar(64) NOT NULL,
   origin_host varchar(64) NOT NULL,
   source varchar(64) NOT NULL,
-  origin_id varchar(64) NOT NULL,
+  origin_id varchar(128) NOT NULL,
   tor  varchar(16) NOT NULL,
   request_type varchar(24) NOT NULL,
-  direction varchar(8) NOT NULL,
   tenant varchar(64) NOT NULL,
   category varchar(32) NOT NULL,
   account varchar(128) NOT NULL,
   subject varchar(128) NOT NULL,
   destination varchar(128) NOT NULL,
   setup_time datetime NOT NULL,
-  pdd DECIMAL(12,9) NOT NULL,
   answer_time datetime NOT NULL,
-  `usage` DECIMAL(30,9) NOT NULL,
-  supplier varchar(128) NOT NULL,
-  disconnect_cause varchar(64) NOT NULL,
+  `usage` BIGINT NOT NULL,
   extra_fields text NOT NULL,
   cost_source varchar(64) NOT NULL,
   cost DECIMAL(20,4) NOT NULL,
-  cost_details text,
-  account_summary text,
+  cost_details MEDIUMTEXT,
   extra_info text,
   created_at TIMESTAMP NULL,
   updated_at TIMESTAMP NULL,
@@ -37,16 +32,16 @@ CREATE TABLE cdrs (
   UNIQUE KEY cdrrun (cgrid, run_id, origin_id)
 );
 
-DROP TABLE IF EXISTS sm_costs;
-CREATE TABLE sm_costs (
+DROP TABLE IF EXISTS sessions_costs;
+CREATE TABLE sessions_costs (
   id int(11) NOT NULL AUTO_INCREMENT,
-  cgrid char(40) NOT NULL,
+  cgrid varchar(40) NOT NULL,
   run_id  varchar(64) NOT NULL,
   origin_host varchar(64) NOT NULL,
-  origin_id varchar(64) NOT NULL,
+  origin_id varchar(128) NOT NULL,
   cost_source varchar(64) NOT NULL,
-  `usage` DECIMAL(30,9) NOT NULL,
-  cost_details text,
+  `usage` BIGINT NOT NULL,
+  cost_details MEDIUMTEXT,
   created_at TIMESTAMP NULL,
   deleted_at TIMESTAMP NULL,
   PRIMARY KEY (`id`),

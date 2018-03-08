@@ -15,15 +15,17 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package utils
 
 import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
-func NewRSRField(fldStr string) (*RSRField, error) {
+func NewRSRField(fldStr string) (fld *RSRField, err error) {
 	if len(fldStr) == 0 {
 		return nil, nil
 	}
@@ -34,12 +36,10 @@ func NewRSRField(fldStr string) (*RSRField, error) {
 		if fltrStart < 1 {
 			return nil, fmt.Errorf("Invalid FilterStartValue in string: %s", fldStr)
 		}
-		for _, fltrVal := range strings.Split(fldStr[fltrStart+1:len(fldStr)-1], INFIELD_SEP) {
-			if rsrFltr, err := NewRSRFilter(fltrVal); err != nil {
-				return nil, fmt.Errorf("Invalid FilterValue in string: %s, err: %s", fltrVal, err.Error())
-			} else {
-				filters = append(filters, rsrFltr)
-			}
+		fltrVal := fldStr[fltrStart+1 : len(fldStr)-1]
+		filters, err = ParseRSRFilters(fltrVal, MetaPipe)
+		if err != nil {
+			return nil, fmt.Errorf("Invalid FilterValue in string: %s, err: %s", fltrVal, err.Error())
 		}
 		fldStr = fldStr[:fltrStart] // Take the filter part out before compiling further
 
@@ -304,4 +304,33 @@ func (flds RSRFields) ParseRules() (err error) {
 		}
 	}
 	return
+}
+
+// RSRTransformer represents functions which should format input into output
+type RSRTransformer interface {
+	Transform(interface{}) (interface{}, error)
+}
+
+func NewRSRTransformer(params interface{}) (trns RSRTransformer, err error) {
+	switch {
+	case params == MetaUsageSeconds:
+		return NewUsageSecondsRSRTransformer(params)
+	default:
+		return nil, fmt.Errorf("unsupported handler definition: <%s>", params)
+	}
+}
+
+func NewUsageSecondsRSRTransformer(params interface{}) (trns RSRTransformer, err error) {
+	return new(UsageSecondsRSRTransformer), nil
+}
+
+// UsageSecondsRSRTransformer transforms a time.Duration into seconds as float64
+type UsageSecondsRSRTransformer struct{}
+
+func (mS *UsageSecondsRSRTransformer) Transform(in interface{}) (out interface{}, err error) {
+	var dur time.Duration
+	if dur, err = IfaceAsDuration(in); err != nil {
+		return
+	}
+	return dur.Seconds(), nil
 }

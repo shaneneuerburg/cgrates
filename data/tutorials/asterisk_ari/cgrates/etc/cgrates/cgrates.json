@@ -29,9 +29,6 @@
 	"cdrstats_conns": [
 		{"address": "*internal"}
 	],
-	"historys_conns": [
-		{"address": "*internal"}
-	],
 	"pubsubs_conns": [
 		{"address": "*internal"}
 	],
@@ -43,6 +40,9 @@
 	],
 },
 
+"stor_db": {								// database used to store offline tariff plans and CDRs
+	"db_password": "CGRateS.org",			// password to use when connecting to stordb
+},
 
 "scheduler": {
 	"enabled": true,
@@ -120,12 +120,12 @@
 			{"tag":"Usage", "type": "*composed", "value": "Usage"},
 			{"tag":"Cost", "type": "*composed", "value": "Cost"},
 		],
-		"trailer_fields": [],	
+		"trailer_fields": [],
 	},
 },
 
 
-"sm_generic": {
+"sessions": {
 	"enabled": true,
 	"debit_interval": "5s",					// interval to perform debits on.
 },
@@ -136,12 +136,6 @@
 	"asterisk_conns":[												// instantiate connections to multiple Asterisk servers
 		{"address": "127.0.0.1:8088", "user": "cgrates", "password": "CGRateS.org", "connect_attempts": 3,"reconnects": 10}
 	],
-},
-
-
-"historys": {
-	"enabled": true,							// starts History service: <true|false>.
-	"history_dir": "/tmp/cgr_osipsasync/cgrates/history",	// location on disk where to store history files.
 },
 
 

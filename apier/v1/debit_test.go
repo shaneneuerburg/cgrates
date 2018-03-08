@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -30,18 +31,19 @@ var (
 	apierDebit        *ApierV1
 	apierDebitStorage *engine.MapStorage
 	responder         *engine.Responder
+	dm                *engine.DataManager
 )
 
 func init() {
 	apierDebitStorage, _ = engine.NewMapStorage()
 	cfg, _ := config.NewDefaultCGRConfig()
-	responder := new(engine.Responder)
-
-	engine.SetDataStorage(apierDebitStorage)
+	responder := &engine.Responder{MaxComputedUsage: cfg.RALsMaxComputedUsage}
+	dm = engine.NewDataManager(apierDebitStorage)
+	engine.SetDataStorage(dm)
 	apierDebit = &ApierV1{
-		DataDB:    engine.DataDB(apierDebitStorage),
-		Config:    cfg,
-		Responder: responder,
+		DataManager: dm,
+		Config:      cfg,
+		Responder:   responder,
 	}
 }
 
@@ -101,7 +103,7 @@ func TestDebitUsageWithOptions(t *testing.T) {
 			},
 		},
 	}
-	if err := apierDebitStorage.SetRatingPlan(rp1, utils.NonTransactional); err != nil {
+	if err := dm.SetRatingPlan(rp1, utils.NonTransactional); err != nil {
 		t.Error(err)
 	}
 
@@ -112,7 +114,7 @@ func TestDebitUsageWithOptions(t *testing.T) {
 			FallbackKeys:   []string{},
 		}},
 	}
-	if err := apierDebitStorage.SetRatingProfile(rpfl, utils.NonTransactional); err != nil {
+	if err := dm.SetRatingProfile(rpfl, utils.NonTransactional); err != nil {
 		t.Error(err)
 	}
 
@@ -123,7 +125,6 @@ func TestDebitUsageWithOptions(t *testing.T) {
 		Usage:       "1",
 		ToR:         utils.MONETARY,
 		Category:    "call",
-		Direction:   "*out",
 		SetupTime:   time.Date(2013, 11, 7, 7, 42, 20, 0, time.UTC).String(),
 		AnswerTime:  time.Date(2013, 11, 7, 7, 42, 20, 0, time.UTC).String(),
 	}

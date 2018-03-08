@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -31,10 +32,11 @@ import (
 
 func NewCDRFromExternalCDR(extCdr *ExternalCDR, timezone string) (*CDR, error) {
 	var err error
-	cdr := &CDR{CGRID: extCdr.CGRID, RunID: extCdr.RunID, OrderID: extCdr.OrderID, ToR: extCdr.ToR, OriginID: extCdr.OriginID, OriginHost: extCdr.OriginHost,
-		Source: extCdr.Source, RequestType: extCdr.RequestType, Direction: extCdr.Direction, Tenant: extCdr.Tenant, Category: extCdr.Category,
-		Account: extCdr.Account, Subject: extCdr.Subject, Destination: extCdr.Destination, Supplier: extCdr.Supplier,
-		DisconnectCause: extCdr.DisconnectCause, CostSource: extCdr.CostSource, Cost: extCdr.Cost, Rated: extCdr.Rated}
+	cdr := &CDR{CGRID: extCdr.CGRID, RunID: extCdr.RunID, OrderID: extCdr.OrderID, ToR: extCdr.ToR,
+		OriginID: extCdr.OriginID, OriginHost: extCdr.OriginHost,
+		Source: extCdr.Source, RequestType: extCdr.RequestType, Tenant: extCdr.Tenant, Category: extCdr.Category,
+		Account: extCdr.Account, Subject: extCdr.Subject, Destination: extCdr.Destination,
+		CostSource: extCdr.CostSource, Cost: extCdr.Cost, Rated: extCdr.Rated}
 	if extCdr.SetupTime != "" {
 		if cdr.SetupTime, err = utils.ParseTimeDetectLayout(extCdr.SetupTime, timezone); err != nil {
 			return nil, err
@@ -49,12 +51,7 @@ func NewCDRFromExternalCDR(extCdr *ExternalCDR, timezone string) (*CDR, error) {
 		}
 	}
 	if extCdr.Usage != "" {
-		if cdr.Usage, err = utils.ParseDurationWithSecs(extCdr.Usage); err != nil {
-			return nil, err
-		}
-	}
-	if extCdr.PDD != "" {
-		if cdr.PDD, err = utils.ParseDurationWithSecs(extCdr.PDD); err != nil {
+		if cdr.Usage, err = utils.ParseDurationWithNanosecs(extCdr.Usage); err != nil {
 			return nil, err
 		}
 	}
@@ -73,48 +70,39 @@ func NewCDRFromExternalCDR(extCdr *ExternalCDR, timezone string) (*CDR, error) {
 }
 
 func NewCDRWithDefaults(cfg *config.CGRConfig) *CDR {
-	return &CDR{ToR: utils.VOICE, RequestType: cfg.DefaultReqType, Direction: utils.OUT, Tenant: cfg.DefaultTenant, Category: cfg.DefaultCategory,
+	return &CDR{ToR: utils.VOICE, RequestType: cfg.DefaultReqType,
+		Tenant: cfg.DefaultTenant, Category: cfg.DefaultCategory,
 		ExtraFields: make(map[string]string), Cost: -1}
 }
 
 type CDR struct {
-	CGRID           string
-	RunID           string
-	OrderID         int64             // Stor order id used as export order id
-	OriginHost      string            // represents the IP address of the host generating the CDR (automatically populated by the server)
-	Source          string            // formally identifies the source of the CDR (free form field)
-	OriginID        string            // represents the unique accounting id given by the telecom switch generating the CDR
-	ToR             string            // type of record, meta-field, should map to one of the TORs hardcoded inside the server <*voice|*data|*sms|*generic>
-	RequestType     string            // matching the supported request types by the **CGRateS**, accepted values are hardcoded in the server <prepaid|postpaid|pseudoprepaid|rated>.
-	Direction       string            // matching the supported direction identifiers of the CGRateS <*out>
-	Tenant          string            // tenant whom this record belongs
-	Category        string            // free-form filter for this record, matching the category defined in rating profiles.
-	Account         string            // account id (accounting subsystem) the record should be attached to
-	Subject         string            // rating subject (rating subsystem) this record should be attached to
-	Destination     string            // destination to be charged
-	SetupTime       time.Time         // set-up time of the event. Supported formats: datetime RFC3339 compatible, SQL datetime (eg: MySQL), unix timestamp.
-	PDD             time.Duration     // PDD value
-	AnswerTime      time.Time         // answer time of the event. Supported formats: datetime RFC3339 compatible, SQL datetime (eg: MySQL), unix timestamp.
-	Usage           time.Duration     // event usage information (eg: in case of tor=*voice this will represent the total duration of a call)
-	Supplier        string            // Supplier information when available
-	DisconnectCause string            // Disconnect cause of the event
-	ExtraFields     map[string]string // Extra fields to be stored in CDR
-	CostSource      string            // The source of this cost
-	Cost            float64
-	CostDetails     *CallCost       // Attach the cost details to CDR when possible
-	AccountSummary  *AccountSummary // Store AccountSummary information
-	ExtraInfo       string          // Container for extra information related to this CDR, eg: populated with error reason in case of error on calculation
-	Rated           bool            // Mark the CDR as rated so we do not process it during rating
-	Partial         bool            // Used for partial record processing by CDRC
+	CGRID       string
+	RunID       string
+	OrderID     int64             // Stor order id used as export order id
+	OriginHost  string            // represents the IP address of the host generating the CDR (automatically populated by the server)
+	Source      string            // formally identifies the source of the CDR (free form field)
+	OriginID    string            // represents the unique accounting id given by the telecom switch generating the CDR
+	ToR         string            // type of record, meta-field, should map to one of the TORs hardcoded inside the server <*voice|*data|*sms|*generic>
+	RequestType string            // matching the supported request types by the **CGRateS**, accepted values are hardcoded in the server <prepaid|postpaid|pseudoprepaid|rated>.
+	Tenant      string            // tenant whom this record belongs
+	Category    string            // free-form filter for this record, matching the category defined in rating profiles.
+	Account     string            // account id (accounting subsystem) the record should be attached to
+	Subject     string            // rating subject (rating subsystem) this record should be attached to
+	Destination string            // destination to be charged
+	SetupTime   time.Time         // set-up time of the event. Supported formats: datetime RFC3339 compatible, SQL datetime (eg: MySQL), unix timestamp.
+	AnswerTime  time.Time         // answer time of the event. Supported formats: datetime RFC3339 compatible, SQL datetime (eg: MySQL), unix timestamp.
+	Usage       time.Duration     // event usage information (eg: in case of tor=*voice this will represent the total duration of a call)
+	ExtraFields map[string]string // Extra fields to be stored in CDR
+	ExtraInfo   string            // Container for extra information related to this CDR, eg: populated with error reason in case of error on calculation
+	Partial     bool              // Used for partial record processing by CDRC
+	Rated       bool              // Mark the CDR as rated so we do not process it during rating
+	CostSource  string            // The source of this cost
+	Cost        float64
+	CostDetails *CallCost // Attach the cost details to CDR when possible
 }
 
 func (cdr *CDR) CostDetailsJson() string {
 	mrshled, _ := json.Marshal(cdr.CostDetails)
-	return string(mrshled)
-}
-
-func (cdr *CDR) AccountSummaryJson() string {
-	mrshled, _ := json.Marshal(cdr.AccountSummary)
 	return string(mrshled)
 }
 
@@ -164,38 +152,30 @@ func (cdr *CDR) FieldAsString(rsrFld *utils.RSRField) string {
 		return rsrFld.ParseValue(strconv.FormatInt(cdr.OrderID, 10))
 	case utils.TOR:
 		return rsrFld.ParseValue(cdr.ToR)
-	case utils.ACCID:
+	case utils.OriginID:
 		return rsrFld.ParseValue(cdr.OriginID)
-	case utils.CDRHOST:
+	case utils.OriginHost:
 		return rsrFld.ParseValue(cdr.OriginHost)
-	case utils.CDRSOURCE:
+	case utils.Source:
 		return rsrFld.ParseValue(cdr.Source)
-	case utils.REQTYPE:
+	case utils.RequestType:
 		return rsrFld.ParseValue(cdr.RequestType)
-	case utils.DIRECTION:
-		return rsrFld.ParseValue(cdr.Direction)
-	case utils.TENANT:
+	case utils.Tenant:
 		return rsrFld.ParseValue(cdr.Tenant)
-	case utils.CATEGORY:
+	case utils.Category:
 		return rsrFld.ParseValue(cdr.Category)
-	case utils.ACCOUNT:
+	case utils.Account:
 		return rsrFld.ParseValue(cdr.Account)
-	case utils.SUBJECT:
+	case utils.Subject:
 		return rsrFld.ParseValue(cdr.Subject)
-	case utils.DESTINATION:
+	case utils.Destination:
 		return rsrFld.ParseValue(cdr.Destination)
-	case utils.SETUP_TIME:
+	case utils.SetupTime:
 		return rsrFld.ParseValue(cdr.SetupTime.Format(time.RFC3339))
-	case utils.PDD:
-		return strconv.FormatFloat(cdr.PDD.Seconds(), 'f', -1, 64)
-	case utils.ANSWER_TIME:
+	case utils.AnswerTime:
 		return rsrFld.ParseValue(cdr.AnswerTime.Format(time.RFC3339))
-	case utils.USAGE:
-		return strconv.FormatFloat(cdr.Usage.Seconds(), 'f', -1, 64)
-	case utils.SUPPLIER:
-		return rsrFld.ParseValue(cdr.Supplier)
-	case utils.DISCONNECT_CAUSE:
-		return rsrFld.ParseValue(cdr.DisconnectCause)
+	case utils.Usage:
+		return cdr.Usage.String()
 	case utils.MEDI_RUNID:
 		return rsrFld.ParseValue(cdr.RunID)
 	case utils.RATED_FLD:
@@ -204,8 +184,6 @@ func (cdr *CDR) FieldAsString(rsrFld *utils.RSRField) string {
 		return rsrFld.ParseValue(strconv.FormatFloat(cdr.Cost, 'f', -1, 64)) // Recommended to use FormatCost
 	case utils.COST_DETAILS:
 		return rsrFld.ParseValue(cdr.CostDetailsJson())
-	case utils.ACCOUNT_SUMMARY:
-		return rsrFld.ParseValue(cdr.AccountSummaryJson())
 	case utils.PartialField:
 		return rsrFld.ParseValue(strconv.FormatBool(cdr.Partial))
 	default:
@@ -229,44 +207,34 @@ func (cdr *CDR) ParseFieldValue(fieldId, fieldVal, timezone string) error {
 		cdr.ToR += fieldVal
 	case utils.MEDI_RUNID:
 		cdr.RunID += fieldVal
-	case utils.ACCID:
+	case utils.OriginID:
 		cdr.OriginID += fieldVal
-	case utils.REQTYPE:
+	case utils.RequestType:
 		cdr.RequestType += fieldVal
-	case utils.DIRECTION:
-		cdr.Direction += fieldVal
-	case utils.TENANT:
+	case utils.Tenant:
 		cdr.Tenant += fieldVal
-	case utils.CATEGORY:
+	case utils.Category:
 		cdr.Category += fieldVal
-	case utils.ACCOUNT:
+	case utils.Account:
 		cdr.Account += fieldVal
-	case utils.SUBJECT:
+	case utils.Subject:
 		cdr.Subject += fieldVal
-	case utils.DESTINATION:
+	case utils.Destination:
 		cdr.Destination += fieldVal
 	case utils.RATED_FLD:
 		cdr.Rated, _ = strconv.ParseBool(fieldVal)
-	case utils.SETUP_TIME:
+	case utils.SetupTime:
 		if cdr.SetupTime, err = utils.ParseTimeDetectLayout(fieldVal, timezone); err != nil {
 			return fmt.Errorf("Cannot parse answer time field with value: %s, err: %s", fieldVal, err.Error())
 		}
-	case utils.PDD:
-		if cdr.PDD, err = utils.ParseDurationWithSecs(fieldVal); err != nil {
-			return fmt.Errorf("Cannot parse answer time field with value: %s, err: %s", fieldVal, err.Error())
-		}
-	case utils.ANSWER_TIME:
+	case utils.AnswerTime:
 		if cdr.AnswerTime, err = utils.ParseTimeDetectLayout(fieldVal, timezone); err != nil {
 			return fmt.Errorf("Cannot parse answer time field with value: %s, err: %s", fieldVal, err.Error())
 		}
-	case utils.USAGE:
-		if cdr.Usage, err = utils.ParseDurationWithSecs(fieldVal); err != nil {
+	case utils.Usage:
+		if cdr.Usage, err = utils.ParseDurationWithNanosecs(fieldVal); err != nil {
 			return fmt.Errorf("Cannot parse duration field with value: %s, err: %s", fieldVal, err.Error())
 		}
-	case utils.SUPPLIER:
-		cdr.Supplier += fieldVal
-	case utils.DISCONNECT_CAUSE:
-		cdr.DisconnectCause += fieldVal
 	case utils.COST:
 		if cdr.Cost, err = strconv.ParseFloat(fieldVal, 64); err != nil {
 			return fmt.Errorf("Cannot parse cost field with value: %s, err: %s", fieldVal, err.Error())
@@ -288,7 +256,7 @@ func (cdr *CDR) FieldsAsString(rsrFlds utils.RSRFields) string {
 	return fldVal
 }
 
-func (cdr *CDR) AsStoredCdr(timezone string) *CDR {
+func (cdr *CDR) AsCDR(timezone string) *CDR {
 	return cdr
 }
 
@@ -299,86 +267,62 @@ func (cdr *CDR) Clone() *CDR {
 }
 
 // Used in mediation, primaryMandatory marks whether missing field out of request represents error or can be ignored
-func (cdr *CDR) ForkCdr(runId string, RequestTypeFld, directionFld, tenantFld, categFld, accountFld, subjectFld, destFld, setupTimeFld, PDDFld,
-	answerTimeFld, durationFld, supplierFld, disconnectCauseFld, ratedFld, costFld *utils.RSRField,
+func (cdr *CDR) ForkCdr(runId string, RequestTypeFld, tenantFld, categFld, accountFld, subjectFld, destFld, setupTimeFld,
+	answerTimeFld, durationFld, ratedFld, costFld *utils.RSRField,
 	extraFlds []*utils.RSRField, primaryMandatory bool, timezone string) (*CDR, error) {
 	if RequestTypeFld == nil {
 		RequestTypeFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if RequestTypeFld.Id == utils.META_DEFAULT {
-		RequestTypeFld.Id = utils.REQTYPE
-	}
-	if directionFld == nil {
-		directionFld, _ = utils.NewRSRField(utils.META_DEFAULT)
-	}
-	if directionFld.Id == utils.META_DEFAULT {
-		directionFld.Id = utils.DIRECTION
+		RequestTypeFld.Id = utils.RequestType
 	}
 	if tenantFld == nil {
 		tenantFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if tenantFld.Id == utils.META_DEFAULT {
-		tenantFld.Id = utils.TENANT
+		tenantFld.Id = utils.Tenant
 	}
 	if categFld == nil {
 		categFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if categFld.Id == utils.META_DEFAULT {
-		categFld.Id = utils.CATEGORY
+		categFld.Id = utils.Category
 	}
 	if accountFld == nil {
 		accountFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if accountFld.Id == utils.META_DEFAULT {
-		accountFld.Id = utils.ACCOUNT
+		accountFld.Id = utils.Account
 	}
 	if subjectFld == nil {
 		subjectFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if subjectFld.Id == utils.META_DEFAULT {
-		subjectFld.Id = utils.SUBJECT
+		subjectFld.Id = utils.Subject
 	}
 	if destFld == nil {
 		destFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if destFld.Id == utils.META_DEFAULT {
-		destFld.Id = utils.DESTINATION
+		destFld.Id = utils.Destination
 	}
 	if setupTimeFld == nil {
 		setupTimeFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if setupTimeFld.Id == utils.META_DEFAULT {
-		setupTimeFld.Id = utils.SETUP_TIME
+		setupTimeFld.Id = utils.SetupTime
 	}
 	if answerTimeFld == nil {
 		answerTimeFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if answerTimeFld.Id == utils.META_DEFAULT {
-		answerTimeFld.Id = utils.ANSWER_TIME
+		answerTimeFld.Id = utils.AnswerTime
 	}
 	if durationFld == nil {
 		durationFld, _ = utils.NewRSRField(utils.META_DEFAULT)
 	}
 	if durationFld.Id == utils.META_DEFAULT {
-		durationFld.Id = utils.USAGE
-	}
-	if PDDFld == nil {
-		PDDFld, _ = utils.NewRSRField(utils.META_DEFAULT)
-	}
-	if PDDFld.Id == utils.META_DEFAULT {
-		PDDFld.Id = utils.PDD
-	}
-	if supplierFld == nil {
-		supplierFld, _ = utils.NewRSRField(utils.META_DEFAULT)
-	}
-	if supplierFld.Id == utils.META_DEFAULT {
-		supplierFld.Id = utils.SUPPLIER
-	}
-	if disconnectCauseFld == nil {
-		disconnectCauseFld, _ = utils.NewRSRField(utils.META_DEFAULT)
-	}
-	if disconnectCauseFld.Id == utils.META_DEFAULT {
-		disconnectCauseFld.Id = utils.DISCONNECT_CAUSE
+		durationFld.Id = utils.Usage
 	}
 	if ratedFld == nil {
 		ratedFld, _ = utils.NewRSRField(utils.META_DEFAULT)
@@ -403,58 +347,46 @@ func (cdr *CDR) ForkCdr(runId string, RequestTypeFld, directionFld, tenantFld, c
 	frkStorCdr.Source = cdr.Source
 	frkStorCdr.RequestType = cdr.FieldAsString(RequestTypeFld)
 	if primaryMandatory && len(frkStorCdr.RequestType) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.REQTYPE, RequestTypeFld.Id)
-	}
-	frkStorCdr.Direction = cdr.FieldAsString(directionFld)
-	if primaryMandatory && len(frkStorCdr.Direction) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.DIRECTION, directionFld.Id)
+		return nil, utils.NewErrMandatoryIeMissing(utils.RequestType, RequestTypeFld.Id)
 	}
 	frkStorCdr.Tenant = cdr.FieldAsString(tenantFld)
 	if primaryMandatory && len(frkStorCdr.Tenant) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.TENANT, tenantFld.Id)
+		return nil, utils.NewErrMandatoryIeMissing(utils.Tenant, tenantFld.Id)
 	}
 	frkStorCdr.Category = cdr.FieldAsString(categFld)
 	if primaryMandatory && len(frkStorCdr.Category) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.CATEGORY, categFld.Id)
+		return nil, utils.NewErrMandatoryIeMissing(utils.Category, categFld.Id)
 	}
 	frkStorCdr.Account = cdr.FieldAsString(accountFld)
 	if primaryMandatory && len(frkStorCdr.Account) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.ACCOUNT, accountFld.Id)
+		return nil, utils.NewErrMandatoryIeMissing(utils.Account, accountFld.Id)
 	}
 	frkStorCdr.Subject = cdr.FieldAsString(subjectFld)
 	if primaryMandatory && len(frkStorCdr.Subject) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.SUBJECT, subjectFld.Id)
+		return nil, utils.NewErrMandatoryIeMissing(utils.Subject, subjectFld.Id)
 	}
 	frkStorCdr.Destination = cdr.FieldAsString(destFld)
 	if primaryMandatory && len(frkStorCdr.Destination) == 0 && frkStorCdr.ToR == utils.VOICE {
-		return nil, utils.NewErrMandatoryIeMissing(utils.DESTINATION, destFld.Id)
+		return nil, utils.NewErrMandatoryIeMissing(utils.Destination, destFld.Id)
 	}
 	sTimeStr := cdr.FieldAsString(setupTimeFld)
 	if primaryMandatory && len(sTimeStr) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.SETUP_TIME, setupTimeFld.Id)
+		return nil, utils.NewErrMandatoryIeMissing(utils.SetupTime, setupTimeFld.Id)
 	} else if frkStorCdr.SetupTime, err = utils.ParseTimeDetectLayout(sTimeStr, timezone); err != nil {
 		return nil, err
 	}
 	aTimeStr := cdr.FieldAsString(answerTimeFld)
 	if primaryMandatory && len(aTimeStr) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.ANSWER_TIME, answerTimeFld.Id)
+		return nil, utils.NewErrMandatoryIeMissing(utils.AnswerTime, answerTimeFld.Id)
 	} else if frkStorCdr.AnswerTime, err = utils.ParseTimeDetectLayout(aTimeStr, timezone); err != nil {
 		return nil, err
 	}
 	durStr := cdr.FieldAsString(durationFld)
 	if primaryMandatory && len(durStr) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.USAGE, durationFld.Id)
-	} else if frkStorCdr.Usage, err = utils.ParseDurationWithSecs(durStr); err != nil {
+		return nil, utils.NewErrMandatoryIeMissing(utils.Usage, durationFld.Id)
+	} else if frkStorCdr.Usage, err = utils.ParseDurationWithNanosecs(durStr); err != nil {
 		return nil, err
 	}
-	PDDStr := cdr.FieldAsString(PDDFld)
-	if primaryMandatory && len(PDDStr) == 0 {
-		return nil, utils.NewErrMandatoryIeMissing(utils.PDD, PDDFld.Id)
-	} else if frkStorCdr.PDD, err = utils.ParseDurationWithSecs(PDDStr); err != nil {
-		return nil, err
-	}
-	frkStorCdr.Supplier = cdr.FieldAsString(supplierFld)
-	frkStorCdr.DisconnectCause = cdr.FieldAsString(disconnectCauseFld)
 	ratedStr := cdr.FieldAsString(ratedFld)
 	if primaryMandatory && len(ratedStr) == 0 {
 		return nil, utils.NewErrMandatoryIeMissing(utils.RATED_FLD, ratedFld.Id)
@@ -475,32 +407,35 @@ func (cdr *CDR) ForkCdr(runId string, RequestTypeFld, directionFld, tenantFld, c
 }
 
 func (cdr *CDR) AsExternalCDR() *ExternalCDR {
+	var usageStr string
+	switch cdr.ToR {
+	case utils.VOICE: // usage as time
+		usageStr = cdr.Usage.String()
+	default: // usage as units
+		usageStr = strconv.FormatInt(cdr.Usage.Nanoseconds(), 10)
+	}
 	return &ExternalCDR{CGRID: cdr.CGRID,
-		RunID:           cdr.RunID,
-		OrderID:         cdr.OrderID,
-		OriginHost:      cdr.OriginHost,
-		Source:          cdr.Source,
-		OriginID:        cdr.OriginID,
-		ToR:             cdr.ToR,
-		RequestType:     cdr.RequestType,
-		Direction:       cdr.Direction,
-		Tenant:          cdr.Tenant,
-		Category:        cdr.Category,
-		Account:         cdr.Account,
-		Subject:         cdr.Subject,
-		Destination:     cdr.Destination,
-		SetupTime:       cdr.SetupTime.Format(time.RFC3339),
-		PDD:             cdr.FieldAsString(&utils.RSRField{Id: utils.PDD}),
-		AnswerTime:      cdr.AnswerTime.Format(time.RFC3339),
-		Usage:           cdr.FormatUsage(utils.SECONDS),
-		Supplier:        cdr.Supplier,
-		DisconnectCause: cdr.DisconnectCause,
-		ExtraFields:     cdr.ExtraFields,
-		CostSource:      cdr.CostSource,
-		Cost:            cdr.Cost,
-		CostDetails:     cdr.CostDetailsJson(),
-		ExtraInfo:       cdr.ExtraInfo,
-		Rated:           cdr.Rated,
+		RunID:       cdr.RunID,
+		OrderID:     cdr.OrderID,
+		OriginHost:  cdr.OriginHost,
+		Source:      cdr.Source,
+		OriginID:    cdr.OriginID,
+		ToR:         cdr.ToR,
+		RequestType: cdr.RequestType,
+		Tenant:      cdr.Tenant,
+		Category:    cdr.Category,
+		Account:     cdr.Account,
+		Subject:     cdr.Subject,
+		Destination: cdr.Destination,
+		SetupTime:   cdr.SetupTime.Format(time.RFC3339),
+		AnswerTime:  cdr.AnswerTime.Format(time.RFC3339),
+		Usage:       usageStr,
+		ExtraFields: cdr.ExtraFields,
+		CostSource:  cdr.CostSource,
+		Cost:        cdr.Cost,
+		CostDetails: cdr.CostDetailsJson(),
+		ExtraInfo:   cdr.ExtraInfo,
+		Rated:       cdr.Rated,
 	}
 }
 
@@ -523,17 +458,8 @@ func (cdr *CDR) GetUUID() string {
 func (cdr *CDR) GetSessionIds() []string {
 	return []string{cdr.GetUUID()}
 }
-func (cdr *CDR) GetDirection(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.DIRECTION, utils.META_DEFAULT, ""}, fieldName) {
-		return cdr.Direction
-	}
-	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
-		return fieldName[len(utils.STATIC_VALUE_PREFIX):]
-	}
-	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
-}
 func (cdr *CDR) GetSubject(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.SUBJECT, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.Subject, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.Subject
 	}
 	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
@@ -542,7 +468,7 @@ func (cdr *CDR) GetSubject(fieldName string) string {
 	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
 }
 func (cdr *CDR) GetAccount(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.ACCOUNT, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.Account, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.Account
 	}
 	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
@@ -551,7 +477,7 @@ func (cdr *CDR) GetAccount(fieldName string) string {
 	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
 }
 func (cdr *CDR) GetDestination(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.DESTINATION, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.Destination, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.Destination
 	}
 	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
@@ -560,7 +486,7 @@ func (cdr *CDR) GetDestination(fieldName string) string {
 	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
 }
 func (cdr *CDR) GetCallDestNr(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.DESTINATION, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.Destination, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.Destination
 	}
 	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
@@ -569,7 +495,7 @@ func (cdr *CDR) GetCallDestNr(fieldName string) string {
 	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
 }
 func (cdr *CDR) GetCategory(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.CATEGORY, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.Category, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.Category
 	}
 	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
@@ -578,7 +504,7 @@ func (cdr *CDR) GetCategory(fieldName string) string {
 	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
 }
 func (cdr *CDR) GetTenant(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.TENANT, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.Tenant, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.Tenant
 	}
 	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
@@ -587,7 +513,7 @@ func (cdr *CDR) GetTenant(fieldName string) string {
 	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
 }
 func (cdr *CDR) GetReqType(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.REQTYPE, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.RequestType, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.RequestType
 	}
 	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
@@ -596,7 +522,7 @@ func (cdr *CDR) GetReqType(fieldName string) string {
 	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
 }
 func (cdr *CDR) GetSetupTime(fieldName, timezone string) (time.Time, error) {
-	if utils.IsSliceMember([]string{utils.SETUP_TIME, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.SetupTime, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.SetupTime, nil
 	}
 	var sTimeVal string
@@ -608,7 +534,7 @@ func (cdr *CDR) GetSetupTime(fieldName, timezone string) (time.Time, error) {
 	return utils.ParseTimeDetectLayout(sTimeVal, timezone)
 }
 func (cdr *CDR) GetAnswerTime(fieldName, timezone string) (time.Time, error) {
-	if utils.IsSliceMember([]string{utils.ANSWER_TIME, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.AnswerTime, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.AnswerTime, nil
 	}
 	var aTimeVal string
@@ -623,7 +549,7 @@ func (cdr *CDR) GetEndTime(fieldName, timezone string) (time.Time, error) {
 	return cdr.AnswerTime.Add(cdr.Usage), nil
 }
 func (cdr *CDR) GetDuration(fieldName string) (time.Duration, error) {
-	if utils.IsSliceMember([]string{utils.USAGE, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.Usage, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.Usage, nil
 	}
 	var durVal string
@@ -632,34 +558,10 @@ func (cdr *CDR) GetDuration(fieldName string) (time.Duration, error) {
 	} else {
 		durVal = cdr.FieldAsString(&utils.RSRField{Id: fieldName})
 	}
-	return utils.ParseDurationWithSecs(durVal)
-}
-func (cdr *CDR) GetPdd(fieldName string) (time.Duration, error) {
-	if utils.IsSliceMember([]string{utils.PDD, utils.META_DEFAULT, ""}, fieldName) {
-		return cdr.PDD, nil
-	}
-	var PDDVal string
-	if strings.HasPrefix(fieldName, utils.STATIC_VALUE_PREFIX) { // Static value
-		PDDVal = fieldName[len(utils.STATIC_VALUE_PREFIX):]
-	} else {
-		PDDVal = cdr.FieldAsString(&utils.RSRField{Id: fieldName})
-	}
-	return utils.ParseDurationWithSecs(PDDVal)
-}
-func (cdr *CDR) GetSupplier(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.SUPPLIER, utils.META_DEFAULT, ""}, fieldName) {
-		return cdr.Supplier
-	}
-	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
-}
-func (cdr *CDR) GetDisconnectCause(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.DISCONNECT_CAUSE, utils.META_DEFAULT, ""}, fieldName) {
-		return cdr.DisconnectCause
-	}
-	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
+	return utils.ParseDurationWithNanosecs(durVal)
 }
 func (cdr *CDR) GetOriginatorIP(fieldName string) string {
-	if utils.IsSliceMember([]string{utils.CDRHOST, utils.META_DEFAULT, ""}, fieldName) {
+	if utils.IsSliceMember([]string{utils.OriginHost, utils.META_DEFAULT, ""}, fieldName) {
 		return cdr.OriginHost
 	}
 	return cdr.FieldAsString(&utils.RSRField{Id: fieldName})
@@ -722,13 +624,13 @@ func (cdr *CDR) exportFieldValue(cfgCdrFld *config.CfgCdrField) (string, error) 
 		switch rsrFld.Id {
 		case utils.COST:
 			cdrVal = cdr.FormatCost(cfgCdrFld.CostShiftDigits, cfgCdrFld.RoundingDecimals)
-		case utils.USAGE:
+		case utils.Usage:
 			cdrVal = cdr.FormatUsage(cfgCdrFld.Layout)
-		case utils.SETUP_TIME:
+		case utils.SetupTime:
 			cdrVal = cdr.SetupTime.Format(cfgCdrFld.Layout)
-		case utils.ANSWER_TIME: // Format time based on layout
+		case utils.AnswerTime: // Format time based on layout
 			cdrVal = cdr.AnswerTime.Format(cfgCdrFld.Layout)
-		case utils.DESTINATION:
+		case utils.Destination:
 			cdrVal = cdr.FieldAsString(rsrFld)
 			if cfgCdrFld.MaskLen != -1 && len(cfgCdrFld.MaskDestID) != 0 && CachedDestHasPrefix(cfgCdrFld.MaskDestID, cdrVal) {
 				cdrVal = utils.MaskSuffix(cdrVal, cfgCdrFld.MaskLen)
@@ -797,8 +699,34 @@ func (cdr *CDR) formatField(cfgFld *config.CfgCdrField, httpSkipTlsCheck bool, g
 }
 
 // Part of event interface
-func (cdr *CDR) AsMapStringIface() (map[string]interface{}, error) {
-	return nil, utils.ErrNotImplemented
+func (cdr *CDR) AsMapStringIface() (mp map[string]interface{}, err error) {
+	mp = make(map[string]interface{})
+	for k, v := range cdr.ExtraFields {
+		mp[k] = v
+	}
+	mp[utils.CGRID] = cdr.CGRID
+	mp[utils.MEDI_RUNID] = cdr.RunID
+	mp[utils.ORDERID] = cdr.OrderID
+	mp[utils.OriginHost] = cdr.OriginHost
+	mp[utils.Source] = cdr.Source
+	mp[utils.OriginID] = cdr.OriginID
+	mp[utils.TOR] = cdr.ToR
+	mp[utils.RequestType] = cdr.RequestType
+	mp[utils.Tenant] = cdr.Tenant
+	mp[utils.Category] = cdr.Category
+	mp[utils.Account] = cdr.Account
+	mp[utils.Subject] = cdr.Subject
+	mp[utils.Destination] = cdr.Destination
+	mp[utils.SetupTime] = cdr.SetupTime
+	mp[utils.AnswerTime] = cdr.AnswerTime
+	mp[utils.Usage] = cdr.Usage
+	mp[utils.CostSource] = cdr.CostSource
+	mp[utils.COST] = cdr.Cost
+	mp[utils.COST_DETAILS] = cdr.CostDetails
+	mp[utils.ExtraInfo] = cdr.ExtraInfo
+	mp[utils.RATED] = cdr.Rated
+	mp[utils.PartialField] = cdr.Partial
+	return
 }
 
 // Used in place where we need to export the CDR based on an export template
@@ -843,40 +771,172 @@ func (cdr *CDR) AsExportMap(exportFields []*config.CfgCdrField, httpSkipTlsCheck
 	return
 }
 
+// AsCDRsTBL converts the CDR into the format used for SQL storage
+func (cdr *CDR) AsCDRsql() (cdrSql *CDRsql) {
+	cdrSql = new(CDRsql)
+	cdrSql.Cgrid = cdr.CGRID
+	cdrSql.RunID = cdr.RunID
+	cdrSql.OriginHost = cdr.OriginHost
+	cdrSql.Source = cdr.Source
+	cdrSql.OriginID = cdr.OriginID
+	cdrSql.TOR = cdr.ToR
+	cdrSql.RequestType = cdr.RequestType
+	cdrSql.Tenant = cdr.Tenant
+	cdrSql.Category = cdr.Category
+	cdrSql.Account = cdr.Account
+	cdrSql.Subject = cdr.Subject
+	cdrSql.Destination = cdr.Destination
+	cdrSql.SetupTime = cdr.SetupTime
+	cdrSql.AnswerTime = cdr.AnswerTime
+	cdrSql.Usage = cdr.Usage.Nanoseconds()
+	cdrSql.ExtraFields = utils.ToJSON(cdr.ExtraFields)
+	cdrSql.CostSource = cdr.CostSource
+	cdrSql.Cost = cdr.Cost
+	cdrSql.CostDetails = utils.ToJSON(cdr.CostDetails)
+	cdrSql.ExtraInfo = cdr.ExtraInfo
+	cdrSql.CreatedAt = time.Now()
+	return
+}
+
+func (cdr *CDR) AsCGREvent() *utils.CGREvent {
+	cdrIf, _ := cdr.AsMapStringIface()
+	return &utils.CGREvent{
+		Tenant: cdr.Tenant,
+		ID:     utils.UUIDSha1Prefix(),
+		Event:  cdrIf,
+	}
+}
+
+// UpdateFromCGREvent will update CDR with event fields from CGREvent
+func (cdr *CDR) UpdateFromCGREvent(cgrEv *utils.CGREvent, fields []string) (err error) {
+	for _, fldName := range fields {
+		if _, has := cgrEv.Event[fldName]; !has {
+			continue //maybe removed
+		}
+		switch fldName {
+		case utils.OriginHost:
+			if cdr.OriginHost, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Source:
+			if cdr.Source, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.TOR:
+			if cdr.ToR, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.RequestType:
+			if cdr.RequestType, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Tenant:
+			if cdr.Tenant, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Category:
+			if cdr.Category, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Account:
+			if cdr.Account, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Subject:
+			if cdr.Subject, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Destination:
+			if cdr.Destination, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.SetupTime:
+			if cdr.SetupTime, err = cgrEv.FieldAsTime(fldName, config.CgrConfig().DefaultTimezone); err != nil {
+				return
+			}
+		case utils.AnswerTime:
+			if cdr.AnswerTime, err = cgrEv.FieldAsTime(fldName, config.CgrConfig().DefaultTimezone); err != nil {
+				return
+			}
+		case utils.Usage:
+			if cdr.Usage, err = cgrEv.FieldAsDuration(fldName); err != nil {
+				return
+			}
+		default:
+			fldVal, err := cgrEv.FieldAsString(fldName)
+			if err != nil {
+				return err
+			}
+			cdr.ExtraFields[fldName] = fldVal
+		}
+	}
+	return
+}
+
+// NewCDRFromSQL converts the CDRsql into CDR
+func NewCDRFromSQL(cdrSql *CDRsql) (cdr *CDR, err error) {
+	cdr = new(CDR)
+	cdr.CGRID = cdrSql.Cgrid
+	cdr.RunID = cdrSql.RunID
+	cdr.OriginHost = cdrSql.OriginHost
+	cdr.Source = cdrSql.Source
+	cdr.OriginID = cdrSql.OriginID
+	cdr.OrderID = cdrSql.ID
+	cdr.ToR = cdrSql.TOR
+	cdr.RequestType = cdrSql.RequestType
+	cdr.Tenant = cdrSql.Tenant
+	cdr.Category = cdrSql.Category
+	cdr.Account = cdrSql.Account
+	cdr.Subject = cdrSql.Subject
+	cdr.Destination = cdrSql.Destination
+	cdr.SetupTime = cdrSql.SetupTime
+	cdr.AnswerTime = cdrSql.AnswerTime
+	cdr.Usage = time.Duration(cdrSql.Usage)
+	cdr.CostSource = cdrSql.CostSource
+	cdr.Cost = cdrSql.Cost
+	cdr.ExtraInfo = cdrSql.ExtraInfo
+	if cdrSql.ExtraFields != "" {
+		if err = json.Unmarshal([]byte(cdrSql.ExtraFields), &cdr.ExtraFields); err != nil {
+			return nil, err
+		}
+	}
+	if cdrSql.CostDetails != "" {
+		if err = json.Unmarshal([]byte(cdrSql.CostDetails), &cdr.CostDetails); err != nil {
+			return nil, err
+		}
+	}
+	return
+}
+
 type ExternalCDR struct {
-	CGRID           string
-	RunID           string
-	OrderID         int64
-	OriginHost      string
-	Source          string
-	OriginID        string
-	ToR             string
-	RequestType     string
-	Direction       string
-	Tenant          string
-	Category        string
-	Account         string
-	Subject         string
-	Destination     string
-	SetupTime       string
-	PDD             string
-	AnswerTime      string
-	Usage           string
-	Supplier        string
-	DisconnectCause string
-	ExtraFields     map[string]string
-	CostSource      string
-	Cost            float64
-	CostDetails     string
-	ExtraInfo       string
-	Rated           bool // Mark the CDR as rated so we do not process it during mediation
+	CGRID       string
+	RunID       string
+	OrderID     int64
+	OriginHost  string
+	Source      string
+	OriginID    string
+	ToR         string
+	RequestType string
+	Tenant      string
+	Category    string
+	Account     string
+	Subject     string
+	Destination string
+	SetupTime   string
+	AnswerTime  string
+	Usage       string
+	ExtraFields map[string]string
+	CostSource  string
+	Cost        float64
+	CostDetails string
+	ExtraInfo   string
+	Rated       bool // Mark the CDR as rated so we do not process it during mediation
 }
 
 // Used when authorizing requests from outside, eg ApierV1.GetMaxUsage
 type UsageRecord struct {
 	ToR         string
 	RequestType string
-	Direction   string
 	Tenant      string
 	Category    string
 	Account     string
@@ -888,17 +948,17 @@ type UsageRecord struct {
 	ExtraFields map[string]string
 }
 
-func (self *UsageRecord) AsStoredCdr(timezone string) (*CDR, error) {
+func (self *UsageRecord) AsCDR(timezone string) (*CDR, error) {
 	var err error
-	cdr := &CDR{CGRID: self.GetId(), ToR: self.ToR, RequestType: self.RequestType, Direction: self.Direction,
-		Tenant: self.Tenant, Category: self.Category, Account: self.Account, Subject: self.Subject, Destination: self.Destination}
+	cdr := &CDR{CGRID: self.GetId(), ToR: self.ToR, RequestType: self.RequestType, Tenant: self.Tenant,
+		Category: self.Category, Account: self.Account, Subject: self.Subject, Destination: self.Destination}
 	if cdr.SetupTime, err = utils.ParseTimeDetectLayout(self.SetupTime, timezone); err != nil {
 		return nil, err
 	}
 	if cdr.AnswerTime, err = utils.ParseTimeDetectLayout(self.AnswerTime, timezone); err != nil {
 		return nil, err
 	}
-	if cdr.Usage, err = utils.ParseDurationWithSecs(self.Usage); err != nil {
+	if cdr.Usage, err = utils.ParseDurationWithNanosecs(self.Usage); err != nil {
 		return nil, err
 	}
 	if self.ExtraFields != nil {
@@ -915,7 +975,7 @@ func (self *UsageRecord) AsCallDescriptor(timezone string, denyNegative bool) (*
 	cd := &CallDescriptor{
 		CgrID:               self.GetId(),
 		TOR:                 self.ToR,
-		Direction:           self.Direction,
+		Direction:           utils.OUT,
 		Tenant:              self.Tenant,
 		Category:            self.Category,
 		Subject:             self.Subject,
@@ -930,7 +990,7 @@ func (self *UsageRecord) AsCallDescriptor(timezone string, denyNegative bool) (*
 	if cd.TimeStart, err = utils.ParseTimeDetectLayout(timeStr, timezone); err != nil {
 		return nil, err
 	}
-	if usage, err := utils.ParseDurationWithSecs(self.Usage); err != nil {
+	if usage, err := utils.ParseDurationWithNanosecs(self.Usage); err != nil {
 		return nil, err
 	} else {
 		cd.TimeEnd = cd.TimeStart.Add(usage)
@@ -945,5 +1005,5 @@ func (self *UsageRecord) AsCallDescriptor(timezone string, denyNegative bool) (*
 }
 
 func (self *UsageRecord) GetId() string {
-	return utils.Sha1(self.ToR, self.RequestType, self.Direction, self.Tenant, self.Category, self.Account, self.Subject, self.Destination, self.SetupTime, self.AnswerTime, self.Usage)
+	return utils.Sha1(self.ToR, self.RequestType, self.Tenant, self.Category, self.Account, self.Subject, self.Destination, self.SetupTime, self.AnswerTime, self.Usage)
 }

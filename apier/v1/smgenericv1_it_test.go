@@ -30,7 +30,7 @@ import (
 
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/engine"
-	"github.com/cgrates/cgrates/sessionmanager"
+	"github.com/cgrates/cgrates/sessions"
 	"github.com/cgrates/cgrates/utils"
 )
 
@@ -100,9 +100,10 @@ func TestSMGV1CacheStats(t *testing.T) {
 		t.Error(reply)
 	}
 	var rcvStats *utils.CacheStats
-	expectedStats := &utils.CacheStats{Destinations: 5, ReverseDestinations: 7, RatingPlans: 4, RatingProfiles: 9,
-		Actions: 8, ActionPlans: 4, AccountActionPlans: 5, SharedGroups: 1, DerivedChargers: 1,
-		LcrProfiles: 5, CdrStats: 6, Users: 3, Aliases: 1, ReverseAliases: 2, ResourceLimits: 2}
+	expectedStats := &utils.CacheStats{Destinations: 5, ReverseDestinations: 7, RatingPlans: 4, RatingProfiles: 10,
+		Actions: 9, ActionPlans: 4, AccountActionPlans: 5, SharedGroups: 1, DerivedChargers: 1,
+		LcrProfiles: 5, CdrStats: 6, Users: 3, Aliases: 1, ReverseAliases: 2, ResourceProfiles: 3, Resources: 3, StatQueues: 1,
+		StatQueueProfiles: 1, Thresholds: 7, ThresholdProfiles: 7, Filters: 16, SupplierProfiles: 3, AttributeProfiles: 1}
 	var args utils.AttrCacheStats
 	if err := smgV1Rpc.Call("ApierV1.GetCacheStats", args, &rcvStats); err != nil {
 		t.Error("Got error on ApierV1.GetCacheStats: ", err.Error())
@@ -125,8 +126,8 @@ func TestSMGV1AccountsBefore(t *testing.T) {
 
 // Make sure account was debited properly
 func TestSMGV1GetMaxUsage(t *testing.T) {
-	setupReq := &sessionmanager.SMGenericEvent{utils.REQTYPE: utils.META_PREPAID, utils.TENANT: "cgrates.org",
-		utils.ACCOUNT: "1003", utils.DESTINATION: "1002", utils.SETUP_TIME: "2015-11-10T15:20:00Z"}
+	setupReq := &sessions.SMGenericEvent{utils.RequestType: utils.META_PREPAID, utils.Tenant: "cgrates.org",
+		utils.Account: "1003", utils.Destination: "1002", utils.SetupTime: "2015-11-10T15:20:00Z"}
 	var maxTime float64
 	if err := smgV1Rpc.Call("SMGenericV1.GetMaxUsage", setupReq, &maxTime); err != nil {
 		t.Error(err)

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -89,12 +90,12 @@ type UserMap struct {
 	properties map[string]*prop
 	index      map[string]map[string]bool
 	indexKeys  []string
-	dataDB     DataDB
+	dm         *DataManager
 	mu         sync.RWMutex
 }
 
-func NewUserMap(dataDB DataDB, indexes []string) (*UserMap, error) {
-	um := newUserMap(dataDB, indexes)
+func NewUserMap(dm *DataManager, indexes []string) (*UserMap, error) {
+	um := newUserMap(dm, indexes)
 	var reply string
 	if err := um.ReloadUsers("", &reply); err != nil {
 		return nil, err
@@ -102,13 +103,13 @@ func NewUserMap(dataDB DataDB, indexes []string) (*UserMap, error) {
 	return um, nil
 }
 
-func newUserMap(dataDB DataDB, indexes []string) *UserMap {
+func newUserMap(dm *DataManager, indexes []string) *UserMap {
 	return &UserMap{
 		table:      make(map[string]map[string]string),
 		properties: make(map[string]*prop),
 		index:      make(map[string]map[string]bool),
 		indexKeys:  indexes,
-		dataDB:     dataDB,
+		dm:         dm,
 	}
 }
 
@@ -123,7 +124,7 @@ func (um *UserMap) ReloadUsers(in string, reply *string) (err error) {
 	um.properties = make(map[string]*prop)
 
 	// load from db
-	ups, err := um.dataDB.GetUsers()
+	ups, err := um.dm.GetUsers()
 	if err != nil { // restore old data before return
 		um.table = oldTable
 		um.index = oldIndex
@@ -157,7 +158,7 @@ func (um *UserMap) ReloadUsers(in string, reply *string) (err error) {
 func (um *UserMap) SetUser(up *UserProfile, reply *string) error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
-	if err := um.dataDB.SetUser(up); err != nil {
+	if err := um.dm.SetUser(up); err != nil {
 		*reply = err.Error()
 		return err
 	}
@@ -171,7 +172,7 @@ func (um *UserMap) SetUser(up *UserProfile, reply *string) error {
 func (um *UserMap) RemoveUser(up *UserProfile, reply *string) error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
-	if err := um.dataDB.RemoveUser(up.GetId()); err != nil {
+	if err := um.dm.RemoveUser(up.GetId()); err != nil {
 		*reply = err.Error()
 		return err
 	}
@@ -215,7 +216,7 @@ func (um *UserMap) UpdateUser(up *UserProfile, reply *string) error {
 		Weight:   up.Weight,
 		Profile:  m,
 	}
-	if err := um.dataDB.SetUser(finalUp); err != nil {
+	if err := um.dm.SetUser(finalUp); err != nil {
 		*reply = err.Error()
 		return err
 	}

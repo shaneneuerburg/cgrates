@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -24,35 +25,44 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/structmatcher"
 	"github.com/cgrates/cgrates/utils"
 )
 
 type TpReader struct {
-	tpid             string
-	timezone         string
-	dataStorage      DataDB
-	lr               LoadReader
-	actions          map[string][]*Action
-	actionPlans      map[string]*ActionPlan
-	actionsTriggers  map[string]ActionTriggers
-	accountActions   map[string]*Account
-	dirtyRpAliases   []*TenantRatingSubject // used to clean aliases that might have changed
-	dirtyAccAliases  []*TenantAccount       // used to clean aliases that might have changed
-	destinations     map[string]*Destination
-	timings          map[string]*utils.TPTiming
-	rates            map[string]*utils.TPRate
-	destinationRates map[string]*utils.TPDestinationRate
-	ratingPlans      map[string]*RatingPlan
-	ratingProfiles   map[string]*RatingProfile
-	sharedGroups     map[string]*SharedGroup
-	lcrs             map[string]*LCR
-	derivedChargers  map[string]*utils.DerivedChargers
-	cdrStats         map[string]*CdrStats
-	users            map[string]*UserProfile
-	aliases          map[string]*Alias
-	resLimits        map[string]*utils.TPResourceLimit
+	tpid              string
+	timezone          string
+	dm                *DataManager
+	lr                LoadReader
+	actions           map[string][]*Action
+	actionPlans       map[string]*ActionPlan
+	actionsTriggers   map[string]ActionTriggers
+	accountActions    map[string]*Account
+	dirtyRpAliases    []*TenantRatingSubject // used to clean aliases that might have changed
+	dirtyAccAliases   []*TenantAccount       // used to clean aliases that might have changed
+	destinations      map[string]*Destination
+	timings           map[string]*utils.TPTiming
+	rates             map[string]*utils.TPRate
+	destinationRates  map[string]*utils.TPDestinationRate
+	ratingPlans       map[string]*RatingPlan
+	ratingProfiles    map[string]*RatingProfile
+	sharedGroups      map[string]*SharedGroup
+	lcrs              map[string]*LCR
+	derivedChargers   map[string]*utils.DerivedChargers
+	cdrStats          map[string]*CdrStats
+	users             map[string]*UserProfile
+	aliases           map[string]*Alias
+	resProfiles       map[utils.TenantID]*utils.TPResource
+	sqProfiles        map[utils.TenantID]*utils.TPStats
+	thProfiles        map[utils.TenantID]*utils.TPThreshold
+	filters           map[utils.TenantID]*utils.TPFilterProfile
+	sppProfiles       map[utils.TenantID]*utils.TPSupplierProfile
+	attributeProfiles map[utils.TenantID]*utils.TPAttributeProfile
+	resources         []*utils.TenantID // IDs of resources which need creation based on resourceProfiles
+	statQueues        []*utils.TenantID // IDs of statQueues which need creation based on statQueueProfiles
+	thresholds        []*utils.TenantID // IDs of thresholds which need creation based on thresholdProfiles
+	suppliers         []*utils.TenantID // IDs of suppliers which need creation based on sppProfiles
+	attrTntID         []*utils.TenantID // IDs of suppliers which need creation based on attributeProfiles
 	revDests,
 	revAliases,
 	acntActionPlans map[string][]string
@@ -60,10 +70,10 @@ type TpReader struct {
 
 func NewTpReader(db DataDB, lr LoadReader, tpid, timezone string) *TpReader {
 	tpr := &TpReader{
-		tpid:        tpid,
-		timezone:    timezone,
-		dataStorage: db,
-		lr:          lr,
+		tpid:     tpid,
+		timezone: timezone,
+		dm:       NewDataManager(db),
+		lr:       lr,
 	}
 	tpr.Init()
 	//add *any and *asap timing tag (in case of no timings file)
@@ -123,7 +133,12 @@ func (tpr *TpReader) Init() {
 	tpr.users = make(map[string]*UserProfile)
 	tpr.aliases = make(map[string]*Alias)
 	tpr.derivedChargers = make(map[string]*utils.DerivedChargers)
-	tpr.resLimits = make(map[string]*utils.TPResourceLimit)
+	tpr.resProfiles = make(map[utils.TenantID]*utils.TPResource)
+	tpr.sqProfiles = make(map[utils.TenantID]*utils.TPStats)
+	tpr.thProfiles = make(map[utils.TenantID]*utils.TPThreshold)
+	tpr.sppProfiles = make(map[utils.TenantID]*utils.TPSupplierProfile)
+	tpr.attributeProfiles = make(map[utils.TenantID]*utils.TPAttributeProfile)
+	tpr.filters = make(map[utils.TenantID]*utils.TPFilterProfile)
 	tpr.revDests = make(map[string][]string)
 	tpr.revAliases = make(map[string][]string)
 	tpr.acntActionPlans = make(map[string][]string)
@@ -140,14 +155,14 @@ func (tpr *TpReader) LoadDestinationsFiltered(tag string) (bool, error) {
 	for _, tpDst := range tpDests {
 		dst := NewDestinationFromTPDestination(tpDst)
 		// ToDo: Fix transactions at onlineDB level
-		if err = tpr.dataStorage.SetDestination(dst, transID); err != nil {
-			cache.RollbackTransaction(transID)
+		if err = tpr.dm.DataDB().SetDestination(dst, transID); err != nil {
+			Cache.RollbackTransaction(transID)
 		}
-		if err = tpr.dataStorage.SetReverseDestination(dst, transID); err != nil {
-			cache.RollbackTransaction(transID)
+		if err = tpr.dm.DataDB().SetReverseDestination(dst, transID); err != nil {
+			Cache.RollbackTransaction(transID)
 		}
 	}
-	cache.CommitTransaction(transID)
+	Cache.CommitTransaction(transID)
 	return true, nil
 }
 
@@ -225,8 +240,8 @@ func (tpr *TpReader) LoadDestinationRates() (err error) {
 			if !destinationExists {
 				_, destinationExists = tpr.destinations[dr.DestinationId]
 			}
-			if !destinationExists && tpr.dataStorage != nil {
-				if destinationExists, err = tpr.dataStorage.HasData(utils.DESTINATION_PREFIX, dr.DestinationId); err != nil {
+			if !destinationExists && tpr.dm.dataDB != nil {
+				if destinationExists, err = tpr.dm.HasData(utils.DESTINATION_PREFIX, dr.DestinationId, ""); err != nil {
 					return err
 				}
 			}
@@ -294,8 +309,8 @@ func (tpr *TpReader) LoadRatingPlansFiltered(tag string) (bool, error) {
 					dms[i] = NewDestinationFromTPDestination(tpDst)
 				}
 				destsExist := len(dms) != 0
-				if !destsExist && tpr.dataStorage != nil {
-					if dbExists, err := tpr.dataStorage.HasData(utils.DESTINATION_PREFIX, drate.DestinationId); err != nil {
+				if !destsExist && tpr.dm.dataDB != nil {
+					if dbExists, err := tpr.dm.HasData(utils.DESTINATION_PREFIX, drate.DestinationId, ""); err != nil {
 						return false, err
 					} else if dbExists {
 						destsExist = true
@@ -306,12 +321,12 @@ func (tpr *TpReader) LoadRatingPlansFiltered(tag string) (bool, error) {
 					return false, fmt.Errorf("could not get destination for tag %v", drate.DestinationId)
 				}
 				for _, destination := range dms {
-					tpr.dataStorage.SetDestination(destination, utils.NonTransactional)
-					tpr.dataStorage.SetReverseDestination(destination, utils.NonTransactional)
+					tpr.dm.DataDB().SetDestination(destination, utils.NonTransactional)
+					tpr.dm.DataDB().SetReverseDestination(destination, utils.NonTransactional)
 				}
 			}
 		}
-		if err := tpr.dataStorage.SetRatingPlan(ratingPlan, utils.NonTransactional); err != nil {
+		if err := tpr.dm.SetRatingPlan(ratingPlan, utils.NonTransactional); err != nil {
 			return false, err
 		}
 	}
@@ -367,8 +382,8 @@ func (tpr *TpReader) LoadRatingProfilesFiltered(qriedRpf *utils.TPRatingProfile)
 				return fmt.Errorf("cannot parse activation time from %v", tpRa.ActivationTime)
 			}
 			_, exists := tpr.ratingPlans[tpRa.RatingPlanId]
-			if !exists && tpr.dataStorage != nil {
-				if exists, err = tpr.dataStorage.HasData(utils.RATING_PLAN_PREFIX, tpRa.RatingPlanId); err != nil {
+			if !exists && tpr.dm.dataDB != nil {
+				if exists, err = tpr.dm.HasData(utils.RATING_PLAN_PREFIX, tpRa.RatingPlanId, ""); err != nil {
 					return err
 				}
 			}
@@ -383,7 +398,7 @@ func (tpr *TpReader) LoadRatingProfilesFiltered(qriedRpf *utils.TPRatingProfile)
 					CdrStatQueueIds: strings.Split(tpRa.CdrStatQueueIds, utils.INFIELD_SEP),
 				})
 		}
-		if err := tpr.dataStorage.SetRatingProfile(resultRatingProfile, utils.NonTransactional); err != nil {
+		if err := tpr.dm.SetRatingProfile(resultRatingProfile, utils.NonTransactional); err != nil {
 			return err
 		}
 	}
@@ -407,8 +422,8 @@ func (tpr *TpReader) LoadRatingProfiles() (err error) {
 				return fmt.Errorf("cannot parse activation time from %v", tpRa.ActivationTime)
 			}
 			_, exists := tpr.ratingPlans[tpRa.RatingPlanId]
-			if !exists && tpr.dataStorage != nil { // Only query if there is a connection, eg on dry run there is none
-				if exists, err = tpr.dataStorage.HasData(utils.RATING_PLAN_PREFIX, tpRa.RatingPlanId); err != nil {
+			if !exists && tpr.dm.dataDB != nil { // Only query if there is a connection, eg on dry run there is none
+				if exists, err = tpr.dm.HasData(utils.RATING_PLAN_PREFIX, tpRa.RatingPlanId, ""); err != nil {
 					return err
 				}
 			}
@@ -452,7 +467,7 @@ func (tpr *TpReader) LoadSharedGroupsFiltered(tag string, save bool) (err error)
 	}
 	if save {
 		for _, sg := range tpr.sharedGroups {
-			if err := tpr.dataStorage.SetSharedGroup(sg, utils.NonTransactional); err != nil {
+			if err := tpr.dm.SetSharedGroup(sg, utils.NonTransactional); err != nil {
 				return err
 			}
 		}
@@ -481,8 +496,8 @@ func (tpr *TpReader) LoadLCRs() (err error) {
 						break
 					}
 				}
-				if !found && tpr.dataStorage != nil {
-					if keys, err := tpr.dataStorage.GetKeysForPrefix(utils.RATING_PROFILE_PREFIX + ratingProfileSearchKey); err != nil {
+				if !found && tpr.dm.dataDB != nil {
+					if keys, err := tpr.dm.DataDB().GetKeysForPrefix(utils.RATING_PROFILE_PREFIX + ratingProfileSearchKey); err != nil {
 						return fmt.Errorf("[LCR] error querying dataDb %s", err.Error())
 					} else if len(keys) != 0 {
 						found = true
@@ -495,8 +510,8 @@ func (tpr *TpReader) LoadLCRs() (err error) {
 				// check destination tags
 				if rule.DestinationId != "" && rule.DestinationId != utils.ANY {
 					_, found := tpr.destinations[rule.DestinationId]
-					if !found && tpr.dataStorage != nil {
-						if found, err = tpr.dataStorage.HasData(utils.DESTINATION_PREFIX, rule.DestinationId); err != nil {
+					if !found && tpr.dm.dataDB != nil {
+						if found, err = tpr.dm.HasData(utils.DESTINATION_PREFIX, rule.DestinationId, ""); err != nil {
 							return fmt.Errorf("[LCR] error querying dataDb %s", err.Error())
 						}
 					}
@@ -578,7 +593,7 @@ func (tpr *TpReader) LoadActions() (err error) {
 			}
 
 			if tpact.Units != "" && tpact.Units != utils.ANY {
-				vf, err := utils.ParseBalanceFilterValue(tpact.Units)
+				vf, err := utils.ParseBalanceFilterValue(tpact.BalanceType, tpact.Units)
 				if err != nil {
 					return err
 				}
@@ -661,8 +676,8 @@ func (tpr *TpReader) LoadActionPlans() (err error) {
 		for _, at := range ats {
 
 			_, exists := tpr.actions[at.ActionsId]
-			if !exists && tpr.dataStorage != nil {
-				if exists, err = tpr.dataStorage.HasData(utils.ACTION_PREFIX, at.ActionsId); err != nil {
+			if !exists && tpr.dm.dataDB != nil {
+				if exists, err = tpr.dm.HasData(utils.ACTION_PREFIX, at.ActionsId, ""); err != nil {
 					return fmt.Errorf("[ActionPlans] Error querying actions: %v - %s", at.ActionsId, err.Error())
 				}
 			}
@@ -717,7 +732,7 @@ func (tpr *TpReader) LoadActionTriggers() (err error) {
 			if err != nil {
 				return err
 			}
-			minSleep, err := utils.ParseDurationWithSecs(atr.MinSleep)
+			minSleep, err := utils.ParseDurationWithNanosecs(atr.MinSleep)
 			if err != nil {
 				return err
 			}
@@ -816,7 +831,7 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *utils.TPAccountActions)
 		if accountAction.ActionPlanId != "" {
 			// get old userBalanceIds
 			exitingAccountIds := make(utils.StringMap)
-			existingActionPlan, err := tpr.dataStorage.GetActionPlan(accountAction.ActionPlanId, true, utils.NonTransactional)
+			existingActionPlan, err := tpr.dm.DataDB().GetActionPlan(accountAction.ActionPlanId, true, utils.NonTransactional)
 			if err == nil && existingActionPlan != nil {
 				exitingAccountIds = existingActionPlan.AccountIDs
 			}
@@ -886,20 +901,20 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *utils.TPAccountActions)
 							AccountID: accID,
 							ActionsID: at.ActionsID,
 						}
-						if err = tpr.dataStorage.PushTask(t); err != nil {
+						if err = tpr.dm.DataDB().PushTask(t); err != nil {
 							return err
 						}
 					}
 				}
 			}
 			// write action plan
-			if err = tpr.dataStorage.SetActionPlan(accountAction.ActionPlanId, actionPlan, false, utils.NonTransactional); err != nil {
+			if err = tpr.dm.DataDB().SetActionPlan(accountAction.ActionPlanId, actionPlan, false, utils.NonTransactional); err != nil {
 				return errors.New(err.Error() + " (SetActionPlan): " + accountAction.ActionPlanId)
 			}
-			if err = tpr.dataStorage.SetAccountActionPlans(id, []string{accountAction.ActionPlanId}, false); err != nil {
+			if err = tpr.dm.DataDB().SetAccountActionPlans(id, []string{accountAction.ActionPlanId}, false); err != nil {
 				return err
 			}
-			if err = tpr.dataStorage.CacheDataFromDB(utils.AccountActionPlansPrefix, []string{id}, true); err != nil {
+			if err = tpr.dm.CacheDataFromDB(utils.AccountActionPlansPrefix, []string{id}, true); err != nil {
 				return err
 			}
 		}
@@ -916,7 +931,7 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *utils.TPAccountActions)
 			for key, atrsLst := range atrs {
 				atrs := make([]*ActionTrigger, len(atrsLst))
 				for idx, atr := range atrsLst {
-					minSleep, _ := utils.ParseDurationWithSecs(atr.MinSleep)
+					minSleep, _ := utils.ParseDurationWithNanosecs(atr.MinSleep)
 					expTime, _ := utils.ParseTimeDetectLayout(atr.ExpirationDate, tpr.timezone)
 					actTime, _ := utils.ParseTimeDetectLayout(atr.ActivationDate, tpr.timezone)
 					if atr.UniqueID == "" {
@@ -999,7 +1014,7 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *utils.TPAccountActions)
 				actionIDs = append(actionIDs, atr.ActionsID)
 			}
 			// write action triggers
-			err = tpr.dataStorage.SetActionTriggers(accountAction.ActionTriggersId, actionTriggers, utils.NonTransactional)
+			err = tpr.dm.SetActionTriggers(accountAction.ActionTriggersId, actionTriggers, utils.NonTransactional)
 			if err != nil {
 				return errors.New(err.Error() + " (SetActionTriggers): " + accountAction.ActionTriggersId)
 			}
@@ -1040,7 +1055,7 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *utils.TPAccountActions)
 					}
 
 					if tpact.Units != "" && tpact.Units != utils.ANY {
-						vf, err := utils.ParseBalanceFilterValue(tpact.Units)
+						vf, err := utils.ParseBalanceFilterValue(tpact.BalanceType, tpact.Units)
 						if err != nil {
 							return err
 						}
@@ -1111,12 +1126,12 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *utils.TPAccountActions)
 		}
 		// write actions
 		for k, as := range facts {
-			err = tpr.dataStorage.SetActions(k, as, utils.NonTransactional)
+			err = tpr.dm.SetActions(k, as, utils.NonTransactional)
 			if err != nil {
 				return err
 			}
 		}
-		ub, err := tpr.dataStorage.GetAccount(id)
+		ub, err := tpr.dm.DataDB().GetAccount(id)
 		if err != nil {
 			ub = &Account{
 				ID: id,
@@ -1125,7 +1140,7 @@ func (tpr *TpReader) LoadAccountActionsFiltered(qriedAA *utils.TPAccountActions)
 		ub.ActionTriggers = actionTriggers
 		// init counters
 		ub.InitCounters()
-		if err := tpr.dataStorage.SetAccount(ub); err != nil {
+		if err := tpr.dm.DataDB().SetAccount(ub); err != nil {
 			return err
 		}
 	}
@@ -1211,7 +1226,7 @@ func (tpr *TpReader) LoadDerivedChargersFiltered(filter *utils.TPDerivedChargers
 	}
 	if save {
 		for dcsKey, dcs := range tpr.derivedChargers {
-			if err := tpr.dataStorage.SetDerivedChargers(dcsKey, dcs, utils.NonTransactional); err != nil {
+			if err := tpr.dm.DataDB().SetDerivedChargers(dcsKey, dcs, utils.NonTransactional); err != nil {
 				return err
 			}
 		}
@@ -1250,7 +1265,7 @@ func (tpr *TpReader) LoadCdrStatsFiltered(tag string, save bool) (err error) {
 					for _, atrsLst := range atrsM {
 						atrs := make([]*ActionTrigger, len(atrsLst))
 						for idx, atr := range atrsLst {
-							minSleep, _ := utils.ParseDurationWithSecs(atr.MinSleep)
+							minSleep, _ := utils.ParseDurationWithNanosecs(atr.MinSleep)
 							expTime, _ := utils.ParseTimeDetectLayout(atr.ExpirationDate, tpr.timezone)
 							actTime, _ := utils.ParseTimeDetectLayout(atr.ActivationDate, tpr.timezone)
 							if atr.UniqueID == "" {
@@ -1339,7 +1354,7 @@ func (tpr *TpReader) LoadCdrStatsFiltered(tag string, save bool) (err error) {
 				return fmt.Errorf("could not get action triggers for cdr stats id %s: %s", cs.Id, triggerTag)
 			}
 			// write action triggers
-			err = tpr.dataStorage.SetActionTriggers(triggerTag, triggers, utils.NonTransactional)
+			err = tpr.dm.SetActionTriggers(triggerTag, triggers, utils.NonTransactional)
 			if err != nil {
 				return errors.New(err.Error() + " (SetActionTriggers): " + triggerTag)
 			}
@@ -1383,7 +1398,7 @@ func (tpr *TpReader) LoadCdrStatsFiltered(tag string, save bool) (err error) {
 					}
 
 					if tpact.Units != "" && tpact.Units != utils.ANY {
-						vf, err := utils.ParseBalanceFilterValue(tpact.Units)
+						vf, err := utils.ParseBalanceFilterValue(tpact.BalanceType, tpact.Units)
 						if err != nil {
 							return err
 						}
@@ -1440,13 +1455,13 @@ func (tpr *TpReader) LoadCdrStatsFiltered(tag string, save bool) (err error) {
 	if save {
 		// write actions
 		for k, as := range tpr.actions {
-			err = tpr.dataStorage.SetActions(k, as, utils.NonTransactional)
+			err = tpr.dm.SetActions(k, as, utils.NonTransactional)
 			if err != nil {
 				return err
 			}
 		}
 		for _, stat := range tpr.cdrStats {
-			if err := tpr.dataStorage.SetCdrStats(stat); err != nil {
+			if err := tpr.dm.SetCdrStats(stat); err != nil {
 				return err
 			}
 		}
@@ -1472,7 +1487,7 @@ func (tpr *TpReader) LoadUsersFiltered(filter *utils.TPUsers) (bool, error) {
 		for _, up := range tpUser.Profile {
 			user.Profile[up.AttrName] = up.AttrValue
 		}
-		tpr.dataStorage.SetUser(user)
+		tpr.dm.SetUser(user)
 	}
 	return len(tpUsers) > 0, err
 }
@@ -1533,8 +1548,8 @@ func (tpr *TpReader) LoadAliasesFiltered(filter *utils.TPAliases) (bool, error) 
 
 		}
 	}
-	tpr.dataStorage.SetAlias(alias, utils.NonTransactional)
-	tpr.dataStorage.SetReverseAlias(alias, utils.NonTransactional)
+	tpr.dm.DataDB().SetAlias(alias, utils.NonTransactional)
+	tpr.dm.DataDB().SetReverseAlias(alias, utils.NonTransactional)
 	return len(tpAliases) > 0, err
 }
 
@@ -1586,21 +1601,141 @@ func (tpr *TpReader) LoadAliases() error {
 	return err
 }
 
-func (tpr *TpReader) LoadResourceLimitsFiltered(tag string) error {
-	rls, err := tpr.lr.GetTPResourceLimits(tpr.tpid, tag)
+func (tpr *TpReader) LoadResourceProfilesFiltered(tag string) (err error) {
+	rls, err := tpr.lr.GetTPResources(tpr.tpid, tag)
 	if err != nil {
 		return err
 	}
-	mapRLs := make(map[string]*utils.TPResourceLimit)
+	mapRsPfls := make(map[utils.TenantID]*utils.TPResource)
 	for _, rl := range rls {
-		mapRLs[rl.ID] = rl
+		mapRsPfls[utils.TenantID{Tenant: rl.Tenant, ID: rl.ID}] = rl
 	}
-	tpr.resLimits = mapRLs
+	tpr.resProfiles = mapRsPfls
+	for tntID, _ := range mapRsPfls {
+		if has, err := tpr.dm.HasData(utils.ResourcesPrefix, tntID.ID, tntID.Tenant); err != nil {
+			return err
+		} else if !has {
+			tpr.resources = append(tpr.resources, &utils.TenantID{Tenant: tntID.Tenant, ID: tntID.ID})
+		}
+	}
 	return nil
 }
 
-func (tpr *TpReader) LoadResourceLimits() error {
-	return tpr.LoadResourceLimitsFiltered("")
+func (tpr *TpReader) LoadResourceProfiles() error {
+	return tpr.LoadResourceProfilesFiltered("")
+}
+
+func (tpr *TpReader) LoadStatsFiltered(tag string) (err error) {
+	tps, err := tpr.lr.GetTPStats(tpr.tpid, tag)
+	if err != nil {
+		return err
+	}
+	mapSTs := make(map[utils.TenantID]*utils.TPStats)
+	for _, st := range tps {
+		mapSTs[utils.TenantID{Tenant: st.Tenant, ID: st.ID}] = st
+	}
+	tpr.sqProfiles = mapSTs
+	for tntID, _ := range mapSTs {
+		if has, err := tpr.dm.HasData(utils.StatQueuePrefix, tntID.ID, tntID.Tenant); err != nil {
+			return err
+		} else if !has {
+			tpr.statQueues = append(tpr.statQueues, &utils.TenantID{Tenant: tntID.Tenant, ID: tntID.ID})
+		}
+	}
+	return nil
+}
+
+func (tpr *TpReader) LoadStats() error {
+	return tpr.LoadStatsFiltered("")
+}
+
+func (tpr *TpReader) LoadThresholdsFiltered(tag string) (err error) {
+	tps, err := tpr.lr.GetTPThresholds(tpr.tpid, tag)
+	if err != nil {
+		return err
+	}
+	mapTHs := make(map[utils.TenantID]*utils.TPThreshold)
+	for _, th := range tps {
+		mapTHs[utils.TenantID{Tenant: th.Tenant, ID: th.ID}] = th
+	}
+	tpr.thProfiles = mapTHs
+	for tntID, _ := range mapTHs {
+		if has, err := tpr.dm.HasData(utils.ThresholdPrefix, tntID.ID, tntID.Tenant); err != nil {
+			return err
+		} else if !has {
+			tpr.thresholds = append(tpr.thresholds, &utils.TenantID{Tenant: tntID.Tenant, ID: tntID.ID})
+		}
+	}
+	return nil
+}
+
+func (tpr *TpReader) LoadThresholds() error {
+	return tpr.LoadThresholdsFiltered("")
+}
+
+func (tpr *TpReader) LoadFiltersFiltered(tag string) error {
+	tps, err := tpr.lr.GetTPFilters(tpr.tpid, tag)
+	if err != nil {
+		return err
+	}
+	mapTHs := make(map[utils.TenantID]*utils.TPFilterProfile)
+	for _, th := range tps {
+		mapTHs[utils.TenantID{Tenant: th.Tenant, ID: th.ID}] = th
+	}
+	tpr.filters = mapTHs
+	return nil
+}
+
+func (tpr *TpReader) LoadFilters() error {
+	return tpr.LoadFiltersFiltered("")
+}
+
+func (tpr *TpReader) LoadSupplierProfilesFiltered(tag string) (err error) {
+	rls, err := tpr.lr.GetTPSuppliers(tpr.tpid, tag)
+	if err != nil {
+		return err
+	}
+	mapRsPfls := make(map[utils.TenantID]*utils.TPSupplierProfile)
+	for _, rl := range rls {
+		mapRsPfls[utils.TenantID{Tenant: rl.Tenant, ID: rl.ID}] = rl
+	}
+	tpr.sppProfiles = mapRsPfls
+	for tntID, _ := range mapRsPfls {
+		if has, err := tpr.dm.HasData(utils.SupplierProfilePrefix, tntID.ID, tntID.Tenant); err != nil {
+			return err
+		} else if !has {
+			tpr.suppliers = append(tpr.suppliers, &utils.TenantID{Tenant: tntID.Tenant, ID: tntID.ID})
+		}
+	}
+	return nil
+}
+
+func (tpr *TpReader) LoadSupplierProfiles() error {
+	return tpr.LoadSupplierProfilesFiltered("")
+}
+
+func (tpr *TpReader) LoadAttributeProfilesFiltered(tag string) (err error) {
+	rls, err := tpr.lr.GetTPAttributes(tpr.tpid, tag)
+	if err != nil {
+		return err
+	}
+	mapRsPfls := make(map[utils.TenantID]*utils.TPAttributeProfile)
+	for _, rl := range rls {
+		mapRsPfls[utils.TenantID{Tenant: rl.Tenant, ID: rl.ID}] = rl
+	}
+	tpr.attributeProfiles = mapRsPfls
+	for tntID, _ := range mapRsPfls {
+		if has, err := tpr.dm.HasData(utils.AttributeProfilePrefix, tntID.ID, tntID.Tenant); err != nil {
+			return err
+		} else if !has {
+			tpr.attrTntID = append(tpr.attrTntID, &utils.TenantID{Tenant: tntID.Tenant, ID: tntID.ID})
+		}
+	}
+	return nil
+}
+
+func (tpr *TpReader) LoadAttributeProfiles() error {
+	return tpr.LoadAttributeProfilesFiltered("")
 }
 
 func (tpr *TpReader) LoadAll() (err error) {
@@ -1652,7 +1787,22 @@ func (tpr *TpReader) LoadAll() (err error) {
 	if err = tpr.LoadAliases(); err != nil && err.Error() != utils.NotFoundCaps {
 		return
 	}
-	if err = tpr.LoadResourceLimits(); err != nil && err.Error() != utils.NotFoundCaps {
+	if err = tpr.LoadFilters(); err != nil && err.Error() != utils.NotFoundCaps {
+		return
+	}
+	if err = tpr.LoadResourceProfiles(); err != nil && err.Error() != utils.NotFoundCaps {
+		return
+	}
+	if err = tpr.LoadStats(); err != nil && err.Error() != utils.NotFoundCaps {
+		return
+	}
+	if err = tpr.LoadThresholds(); err != nil && err.Error() != utils.NotFoundCaps {
+		return
+	}
+	if err = tpr.LoadSupplierProfiles(); err != nil && err.Error() != utils.NotFoundCaps {
+		return
+	}
+	if err = tpr.LoadAttributeProfiles(); err != nil && err.Error() != utils.NotFoundCaps {
 		return
 	}
 	return nil
@@ -1678,17 +1828,17 @@ func (tpr *TpReader) IsValid() bool {
 }
 
 func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err error) {
-	if tpr.dataStorage == nil {
+	if tpr.dm.dataDB == nil {
 		return errors.New("no database connection")
 	}
 	if flush { // ToDo
-		//tpr.dataStorage.Flush("")
+		//tpr.dm.DataDB().Flush("")
 	}
 	if verbose {
 		log.Print("Destinations:")
 	}
 	for _, d := range tpr.destinations {
-		err = tpr.dataStorage.SetDestination(d, utils.NonTransactional)
+		err = tpr.dm.DataDB().SetDestination(d, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1706,7 +1856,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Rating Plans:")
 	}
 	for _, rp := range tpr.ratingPlans {
-		err = tpr.dataStorage.SetRatingPlan(rp, utils.NonTransactional)
+		err = tpr.dm.SetRatingPlan(rp, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1718,7 +1868,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Rating Profiles:")
 	}
 	for _, rp := range tpr.ratingProfiles {
-		err = tpr.dataStorage.SetRatingProfile(rp, utils.NonTransactional)
+		err = tpr.dm.SetRatingProfile(rp, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1741,7 +1891,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 					if verbose {
 						log.Println("\tTask: ", t)
 					}
-					if err = tpr.dataStorage.PushTask(t); err != nil {
+					if err = tpr.dm.DataDB().PushTask(t); err != nil {
 						return err
 					}
 				}
@@ -1753,13 +1903,13 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 					if verbose {
 						log.Println("\tTask: ", t)
 					}
-					if err = tpr.dataStorage.PushTask(t); err != nil {
+					if err = tpr.dm.DataDB().PushTask(t); err != nil {
 						return err
 					}
 				}
 			}
 		}
-		err = tpr.dataStorage.SetActionPlan(k, ap, false, utils.NonTransactional)
+		err = tpr.dm.DataDB().SetActionPlan(k, ap, false, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1777,7 +1927,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Action Triggers:")
 	}
 	for k, atrs := range tpr.actionsTriggers {
-		err = tpr.dataStorage.SetActionTriggers(k, atrs, utils.NonTransactional)
+		err = tpr.dm.SetActionTriggers(k, atrs, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1789,7 +1939,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Shared Groups:")
 	}
 	for k, sg := range tpr.sharedGroups {
-		err = tpr.dataStorage.SetSharedGroup(sg, utils.NonTransactional)
+		err = tpr.dm.SetSharedGroup(sg, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1801,7 +1951,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("LCR Rules:")
 	}
 	for k, lcr := range tpr.lcrs {
-		err = tpr.dataStorage.SetLCR(lcr, utils.NonTransactional)
+		err = tpr.dm.SetLCR(lcr, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1813,7 +1963,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Actions:")
 	}
 	for k, as := range tpr.actions {
-		err = tpr.dataStorage.SetActions(k, as, utils.NonTransactional)
+		err = tpr.dm.SetActions(k, as, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1825,7 +1975,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Account Actions:")
 	}
 	for _, ub := range tpr.accountActions {
-		err = tpr.dataStorage.SetAccount(ub)
+		err = tpr.dm.DataDB().SetAccount(ub)
 		if err != nil {
 			return err
 		}
@@ -1837,7 +1987,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Derived Chargers:")
 	}
 	for key, dcs := range tpr.derivedChargers {
-		err = tpr.dataStorage.SetDerivedChargers(key, dcs, utils.NonTransactional)
+		err = tpr.dm.DataDB().SetDerivedChargers(key, dcs, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1849,7 +1999,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("CDR Stats Queues:")
 	}
 	for _, sq := range tpr.cdrStats {
-		err = tpr.dataStorage.SetCdrStats(sq)
+		err = tpr.dm.SetCdrStats(sq)
 		if err != nil {
 			return err
 		}
@@ -1861,7 +2011,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Users:")
 	}
 	for _, u := range tpr.users {
-		err = tpr.dataStorage.SetUser(u)
+		err = tpr.dm.SetUser(u)
 		if err != nil {
 			return err
 		}
@@ -1873,7 +2023,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		log.Print("Aliases:")
 	}
 	for _, al := range tpr.aliases {
-		err = tpr.dataStorage.SetAlias(al, utils.NonTransactional)
+		err = tpr.dm.DataDB().SetAlias(al, utils.NonTransactional)
 		if err != nil {
 			return err
 		}
@@ -1888,18 +2038,151 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 		}
 	}
 	if verbose {
-		log.Print("ResourceLimits:")
+		log.Print("Filters:")
 	}
-	for _, tpRL := range tpr.resLimits {
-		rl, err := APItoResourceLimit(tpRL, tpr.timezone)
+	for _, tpTH := range tpr.filters {
+		th, err := APItoFilter(tpTH, tpr.timezone)
 		if err != nil {
 			return err
 		}
-		if err = tpr.dataStorage.SetResourceLimit(rl, utils.NonTransactional); err != nil {
+		if err = tpr.dm.SetFilter(th); err != nil {
 			return err
 		}
 		if verbose {
-			log.Print("\t", rl.ID)
+			log.Print("\t", th.TenantID())
+		}
+	}
+	if verbose {
+		log.Print("ResourceProfiles:")
+	}
+	for _, tpRsp := range tpr.resProfiles {
+		rsp, err := APItoResource(tpRsp, tpr.timezone)
+		if err != nil {
+			return err
+		}
+		if err = tpr.dm.SetResourceProfile(rsp, true); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", rsp.TenantID())
+		}
+	}
+	if verbose {
+		log.Print("Resources:")
+	}
+	for _, rTid := range tpr.resources {
+		if err = tpr.dm.SetResource(&Resource{Tenant: rTid.Tenant, ID: rTid.ID, Usages: make(map[string]*ResourceUsage)}); err != nil {
+			return
+		}
+		if verbose {
+			log.Print("\t", rTid.TenantID())
+		}
+	}
+	if verbose {
+		log.Print("StatQueueProfiles:")
+	}
+	for _, tpST := range tpr.sqProfiles {
+		st, err := APItoStats(tpST, tpr.timezone)
+		if err != nil {
+			return err
+		}
+		if err = tpr.dm.SetStatQueueProfile(st, true); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", st.TenantID())
+		}
+	}
+	if verbose {
+		log.Print("StatQueues:")
+	}
+	for _, sqTntID := range tpr.statQueues {
+		metrics := make(map[string]StatMetric)
+		for _, metricwithparam := range tpr.sqProfiles[utils.TenantID{Tenant: sqTntID.Tenant, ID: sqTntID.ID}].Metrics {
+			if metric, err := NewStatMetric(metricwithparam.MetricID,
+				tpr.sqProfiles[utils.TenantID{Tenant: sqTntID.Tenant, ID: sqTntID.ID}].MinItems, metricwithparam.Parameters); err != nil {
+				return err
+			} else {
+				metrics[metricwithparam.MetricID] = metric
+
+			}
+		}
+		sq := &StatQueue{Tenant: sqTntID.Tenant, ID: sqTntID.ID, SQMetrics: metrics}
+		if err = tpr.dm.SetStatQueue(sq); err != nil {
+			return
+		}
+		if verbose {
+			log.Print("\t", sqTntID.TenantID())
+		}
+	}
+	if verbose {
+		log.Print("ThresholdProfiles:")
+	}
+	for _, tpTH := range tpr.thProfiles {
+		th, err := APItoThresholdProfile(tpTH, tpr.timezone)
+		if err != nil {
+			return err
+		}
+		if err = tpr.dm.SetThresholdProfile(th, true); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", th.TenantID())
+		}
+	}
+	if verbose {
+		log.Print("Thresholds:")
+	}
+	for _, thd := range tpr.thresholds {
+		if err = tpr.dm.SetThreshold(&Threshold{Tenant: thd.Tenant, ID: thd.ID}); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", thd.TenantID())
+		}
+	}
+
+	if verbose {
+		log.Print("SupplierProfiles:")
+	}
+	for _, tpTH := range tpr.sppProfiles {
+		th, err := APItoSupplierProfile(tpTH, tpr.timezone)
+		if err != nil {
+			return err
+		}
+		if err = tpr.dm.SetSupplierProfile(th, true); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", th.TenantID())
+		}
+	}
+
+	if verbose {
+		log.Print("AttributeProfiles:")
+	}
+	for _, tpTH := range tpr.attributeProfiles {
+		th, err := APItoAttributeProfile(tpTH, tpr.timezone)
+		if err != nil {
+			return err
+		}
+		if err = tpr.dm.SetAttributeProfile(th, true); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", th.TenantID())
+		}
+	}
+
+	if verbose {
+		log.Print("Timings:")
+	}
+	for _, t := range tpr.timings {
+		if err = tpr.dm.SetTiming(t); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", t.ID)
 		}
 	}
 	if !disable_reverse {
@@ -1907,7 +2190,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 			if verbose {
 				log.Print("Rebuilding reverse destinations")
 			}
-			if err = tpr.dataStorage.RebuildReverseForPrefix(utils.REVERSE_DESTINATION_PREFIX); err != nil {
+			if err = tpr.dm.DataDB().RebuildReverseForPrefix(utils.REVERSE_DESTINATION_PREFIX); err != nil {
 				return err
 			}
 		}
@@ -1915,7 +2198,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 			if verbose {
 				log.Print("Rebuilding account action plans")
 			}
-			if err = tpr.dataStorage.RebuildReverseForPrefix(utils.AccountActionPlansPrefix); err != nil {
+			if err = tpr.dm.DataDB().RebuildReverseForPrefix(utils.AccountActionPlansPrefix); err != nil {
 				return err
 			}
 		}
@@ -1923,29 +2206,7 @@ func (tpr *TpReader) WriteToDatabase(flush, verbose, disable_reverse bool) (err 
 			if verbose {
 				log.Print("Rebuilding reverse aliases")
 			}
-			if err = tpr.dataStorage.RebuildReverseForPrefix(utils.REVERSE_ALIASES_PREFIX); err != nil {
-				return err
-			}
-		}
-		if len(tpr.resLimits) > 0 {
-			if verbose {
-				log.Print("Indexing resource limits")
-			}
-			rlIdxr, err := NewReqFilterIndexer(tpr.dataStorage, utils.ResourceLimitsIndex)
-			if err != nil {
-				return err
-			}
-			for _, tpRL := range tpr.resLimits {
-				if rl, err := APItoResourceLimit(tpRL, tpr.timezone); err != nil {
-					return err
-				} else {
-					rlIdxr.IndexFilters(rl.ID, rl.Filters)
-				}
-			}
-			if verbose {
-				log.Printf("Indexed ResourceLimit keys: %+v", rlIdxr.ChangedKeys().Slice())
-			}
-			if err := rlIdxr.StoreIndexes(); err != nil {
+			if err = tpr.dm.DataDB().RebuildReverseForPrefix(utils.REVERSE_ALIASES_PREFIX); err != nil {
 				return err
 			}
 		}
@@ -2000,8 +2261,8 @@ func (tpr *TpReader) ShowStatistics() {
 	log.Print("Actions: ", len(tpr.actions))
 	// action plans
 	log.Print("Action plans: ", len(tpr.actionPlans))
-	// action trigers
-	log.Print("Action trigers: ", len(tpr.actionsTriggers))
+	// action triggers
+	log.Print("Action triggers: ", len(tpr.actionsTriggers))
 	// account actions
 	log.Print("Account actions: ", len(tpr.accountActions))
 	// derivedChargers
@@ -2010,8 +2271,18 @@ func (tpr *TpReader) ShowStatistics() {
 	log.Print("LCR rules: ", len(tpr.lcrs))
 	// cdr stats
 	log.Print("CDR stats: ", len(tpr.cdrStats))
-	// resource limits
-	log.Print("ResourceLimits: ", len(tpr.resLimits))
+	// resource profiles
+	log.Print("ResourceProfiles: ", len(tpr.resProfiles))
+	// stats
+	log.Print("Stats: ", len(tpr.sqProfiles))
+	// thresholds
+	log.Print("Thresholds: ", len(tpr.thProfiles))
+	// filters
+	log.Print("Filters: ", len(tpr.filters))
+	// Supplier profiles
+	log.Print("SupplierProfiles: ", len(tpr.sppProfiles))
+	// Attribute profiles
+	log.Print("AttributeProfiles: ", len(tpr.attributeProfiles))
 }
 
 // Returns the identities loaded for a specific category, useful for cache reloads
@@ -2121,11 +2392,11 @@ func (tpr *TpReader) GetLoadedIds(categ string) ([]string, error) {
 			i++
 		}
 		return keys, nil
-	case utils.ResourceLimitsPrefix:
-		keys := make([]string, len(tpr.resLimits))
+	case utils.ResourceProfilesPrefix:
+		keys := make([]string, len(tpr.resProfiles))
 		i := 0
-		for k := range tpr.resLimits {
-			keys[i] = k
+		for k, _ := range tpr.resProfiles {
+			keys[i] = k.TenantID()
 			i++
 		}
 		return keys, nil
@@ -2145,6 +2416,347 @@ func (tpr *TpReader) GetLoadedIds(categ string) ([]string, error) {
 			i++
 		}
 		return keys, nil
+	case utils.StatQueueProfilePrefix:
+		keys := make([]string, len(tpr.sqProfiles))
+		i := 0
+		for k, _ := range tpr.sqProfiles {
+			keys[i] = k.TenantID()
+			i++
+		}
+		return keys, nil
+	case utils.ThresholdProfilePrefix:
+		keys := make([]string, len(tpr.thProfiles))
+		i := 0
+		for k, _ := range tpr.thProfiles {
+			keys[i] = k.TenantID()
+			i++
+		}
+		return keys, nil
+	case utils.FilterPrefix:
+		keys := make([]string, len(tpr.filters))
+		i := 0
+		for k := range tpr.filters {
+			keys[i] = k.TenantID()
+			i++
+		}
+		return keys, nil
+	case utils.SupplierProfilePrefix:
+		keys := make([]string, len(tpr.sppProfiles))
+		i := 0
+		for k, _ := range tpr.sppProfiles {
+			keys[i] = k.TenantID()
+			i++
+		}
+		return keys, nil
+	case utils.AttributeProfilePrefix:
+		keys := make([]string, len(tpr.attributeProfiles))
+		i := 0
+		for k, _ := range tpr.attributeProfiles {
+			keys[i] = k.TenantID()
+			i++
+		}
+		return keys, nil
 	}
 	return nil, errors.New("Unsupported load category")
+}
+
+func (tpr *TpReader) RemoveFromDatabase(verbose, disable_reverse bool) (err error) {
+	for _, d := range tpr.destinations {
+		err = tpr.dm.DataDB().RemoveDestination(d.Id, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", d.Id, " : ", d.Prefixes)
+		}
+	}
+	if verbose {
+		log.Print("Reverse Destinations:")
+		for id, vals := range tpr.revDests {
+			log.Printf("\t %s : %+v", id, vals)
+		}
+	}
+	if verbose {
+		log.Print("Rating Plans:")
+	}
+	for _, rp := range tpr.ratingPlans {
+		err = tpr.dm.RemoveRatingPlan(rp.Id, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", rp.Id)
+		}
+	}
+	if verbose {
+		log.Print("Rating Profiles:")
+	}
+	for _, rp := range tpr.ratingProfiles {
+		err = tpr.dm.RemoveRatingProfile(rp.Id, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", rp.Id)
+		}
+	}
+	if verbose {
+		log.Print("Action Plans:")
+	}
+	for k, _ := range tpr.actionPlans {
+		err = tpr.dm.DataDB().RemoveActionPlan(k, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("Account Action Plans:")
+		for id, vals := range tpr.acntActionPlans {
+			log.Printf("\t %s : %+v", id, vals)
+		}
+	}
+	if verbose {
+		log.Print("Action Triggers:")
+	}
+	for k, _ := range tpr.actionsTriggers {
+		err = tpr.dm.RemoveActionTriggers(k, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("Shared Groups:")
+	}
+	for k, _ := range tpr.sharedGroups {
+		err = tpr.dm.RemoveSharedGroup(k, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("LCR Rules:")
+	}
+	for k, lcr := range tpr.lcrs {
+		err = tpr.dm.RemoveLCR(lcr.GetId(), utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("Actions:")
+	}
+	for k, _ := range tpr.actions {
+		err = tpr.dm.RemoveActions(k, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", k)
+		}
+	}
+	if verbose {
+		log.Print("Account Actions:")
+	}
+	for _, ub := range tpr.accountActions {
+		err = tpr.dm.DataDB().RemoveAccount(ub.ID)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Println("\t", ub.ID)
+		}
+	}
+	if verbose {
+		log.Print("Derived Chargers:")
+	}
+	for key, _ := range tpr.derivedChargers {
+		err = tpr.dm.RemoveDerivedChargers(key, utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", key)
+		}
+	}
+	if verbose {
+		log.Print("CDR Stats Queues:")
+	}
+	for _, sq := range tpr.cdrStats {
+		err = tpr.dm.RemoveCdrStatsQueue(sq.Id)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", sq.Id)
+		}
+	}
+	if verbose {
+		log.Print("Users:")
+	}
+	for _, u := range tpr.users {
+		err = tpr.dm.RemoveUser(u.GetId())
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", u.GetId())
+		}
+	}
+	if verbose {
+		log.Print("Aliases:")
+	}
+	for _, al := range tpr.aliases {
+		err = tpr.dm.DataDB().RemoveAlias(al.GetId(), utils.NonTransactional)
+		if err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", al.GetId())
+		}
+	}
+	if verbose {
+		log.Print("Reverse Aliases:")
+		for id, vals := range tpr.revAliases {
+			log.Printf("\t %s : %+v", id, vals)
+		}
+	}
+	if verbose {
+		log.Print("Filters:")
+	}
+	for _, tpTH := range tpr.filters {
+		if err = tpr.dm.RemoveFilter(tpTH.Tenant, tpTH.ID, utils.NonTransactional); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", tpTH.Tenant)
+		}
+	}
+	if verbose {
+		log.Print("ResourceProfiles:")
+	}
+	for _, tpRsp := range tpr.resProfiles {
+		if err = tpr.dm.RemoveResourceProfile(tpRsp.Tenant, tpRsp.ID, utils.NonTransactional, false); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", tpRsp.Tenant)
+		}
+	}
+	if verbose {
+		log.Print("Resources:")
+	}
+	for _, rTid := range tpr.resources {
+		if err = tpr.dm.RemoveResource(rTid.Tenant, rTid.ID, utils.NonTransactional); err != nil {
+			return
+		}
+		if verbose {
+			log.Print("\t", rTid.TenantID())
+		}
+	}
+	if verbose {
+		log.Print("StatQueueProfiles:")
+	}
+	for _, tpST := range tpr.sqProfiles {
+		if err = tpr.dm.RemoveStatQueueProfile(tpST.Tenant, tpST.ID, utils.NonTransactional, false); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", tpST.Tenant)
+		}
+	}
+	if verbose {
+		log.Print("StatQueues:")
+	}
+	for _, sqTntID := range tpr.statQueues {
+		if err = tpr.dm.RemoveStatQueue(sqTntID.Tenant, sqTntID.ID, utils.NonTransactional); err != nil {
+			return
+		}
+		if verbose {
+			log.Print("\t", sqTntID.Tenant)
+		}
+	}
+	if verbose {
+		log.Print("ThresholdProfiles:")
+	}
+	for _, tpTH := range tpr.thProfiles {
+		if err = tpr.dm.RemoveThresholdProfile(tpTH.Tenant, tpTH.ID, utils.NonTransactional, false); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", tpTH.Tenant)
+		}
+	}
+	if verbose {
+		log.Print("Thresholds:")
+	}
+	for _, thd := range tpr.thresholds {
+		if err = tpr.dm.RemoveThreshold(thd.Tenant, thd.ID, utils.NonTransactional); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", thd.Tenant)
+		}
+	}
+
+	if verbose {
+		log.Print("SupplierProfiles:")
+	}
+	for _, tpTH := range tpr.sppProfiles {
+		if err = tpr.dm.RemoveSupplierProfile(tpTH.Tenant, tpTH.ID, utils.NonTransactional, false); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", tpTH.Tenant)
+		}
+	}
+	if verbose {
+		log.Print("Timings:")
+	}
+	for _, t := range tpr.timings {
+		if err = tpr.dm.RemoveTiming(t.ID, utils.NonTransactional); err != nil {
+			return err
+		}
+		if verbose {
+			log.Print("\t", t.ID)
+		}
+	}
+	if !disable_reverse {
+		if len(tpr.destinations) > 0 {
+			if verbose {
+				log.Print("Removing reverse destinations")
+			}
+			if err = tpr.dm.DataDB().RemoveReverseForPrefix(utils.REVERSE_DESTINATION_PREFIX); err != nil {
+				return err
+			}
+		}
+		if len(tpr.acntActionPlans) > 0 {
+			if verbose {
+				log.Print("Removing account action plans")
+			}
+			if err = tpr.dm.DataDB().RemoveReverseForPrefix(utils.AccountActionPlansPrefix); err != nil {
+				return err
+			}
+		}
+		if len(tpr.aliases) > 0 {
+			if verbose {
+				log.Print("Removing reverse aliases")
+			}
+			if err = tpr.dm.DataDB().RemoveReverseForPrefix(utils.REVERSE_ALIASES_PREFIX); err != nil {
+				return err
+			}
+		}
+	}
+	return
 }

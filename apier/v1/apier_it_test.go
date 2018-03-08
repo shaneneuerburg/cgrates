@@ -77,7 +77,7 @@ func TestApierLoadConfig(t *testing.T) {
 }
 
 func TestApierCreateDirs(t *testing.T) {
-	for _, pathDir := range []string{cfg.CdreProfiles[utils.META_DEFAULT].ExportPath, "/var/log/cgrates/cdrc/in", "/var/log/cgrates/cdrc/out", cfg.HistoryDir} {
+	for _, pathDir := range []string{cfg.CdreProfiles[utils.META_DEFAULT].ExportPath, "/var/log/cgrates/cdrc/in", "/var/log/cgrates/cdrc/out"} {
 		if err := os.RemoveAll(pathDir); err != nil {
 			t.Fatal("Error removing folder: ", pathDir, err)
 		}
@@ -155,7 +155,7 @@ func TestApierTPTiming(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPTiming", new(utils.ApierTPTiming), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPTiming, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid ID Years Months MonthDays WeekDays Time]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid ID Years Months MonthDays WeekDays Time]" {
 		t.Error("Calling ApierV1.SetTPTiming got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -206,7 +206,7 @@ func TestApierTPDestination(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPDestination", new(utils.TPDestination), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPDestination, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid ID Prefixes]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid ID Prefixes]" {
 		t.Error("Calling ApierV1.SetTPDestination got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -257,7 +257,7 @@ func TestApierTPRate(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPRate", new(utils.TPRate), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPDestination, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid ID RateSlots]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid ID RateSlots]" {
 		t.Error("Calling ApierV1.SetTPRate got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -311,7 +311,7 @@ func TestApierTPDestinationRate(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPDestinationRate", new(utils.TPDestinationRate), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPDestination, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid ID DestinationRates]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid ID DestinationRates]" {
 		t.Error("Calling ApierV1.SetTPDestinationRate got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -362,7 +362,7 @@ func TestApierTPRatingPlan(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPRatingPlan", new(utils.TPRatingPlan), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPRatingPlan, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid ID RatingPlanBindings]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid ID RatingPlanBindings]" {
 		t.Error("Calling ApierV1.SetTPRatingPlan got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -414,7 +414,7 @@ func TestApierTPRatingProfile(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPRatingProfile", new(utils.TPRatingProfile), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPRatingProfile, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid LoadId Tenant Category Direction Subject RatingPlanActivations]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid LoadId Tenant Category Direction Subject RatingPlanActivations]" {
 		t.Error("Calling ApierV1.SetTPRatingProfile got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -471,7 +471,7 @@ func TestApierTPActions(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPActions", new(utils.TPActions), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPActions, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid ID Actions]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid ID Actions]" {
 		t.Error("Calling ApierV1.SetTPActions got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -521,7 +521,7 @@ func TestApierTPActionPlan(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPActionPlan", new(utils.TPActionPlan), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPActionPlan, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid ID ActionPlan]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid ID ActionPlan]" {
 		t.Error("Calling ApierV1.SetTPActionPlan got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -571,7 +571,7 @@ func TestApierTPActionTriggers(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPActionTriggers", new(utils.TPActionTriggers), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPActionTriggers, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid ID]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid ID]" {
 		t.Error("Calling ApierV1.SetTPActionTriggers got unexpected error: ", err.Error())
 	}
 	atTst.ActionTriggers[0].Id = utils.TEST_SQL
@@ -630,7 +630,7 @@ func TestApierTPAccountActions(t *testing.T) {
 	// Check missing params
 	if err := rater.Call("ApierV1.SetTPAccountActions", new(utils.TPAccountActions), &reply); err == nil {
 		t.Error("Calling ApierV1.SetTPAccountActions, expected error, received: ", reply)
-	} else if err.Error() != "MANDATORY_IE_MISSING:[TPid LoadId Tenant Account ActionPlanId ActionTriggersId]" {
+	} else if err.Error() != "MANDATORY_IE_MISSING: [TPid LoadId Tenant Account ActionPlanId ActionTriggersId]" {
 		t.Error("Calling ApierV1.SetTPAccountActions got unexpected error: ", err.Error())
 	}
 	// Test get
@@ -1101,7 +1101,10 @@ func TestApierGetAccountActionPlan(t *testing.T) {
 // Make sure we have scheduled actions
 func TestApierITGetScheduledActionsForAccount(t *testing.T) {
 	var rply []*scheduler.ScheduledAction
-	if err := rater.Call("ApierV1.GetScheduledActions", scheduler.ArgsGetScheduledActions{Tenant: utils.StringPointer("cgrates.org"), Account: utils.StringPointer("dan7")}, &rply); err != nil {
+	if err := rater.Call("ApierV1.GetScheduledActions",
+		scheduler.ArgsGetScheduledActions{
+			Tenant:  utils.StringPointer("cgrates.org"),
+			Account: utils.StringPointer("dan7")}, &rply); err != nil {
 		t.Error("Unexpected error: ", err)
 	} else if len(rply) == 0 {
 		t.Errorf("ScheduledActions: %+v", rply)
@@ -1242,7 +1245,8 @@ func TestApierComputeReverse(t *testing.T) {
 }
 
 func TestApierResetDataAfterLoadFromFolder(t *testing.T) {
-	expStats := &utils.CacheStats{Destinations: 3, Actions: 6, ActionPlans: 7, AccountActionPlans: 13, Aliases: 1} // We get partial cache info during load, maybe fix this in the future
+	expStats := &utils.CacheStats{Destinations: 3, Actions: 6, ActionPlans: 7,
+		AccountActionPlans: 13, Aliases: 1, AttributeProfiles: 1} // We get partial cache info during load, maybe fix this in the future
 	var rcvStats *utils.CacheStats
 	if err := rater.Call("ApierV1.GetCacheStats", utils.AttrCacheStats{}, &rcvStats); err != nil {
 		t.Error("Got error on ApierV1.GetCacheStats: ", err.Error())
@@ -1272,7 +1276,8 @@ func TestApierResetDataAfterLoadFromFolder(t *testing.T) {
 			rcvStats.LcrProfiles != 0 ||
 			rcvStats.Aliases != 1 ||
 			rcvStats.ReverseAliases != 2 ||
-			rcvStats.ResourceLimits != 0 {
+			rcvStats.ResourceProfiles != 3 ||
+			rcvStats.Resources != 3 {
 			t.Errorf("Expecting: %+v, received: %+v", expStats, rcvStats)
 		}
 	}
@@ -1353,16 +1358,16 @@ func TestApierMaxDebitInexistentAcnt(t *testing.T) {
 
 func TestApierCdrServer(t *testing.T) {
 	httpClient := new(http.Client)
-	cdrForm1 := url.Values{utils.ACCID: []string{"dsafdsaf"}, utils.CDRHOST: []string{"192.168.1.1"}, utils.REQTYPE: []string{utils.META_RATED}, utils.DIRECTION: []string{"*out"},
-		utils.TENANT: []string{"cgrates.org"}, utils.CATEGORY: []string{"call"}, utils.ACCOUNT: []string{"1001"}, utils.SUBJECT: []string{"1001"}, utils.DESTINATION: []string{"1002"},
-		utils.SETUP_TIME:  []string{"2013-11-07T08:42:22Z"},
-		utils.ANSWER_TIME: []string{"2013-11-07T08:42:26Z"}, utils.USAGE: []string{"10"}, "field_extr1": []string{"val_extr1"}, "fieldextr2": []string{"valextr2"}}
-	cdrForm2 := url.Values{utils.ACCID: []string{"adsafdsaf"}, utils.CDRHOST: []string{"192.168.1.1"}, utils.REQTYPE: []string{utils.META_RATED}, utils.DIRECTION: []string{"*out"},
-		utils.TENANT: []string{"cgrates.org"}, utils.CATEGORY: []string{"call"}, utils.ACCOUNT: []string{"1001"}, utils.SUBJECT: []string{"1001"}, utils.DESTINATION: []string{"1002"},
-		utils.SETUP_TIME:  []string{"2013-11-07T08:42:23Z"},
-		utils.ANSWER_TIME: []string{"2013-11-07T08:42:26Z"}, utils.USAGE: []string{"10"}, "field_extr1": []string{"val_extr1"}, "fieldextr2": []string{"valextr2"}}
+	cdrForm1 := url.Values{utils.OriginID: []string{"dsafdsaf"}, utils.OriginHost: []string{"192.168.1.1"}, utils.RequestType: []string{utils.META_RATED},
+		utils.Tenant: []string{"cgrates.org"}, utils.Category: []string{"call"}, utils.Account: []string{"1001"}, utils.Subject: []string{"1001"}, utils.Destination: []string{"1002"},
+		utils.SetupTime:  []string{"2013-11-07T08:42:22Z"},
+		utils.AnswerTime: []string{"2013-11-07T08:42:26Z"}, utils.Usage: []string{"10"}, "field_extr1": []string{"val_extr1"}, "fieldextr2": []string{"valextr2"}}
+	cdrForm2 := url.Values{utils.OriginID: []string{"adsafdsaf"}, utils.OriginHost: []string{"192.168.1.1"}, utils.RequestType: []string{utils.META_RATED},
+		utils.Tenant: []string{"cgrates.org"}, utils.Category: []string{"call"}, utils.Account: []string{"1001"}, utils.Subject: []string{"1001"}, utils.Destination: []string{"1002"},
+		utils.SetupTime:  []string{"2013-11-07T08:42:23Z"},
+		utils.AnswerTime: []string{"2013-11-07T08:42:26Z"}, utils.Usage: []string{"10"}, "field_extr1": []string{"val_extr1"}, "fieldextr2": []string{"valextr2"}}
 	for _, cdrForm := range []url.Values{cdrForm1, cdrForm2} {
-		cdrForm.Set(utils.CDRSOURCE, utils.TEST_SQL)
+		cdrForm.Set(utils.Source, utils.TEST_SQL)
 		if _, err := httpClient.PostForm(fmt.Sprintf("http://%s/cdr_http", "127.0.0.1:2080"), cdrForm); err != nil {
 			t.Error(err.Error())
 		}
@@ -1383,7 +1388,7 @@ func TestApierITGetCdrs(t *testing.T) {
 func TestApierITProcessCdr(t *testing.T) {
 	var reply string
 	cdr := engine.CDR{CGRID: utils.Sha1("dsafdsaf", time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC).String()), OrderID: 123, ToR: utils.VOICE, OriginID: "dsafdsaf",
-		OriginHost: "192.168.1.1", Source: "test", RequestType: utils.META_RATED, Direction: "*out", Tenant: "cgrates.org", Category: "call", Account: "1001", Subject: "1001",
+		OriginHost: "192.168.1.1", Source: "test", RequestType: utils.META_RATED, Tenant: "cgrates.org", Category: "call", Account: "1001", Subject: "1001",
 		Destination: "1002",
 		SetupTime:   time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC), AnswerTime: time.Date(2013, 11, 7, 8, 42, 26, 0, time.UTC), RunID: utils.DEFAULT_RUNID,
 		Usage: time.Duration(10) * time.Second, ExtraFields: map[string]string{"field_extr1": "val_extr1", "fieldextr2": "valextr2"}, Cost: 1.01,
@@ -1467,20 +1472,20 @@ func TestApierITSetDestination(t *testing.T) {
 	if err := rater.Call("ApierV1.GetDestination", attrs.Id, &rcvDestination); err != nil {
 		t.Error("Unexpected error", err.Error())
 	} else if !reflect.DeepEqual(eDestination, rcvDestination) {
-		t.Error("Expecting: %+v, received: %+v", eDestination, rcvDestination)
+		t.Errorf("Expecting: %+v, received: %+v", eDestination, rcvDestination)
 	}
 	eRcvIDs := []string{attrs.Id}
 	var rcvIDs []string
 	if err := rater.Call("ApierV1.GetReverseDestination", attrs.Prefixes[0], &rcvIDs); err != nil {
 		t.Error("Unexpected error", err.Error())
 	} else if !reflect.DeepEqual(eRcvIDs, rcvIDs) {
-		t.Error("Expecting: %+v, received: %+v", eRcvIDs, rcvIDs)
+		t.Errorf("Expecting: %+v, received: %+v", eRcvIDs, rcvIDs)
 	}
 }
 
 func TestApierITGetAliases(t *testing.T) {
 	var alias engine.Alias
-	if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.ALIAS_CONTEXT_RATING, Direction: "*out",
+	if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.MetaRating, Direction: "*out",
 		Tenant: "cgrates.org", Category: "call", Account: "2001", Subject: "2001"}, &alias); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Error(err)
 	}
@@ -1503,7 +1508,7 @@ func TestApierITAddRatingSubjectAliases(t *testing.T) {
 	}
 	var alias engine.Alias
 	for _, als := range addRtSubjAliases.Aliases {
-		if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.ALIAS_CONTEXT_RATING, Direction: "*out",
+		if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.MetaRating, Direction: "*out",
 			Tenant: addRtSubjAliases.Tenant, Category: addRtSubjAliases.Category,
 			Account: als, Subject: als}, &alias); err != nil {
 			t.Error("Unexpected error", err.Error())
@@ -1521,7 +1526,7 @@ func TestApierITRemRatingSubjectAliases(t *testing.T) {
 	}
 	var alias engine.Alias
 	//al.Direction, al.Tenant, al.Category, al.Account, al.Subject, al.Group
-	if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.ALIAS_CONTEXT_RATING, Direction: "*out",
+	if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.MetaRating, Direction: "*out",
 		Tenant: "cgrates.org", Category: "call", Account: "2001", Subject: "2001"}, &alias); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Errorf("Unexpected error %v, alias: %+v, values: %+v", err, alias, alias.Values[0])
 	}
@@ -1537,7 +1542,7 @@ func TestApierITAddAccountAliases(t *testing.T) {
 	}
 	var alias engine.Alias
 	for _, als := range addAcntAliases.Aliases {
-		if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.ALIAS_CONTEXT_RATING, Direction: "*out", Tenant: addAcntAliases.Tenant, Category: addAcntAliases.Category,
+		if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.MetaRating, Direction: "*out", Tenant: addAcntAliases.Tenant, Category: addAcntAliases.Category,
 			Account: als, Subject: als}, &alias); err != nil {
 			t.Error("Unexpected error", err.Error())
 		}
@@ -1554,7 +1559,7 @@ func TestApierITRemAccountAliases(t *testing.T) {
 	}
 	var alias engine.Alias
 	//al.Direction, al.Tenant, al.Category, al.Account, al.Subject, al.Group
-	if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.ALIAS_CONTEXT_RATING, Direction: "*out", Tenant: "cgrates.org", Category: "call", Account: "2001", Subject: "2001"}, &alias); err == nil || err.Error() != utils.ErrNotFound.Error() {
+	if err := rater.Call("AliasesV1.GetAlias", engine.Alias{Context: utils.MetaRating, Direction: "*out", Tenant: "cgrates.org", Category: "call", Account: "2001", Subject: "2001"}, &alias); err == nil || err.Error() != utils.ErrNotFound.Error() {
 		t.Errorf("Unexpected error %v, alias: %+v", err, alias)
 	}
 }
@@ -1567,12 +1572,24 @@ func TestApierITGetScheduledActions(t *testing.T) {
 }
 
 func TestApierITGetDataCost(t *testing.T) {
-	attrs := AttrGetDataCost{Direction: "*out", Category: "data", Tenant: "cgrates.org", Account: "1001", Subject: "1001", StartTime: time.Now(), Usage: 640113}
+	attrs := AttrGetDataCost{Category: "data", Tenant: "cgrates.org",
+		Subject: "1001", AnswerTime: time.Now(), Usage: 640113}
 	var rply *engine.DataCost
 	if err := rater.Call("ApierV1.GetDataCost", attrs, &rply); err != nil {
 		t.Error("Unexpected nil error received: ", err.Error())
 	} else if rply.Cost != 128.0240 {
 		t.Errorf("Unexpected cost received: %f", rply.Cost)
+	}
+}
+
+func TestApierITGetCost(t *testing.T) {
+	attrs := AttrGetCost{Category: "data", Tenant: "cgrates.org",
+		Subject: "1001", AnswerTime: time.Now(), Usage: "640113"}
+	var rply *engine.EventCost
+	if err := rater.Call("ApierV1.GetCost", attrs, &rply); err != nil {
+		t.Error("Unexpected nil error received: ", err.Error())
+	} else if *rply.Cost != 128.0240 {
+		t.Errorf("Unexpected cost received: %f", *rply.Cost)
 	}
 }
 
@@ -1784,7 +1801,24 @@ func TestApierReplayFailedPosts(t *testing.T) {
 			t.Errorf("Error %s removing folder: %s", err, dir)
 		}
 	}
+}
 
+func TestApierGetDataDBVesions(t *testing.T) {
+	var reply *engine.Versions
+	if err := rater.Call("ApierV1.GetDataDBVersions", "", &reply); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(engine.CurrentDataDBVersions(), *reply) {
+		t.Errorf("Expecting : %+v, received: %+v", engine.CurrentDataDBVersions(), *reply)
+	}
+}
+
+func TestApierGetStorDBVesions(t *testing.T) {
+	var reply *engine.Versions
+	if err := rater.Call("ApierV1.GetStorDBVersions", "", &reply); err != nil {
+		t.Error(err)
+	} else if !reflect.DeepEqual(engine.CurrentStorDBVersions(), *reply) {
+		t.Errorf("Expecting : %+v, received: %+v", engine.CurrentStorDBVersions(), *reply)
+	}
 }
 
 // Simply kill the engine after we are done with tests within this file

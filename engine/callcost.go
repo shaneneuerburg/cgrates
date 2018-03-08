@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -68,7 +69,7 @@ func (cc *CallCost) UpdateRatedUsage() time.Duration {
 		return 0
 	}
 	totalDuration := cc.GetDuration()
-	cc.RatedUsage = totalDuration.Seconds()
+	cc.RatedUsage = float64(totalDuration.Nanoseconds())
 	return totalDuration
 }
 
@@ -120,15 +121,15 @@ func (cc *CallCost) ToDataCost() (*DataCost, error) {
 	}
 	dc.DataSpans = make([]*DataSpan, len(cc.Timespans))
 	for i, ts := range cc.Timespans {
-		length := ts.TimeEnd.Sub(ts.TimeStart).Seconds()
-		callDuration := ts.DurationIndex.Seconds()
+		length := ts.TimeEnd.Sub(ts.TimeStart).Nanoseconds()
+		callDuration := ts.DurationIndex.Nanoseconds()
 		dc.DataSpans[i] = &DataSpan{
-			DataStart:      callDuration - length,
-			DataEnd:        callDuration,
+			DataStart:      float64(callDuration - length),
+			DataEnd:        float64(callDuration),
 			Cost:           ts.Cost,
 			ratingInfo:     ts.ratingInfo,
 			RateInterval:   ts.RateInterval,
-			DataIndex:      callDuration,
+			DataIndex:      float64(callDuration),
 			MatchedSubject: ts.MatchedSubject,
 			MatchedPrefix:  ts.MatchedPrefix,
 			MatchedDestId:  ts.MatchedDestId,
@@ -137,7 +138,7 @@ func (cc *CallCost) ToDataCost() (*DataCost, error) {
 		dc.DataSpans[i].Increments = make([]*DataIncrement, len(ts.Increments))
 		for j, incr := range ts.Increments {
 			dc.DataSpans[i].Increments[j] = &DataIncrement{
-				Amount:         incr.Duration.Seconds(),
+				Amount:         float64(incr.Duration.Nanoseconds()),
 				Cost:           incr.Cost,
 				BalanceInfo:    incr.BalanceInfo,
 				CompressFactor: incr.CompressFactor,
@@ -238,7 +239,7 @@ func (cc *CallCost) MatchCCFilter(bf *BalanceFilter) bool {
 	foundMatchingDestID := false
 	if bf.DestinationIDs != nil && cc.Destination != "" {
 		for _, p := range utils.SplitPrefix(cc.Destination, MIN_PREFIX_MATCH) {
-			if destIDs, err := dataStorage.GetReverseDestination(p, false, utils.NonTransactional); err == nil {
+			if destIDs, err := dm.DataDB().GetReverseDestination(p, false, utils.NonTransactional); err == nil {
 				for _, dID := range destIDs {
 					if _, ok := (*bf.DestinationIDs)[dID]; ok {
 						foundMatchingDestID = true

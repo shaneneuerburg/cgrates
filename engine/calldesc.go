@@ -15,18 +15,16 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
 	"errors"
 	"fmt"
-	"log"
-
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
@@ -42,33 +40,24 @@ const (
 )
 
 func init() {
-	var err error
+	var data DataDB
 	switch DB {
 	case "map":
 		if cgrCfg := config.CgrConfig(); cgrCfg == nil {
 			cgrCfg, _ = config.NewDefaultCGRConfig()
 			config.SetCgrConfig(cgrCfg)
 		}
-		dataStorage, _ = NewMapStorage()
-	case utils.MONGO:
-		dataStorage, err = NewMongoStorage("127.0.0.1", "27017", "cgrates_data_test", "", "", utils.DataDB, nil, &config.CacheConfig{RatingPlans: &config.CacheParamConfig{Precache: true}}, 10)
-		if err != nil {
-			log.Fatal(err)
-		}
-	case utils.REDIS:
-		dataStorage, _ = NewRedisStorage("127.0.0.1:6379", 12, "", utils.MSGPACK, utils.REDIS_MAX_CONNS, &config.CacheConfig{RatingPlans: &config.CacheParamConfig{Precache: true}}, 10)
-		if err != nil {
-			log.Fatal(err)
-		}
+		data, _ = NewMapStorage()
 	}
+	dm = NewDataManager(data)
 }
 
 var (
-	dataStorage              DataDB
+	dm                       *DataManager
 	cdrStorage               CdrStorage
 	debitPeriod              = 10 * time.Second
 	globalRoundingDecimals   = 6
-	historyScribe            rpcclient.RpcClientConnection
+	thresholdS               rpcclient.RpcClientConnection // used by RALs to communicate with ThresholdS
 	pubSubServer             rpcclient.RpcClientConnection
 	userService              rpcclient.RpcClientConnection
 	aliasService             rpcclient.RpcClientConnection
@@ -77,8 +66,12 @@ var (
 )
 
 // Exported method to set the storage getter.
-func SetDataStorage(sg DataDB) {
-	dataStorage = sg
+func SetDataStorage(dm2 *DataManager) {
+	dm = dm2
+}
+
+func SetThresholdS(thdS rpcclient.RpcClientConnection) {
+	thresholdS = thdS
 }
 
 // Sets the global rounding method and decimal precision for GetCost method
@@ -99,11 +92,6 @@ Sets the database for CDR storing, used by *cdrlog in first place
 */
 func SetCdrStorage(cStorage CdrStorage) {
 	cdrStorage = cStorage
-}
-
-// Exported method to set the history scribe.
-func SetHistoryScribe(scribe rpcclient.RpcClientConnection) {
-	historyScribe = scribe
 }
 
 func SetPubSub(ps rpcclient.RpcClientConnection) {
@@ -154,6 +142,79 @@ type CallDescriptor struct {
 	testCallcost        *CallCost // testing purpose only!
 }
 
+// AsCGREvent converts the CallDescriptor into CGREvent
+func (cd *CallDescriptor) AsCGREvent() *utils.CGREvent {
+	cgrEv := &utils.CGREvent{
+		Tenant:  cd.Tenant,
+		ID:      utils.UUIDSha1Prefix(), // make it unique
+		Context: utils.StringPointer(utils.MetaRating),
+		Event:   make(map[string]interface{}),
+	}
+	for k, v := range cd.ExtraFields {
+		cgrEv.Event[k] = v
+	}
+	cgrEv.Event[utils.TOR] = cd.TOR
+	cgrEv.Event[utils.Tenant] = cd.Tenant
+	cgrEv.Event[utils.Category] = cd.Category
+	cgrEv.Event[utils.Account] = cd.Account
+	cgrEv.Event[utils.Subject] = cd.Subject
+	cgrEv.Event[utils.Destination] = cd.Destination
+	cgrEv.Event[utils.AnswerTime] = cd.TimeStart
+	cgrEv.Event[utils.Usage] = cd.TimeEnd.Sub(cd.TimeStart)
+	return cgrEv
+}
+
+// UpdateFromCGREvent will update CallDescriptor with fields from CGREvent
+// cgrEv contains both fields and their values
+// fields represent fields needing update
+func (cd *CallDescriptor) UpdateFromCGREvent(cgrEv *utils.CGREvent, fields []string) (err error) {
+	for _, fldName := range fields {
+		switch fldName {
+		case utils.TOR:
+			if cd.TOR, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Tenant:
+			if cd.Tenant, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Category:
+			if cd.Category, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Account:
+			if cd.Account, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Subject:
+			if cd.Subject, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.Destination:
+			if cd.Destination, err = cgrEv.FieldAsString(fldName); err != nil {
+				return
+			}
+		case utils.AnswerTime:
+			if cd.TimeStart, err = cgrEv.FieldAsTime(fldName, config.CgrConfig().DefaultTimezone); err != nil {
+				return
+			}
+		case utils.Usage:
+			usage, err := cgrEv.FieldAsDuration(fldName)
+			if err != nil {
+				return err
+			}
+			cd.TimeEnd = cd.TimeStart.Add(usage)
+		default:
+			fldVal, err := cgrEv.FieldAsString(fldName)
+			if err != nil {
+				return err
+			}
+			cd.ExtraFields[fldName] = fldVal
+		}
+	}
+	return
+}
+
 func (cd *CallDescriptor) ValidateCallData() error {
 	if cd.TimeStart.After(cd.TimeEnd) || cd.TimeStart.Equal(cd.TimeEnd) {
 		return errors.New("TimeStart must be strctly before TimeEnd")
@@ -172,7 +233,7 @@ func (cd *CallDescriptor) AddRatingInfo(ris ...*RatingInfo) {
 // Gets and caches the user balance information.
 func (cd *CallDescriptor) getAccount() (ub *Account, err error) {
 	if cd.account == nil {
-		cd.account, err = dataStorage.GetAccount(cd.GetAccountKey())
+		cd.account, err = dm.DataDB().GetAccount(cd.GetAccountKey())
 	}
 	if cd.account != nil && cd.account.Disabled {
 		return nil, utils.ErrAccountDisabled
@@ -494,7 +555,6 @@ func (cd *CallDescriptor) GetCost() (*CallCost, error) {
 }
 
 func (cd *CallDescriptor) getCost() (*CallCost, error) {
-
 	// check for 0 duration
 	if cd.GetDuration() == 0 {
 		cc := cd.CreateCallCost()
@@ -592,7 +652,7 @@ func (origCD *CallDescriptor) getMaxSessionDuration(origAcc *Account) (time.Dura
 	for _, ts := range cc.Timespans {
 		if cd.MaxRate > 0 && cd.MaxRateUnit > 0 {
 			rate, _, rateUnit := ts.RateInterval.GetRateParameters(ts.GetGroupStart())
-			if rate/rateUnit.Seconds() > cd.MaxRate/cd.MaxRateUnit.Seconds() {
+			if rate/float64(rateUnit.Nanoseconds()) > cd.MaxRate/float64(cd.MaxRateUnit.Nanoseconds()) {
 				return utils.MinDuration(initialDuration, totalDuration), nil
 			}
 		}
@@ -678,7 +738,7 @@ func (cd *CallDescriptor) debit(account *Account, dryRun bool, goNegative bool) 
 	cc.UpdateRatedUsage()
 	cc.Timespans.Compress()
 	if !dryRun {
-		dataStorage.SetAccount(account)
+		dm.DataDB().SetAccount(account)
 	}
 	if cd.PerformRounding {
 		cc.Round()
@@ -798,11 +858,11 @@ func (cd *CallDescriptor) refundIncrements() (err error) {
 	for _, increment := range cd.Increments {
 		account, found := accountsCache[increment.BalanceInfo.AccountID]
 		if !found {
-			if acc, err := dataStorage.GetAccount(increment.BalanceInfo.AccountID); err == nil && acc != nil {
+			if acc, err := dm.DataDB().GetAccount(increment.BalanceInfo.AccountID); err == nil && acc != nil {
 				account = acc
 				accountsCache[increment.BalanceInfo.AccountID] = account
 				// will save the account only once at the end of the function
-				defer dataStorage.SetAccount(account)
+				defer dm.DataDB().SetAccount(account)
 			}
 		}
 		if account == nil {
@@ -817,8 +877,8 @@ func (cd *CallDescriptor) refundIncrements() (err error) {
 			if balance = account.BalanceMap[unitType].GetBalance(increment.BalanceInfo.Unit.UUID); balance == nil {
 				return
 			}
-			balance.AddValue(increment.Duration.Seconds())
-			account.countUnits(-increment.Duration.Seconds(), unitType, cc, balance)
+			balance.AddValue(float64(increment.Duration.Nanoseconds()))
+			account.countUnits(-float64(increment.Duration.Nanoseconds()), unitType, cc, balance)
 		}
 		// check money too
 		if increment.BalanceInfo.Monetary != nil && increment.BalanceInfo.Monetary.UUID != "" {
@@ -860,11 +920,11 @@ func (cd *CallDescriptor) refundRounding() (err error) {
 	for _, increment := range cd.Increments {
 		account, found := accountsCache[increment.BalanceInfo.AccountID]
 		if !found {
-			if acc, err := dataStorage.GetAccount(increment.BalanceInfo.AccountID); err == nil && acc != nil {
+			if acc, err := dm.DataDB().GetAccount(increment.BalanceInfo.AccountID); err == nil && acc != nil {
 				account = acc
 				accountsCache[increment.BalanceInfo.AccountID] = account
 				// will save the account only once at the end of the function
-				defer dataStorage.SetAccount(account)
+				defer dm.DataDB().SetAccount(account)
 			}
 		}
 		if account == nil {
@@ -956,7 +1016,7 @@ func (cd *CallDescriptor) GetLCRFromStorage() (*LCR, error) {
 		keyVariants = append(keyVariants[:1], append(partialSubjects, keyVariants[1:]...)...)
 	}
 	for _, key := range keyVariants {
-		if lcr, err := dataStorage.GetLCR(key, false, utils.NonTransactional); err != nil && err != utils.ErrNotFound {
+		if lcr, err := dm.GetLCR(key, false, utils.NonTransactional); err != nil && err != utils.ErrNotFound {
 			return nil, err
 		} else if err == nil && lcr != nil {
 			return lcr, nil
@@ -999,7 +1059,7 @@ func (cd *CallDescriptor) GetLCR(stats rpcclient.RpcClientConnection, lcrFltr *L
 			fullSupplier := utils.ConcatenatedKey(lcrCD.Direction, lcrCD.Tenant, lcrCD.Category, lcrCD.Subject)
 			var cc *CallCost
 			var err error
-			if cd.account, err = dataStorage.GetAccount(lcrCD.GetAccountKey()); err == nil {
+			if cd.account, err = dm.DataDB().GetAccount(lcrCD.GetAccountKey()); err == nil {
 				if cd.account.Disabled {
 					lcrCost.SupplierCosts = append(lcrCost.SupplierCosts, &LCRSupplierCost{
 						Supplier: fullSupplier,
@@ -1032,21 +1092,20 @@ func (cd *CallDescriptor) GetLCR(stats rpcclient.RpcClientConnection, lcrFltr *L
 			category = lcr.Category
 		}
 		ratingProfileSearchKey := utils.ConcatenatedKey(lcr.Direction, lcr.Tenant, lcrCost.Entry.RPCategory)
-		searchKey := utils.RATING_PROFILE_PREFIX + ratingProfileSearchKey
-		suppliers := cache.GetEntryKeys(searchKey)
+		suppliers := Cache.GetItemIDs(utils.CacheRatingProfiles, ratingProfileSearchKey)
 		if len(suppliers) == 0 { // Most probably the data was not cached, do it here, #ToDo: move logic in RAL service
-			suppliers, err = dataStorage.GetKeysForPrefix(searchKey)
+			suppliers, err = dm.DataDB().GetKeysForPrefix(utils.RATING_PROFILE_PREFIX + ratingProfileSearchKey)
 			if err != nil {
 				return nil, err
 			}
 			transID := utils.GenUUID()
 			for _, dbKey := range suppliers {
-				if _, err := dataStorage.GetRatingProfile(dbKey[len(utils.RATING_PROFILE_PREFIX):], true, transID); err != nil { // cache the keys here
-					cache.RollbackTransaction(transID)
+				if _, err := dm.GetRatingProfile(dbKey[len(utils.RATING_PROFILE_PREFIX):], true, transID); err != nil { // cache the keys here
+					Cache.RollbackTransaction(transID)
 					return nil, err
 				}
 			}
-			cache.CommitTransaction(transID)
+			Cache.CommitTransaction(transID)
 		}
 		for _, supplier := range suppliers {
 			split := strings.Split(supplier, ":")
@@ -1090,21 +1149,21 @@ func (cd *CallDescriptor) GetLCR(stats rpcclient.RpcClientConnection, lcrFltr *L
 				} else if rpf != nil {
 					rpf.RatingPlanActivations.Sort()
 					activeRas := rpf.RatingPlanActivations.GetActiveForCall(cd)
-					var cdrStatsQueueIds []string
+					var cdrCDRStatsQueueIds []string
 					for _, ra := range activeRas {
 						for _, qId := range ra.CdrStatQueueIds {
 							if qId != "" {
-								cdrStatsQueueIds = append(cdrStatsQueueIds, qId)
+								cdrCDRStatsQueueIds = append(cdrCDRStatsQueueIds, qId)
 							}
 						}
 					}
 
 					statsErr := false
-					var supplierQueues []*StatsQueue
-					for _, qId := range cdrStatsQueueIds {
+					var supplierQueues []*CDRStatsQueue
+					for _, qId := range cdrCDRStatsQueueIds {
 						if lcrCost.Entry.Strategy == LCR_STRATEGY_LOAD {
-							for _, qId := range cdrStatsQueueIds {
-								sq := &StatsQueue{}
+							for _, qId := range cdrCDRStatsQueueIds {
+								sq := &CDRStatsQueue{}
 								if err := stats.Call("CDRStatsV1.GetQueue", qId, sq); err == nil {
 									if sq.conf.QueueLength == 0 { //only add qeues that don't have fixed length
 										supplierQueues = append(supplierQueues, sq)
@@ -1244,7 +1303,7 @@ func (cd *CallDescriptor) GetLCR(stats rpcclient.RpcClientConnection, lcrFltr *L
 
 			var cc *CallCost
 			var err error
-			if cd.account, err = dataStorage.GetAccount(lcrCD.GetAccountKey()); err == nil {
+			if cd.account, err = dm.DataDB().GetAccount(lcrCD.GetAccountKey()); err == nil {
 				if cd.account.Disabled {
 					lcrCost.SupplierCosts = append(lcrCost.SupplierCosts, &LCRSupplierCost{
 						Supplier: fullSupplier,

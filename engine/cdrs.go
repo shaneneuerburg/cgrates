@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -25,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/guardian"
 	"github.com/cgrates/cgrates/utils"
@@ -50,7 +50,7 @@ func cgrCdrHandler(w http.ResponseWriter, r *http.Request) {
 		utils.Logger.Err(fmt.Sprintf("<CDRS> Could not create CDR entry: %s", err.Error()))
 		return
 	}
-	if err := cdrServer.processCdr(cgrCdr.AsStoredCdr(cdrServer.cgrCfg.DefaultTimezone)); err != nil {
+	if err := cdrServer.processCdr(cgrCdr.AsCDR(cdrServer.cgrCfg.DefaultTimezone)); err != nil {
 		utils.Logger.Err(fmt.Sprintf("<CDRS> Errors when storing CDR entry: %s", err.Error()))
 	}
 }
@@ -63,43 +63,57 @@ func fsCdrHandler(w http.ResponseWriter, r *http.Request) {
 		utils.Logger.Err(fmt.Sprintf("<CDRS> Could not create CDR entry: %s", err.Error()))
 		return
 	}
-	if err := cdrServer.processCdr(fsCdr.AsStoredCdr(cdrServer.Timezone())); err != nil {
+	if err := cdrServer.processCdr(fsCdr.AsCDR(cdrServer.Timezone())); err != nil {
 		utils.Logger.Err(fmt.Sprintf("<CDRS> Errors when storing CDR entry: %s", err.Error()))
 	}
 }
 
-func NewCdrServer(cgrCfg *config.CGRConfig, cdrDb CdrStorage, dataDB DataDB, rater, pubsub, users, aliases, stats rpcclient.RpcClientConnection) (*CdrServer, error) {
-	if rater == nil || reflect.ValueOf(rater).IsNil() { // Work around so we store actual nil instead of nil interface value, faster to check here than in CdrServer code
+func NewCdrServer(cgrCfg *config.CGRConfig, cdrDb CdrStorage, dm *DataManager, rater, pubsub,
+	attrs, users, aliases, cdrstats, thdS, stats rpcclient.RpcClientConnection) (*CdrServer, error) {
+	if rater != nil && reflect.ValueOf(rater).IsNil() { // Work around so we store actual nil instead of nil interface value, faster to check here than in CdrServer code
 		rater = nil
 	}
-	if pubsub == nil || reflect.ValueOf(pubsub).IsNil() {
+	if pubsub != nil && reflect.ValueOf(pubsub).IsNil() {
 		pubsub = nil
 	}
-	if users == nil || reflect.ValueOf(users).IsNil() {
+	if attrs != nil && reflect.ValueOf(attrs).IsNil() {
+		attrs = nil
+	}
+	if users != nil && reflect.ValueOf(users).IsNil() {
 		users = nil
 	}
-	if aliases == nil || reflect.ValueOf(aliases).IsNil() {
+	if aliases != nil && reflect.ValueOf(aliases).IsNil() {
 		aliases = nil
 	}
-	if stats == nil || reflect.ValueOf(stats).IsNil() {
+	if cdrstats != nil && reflect.ValueOf(cdrstats).IsNil() {
+		cdrstats = nil
+	}
+	if thdS != nil && reflect.ValueOf(thdS).IsNil() {
+		thdS = nil
+	}
+	if stats != nil && reflect.ValueOf(stats).IsNil() {
 		stats = nil
 	}
-	return &CdrServer{cgrCfg: cgrCfg, cdrDb: cdrDb, dataDB: dataDB,
-		rals: rater, pubsub: pubsub, users: users, aliases: aliases, stats: stats, guard: guardian.Guardian,
+	return &CdrServer{cgrCfg: cgrCfg, cdrDb: cdrDb, dm: dm,
+		rals: rater, pubsub: pubsub, users: users, aliases: aliases,
+		cdrstats: cdrstats, stats: stats, thdS: thdS, guard: guardian.Guardian,
 		httpPoster: utils.NewHTTPPoster(cgrCfg.HttpSkipTlsVerify, cgrCfg.ReplyTimeout)}, nil
 }
 
 type CdrServer struct {
 	cgrCfg        *config.CGRConfig
 	cdrDb         CdrStorage
-	dataDB        DataDB
+	dm            *DataManager
 	rals          rpcclient.RpcClientConnection
 	pubsub        rpcclient.RpcClientConnection
+	attrS         rpcclient.RpcClientConnection
 	users         rpcclient.RpcClientConnection
 	aliases       rpcclient.RpcClientConnection
+	cdrstats      rpcclient.RpcClientConnection
+	thdS          rpcclient.RpcClientConnection
 	stats         rpcclient.RpcClientConnection
 	guard         *guardian.GuardianLock
-	responseCache *cache.ResponseCache
+	responseCache *utils.ResponseCache
 	httpPoster    *utils.HTTPPoster // used for replication
 }
 
@@ -107,13 +121,13 @@ func (self *CdrServer) Timezone() string {
 	return self.cgrCfg.DefaultTimezone
 }
 func (self *CdrServer) SetTimeToLive(timeToLive time.Duration, out *int) error {
-	self.responseCache = cache.NewResponseCache(timeToLive)
+	self.responseCache = utils.NewResponseCache(timeToLive)
 	return nil
 }
 
-func (self *CdrServer) getCache() *cache.ResponseCache {
+func (self *CdrServer) getCache() *utils.ResponseCache {
 	if self.responseCache == nil {
-		self.responseCache = cache.NewResponseCache(0)
+		self.responseCache = utils.NewResponseCache(0)
 	}
 	return self.responseCache
 }
@@ -155,9 +169,6 @@ func (self *CdrServer) storeSMCost(smCost *SMCost, checkDuplicate bool) error {
 
 // Returns error if not able to properly store the CDR, mediation is async since we can always recover offline
 func (self *CdrServer) processCdr(cdr *CDR) (err error) {
-	if cdr.Direction == "" {
-		cdr.Direction = utils.OUT
-	}
 	if cdr.RequestType == "" {
 		cdr.RequestType = self.cgrCfg.DefaultReqType
 	}
@@ -186,22 +197,37 @@ func (self *CdrServer) processCdr(cdr *CDR) (err error) {
 			return err // Error is propagated back and we don't continue processing the CDR if we cannot store it
 		}
 	}
+	if self.thdS != nil {
+		var hits int
+		thEv := &ArgsProcessEvent{
+			CGREvent: *cdr.AsCGREvent()}
+		if err := self.thdS.Call(utils.ThresholdSv1ProcessEvent, thEv, &hits); err != nil &&
+			err.Error() != utils.ErrNotFound.Error() {
+			utils.Logger.Warning(
+				fmt.Sprintf("<CDRS> error: %s processing CDR event %+v with thdS.", err.Error(), thEv))
+		}
+	}
 	// Attach raw CDR to stats
-	if self.stats != nil { // Send raw CDR to stats
+	if self.cdrstats != nil { // Send raw CDR to stats
 		var out int
-		go self.stats.Call("CDRStatsV1.AppendCDR", cdr, &out)
+		go self.cdrstats.Call("CDRStatsV1.AppendCDR", cdr, &out)
+	}
+	if self.stats != nil {
+		var reply string
+		go self.stats.Call(utils.StatSv1ProcessEvent, cdr.AsCGREvent(), &reply)
 	}
 	if len(self.cgrCfg.CDRSOnlineCDRExports) != 0 { // Replicate raw CDR
 		self.replicateCDRs([]*CDR{cdr})
 	}
 	if self.rals != nil && !cdr.Rated { // CDRs not rated will be processed by Rating
-		go self.deriveRateStoreStatsReplicate(cdr, self.cgrCfg.CDRSStoreCdrs, self.stats != nil, len(self.cgrCfg.CDRSOnlineCDRExports) != 0)
+		go self.deriveRateStoreStatsReplicate(cdr, self.cgrCfg.CDRSStoreCdrs,
+			true, len(self.cgrCfg.CDRSOnlineCDRExports) != 0)
 	}
 	return nil
 }
 
 // Returns error if not able to properly store the CDR, mediation is async since we can always recover offline
-func (self *CdrServer) deriveRateStoreStatsReplicate(cdr *CDR, store, stats, replicate bool) error {
+func (self *CdrServer) deriveRateStoreStatsReplicate(cdr *CDR, store, cdrstats, replicate bool) (err error) {
 	cdrRuns, err := self.deriveCdrs(cdr)
 	if err != nil {
 		utils.Logger.Err(fmt.Sprintf("<CDRS> Deriving CDR %+v, got error: %s", cdr, err.Error()))
@@ -209,18 +235,32 @@ func (self *CdrServer) deriveRateStoreStatsReplicate(cdr *CDR, store, stats, rep
 	}
 	var ratedCDRs []*CDR // Gather all CDRs received from rating subsystem
 	for _, cdrRun := range cdrRuns {
+		if self.attrS != nil {
+			var rplyEv AttrSProcessEventReply
+			cgrEv := cdrRun.AsCGREvent()
+			cgrEv.Context = utils.StringPointer(utils.MetaCDRs)
+			if err = self.attrS.Call(utils.AttributeSv1ProcessEvent,
+				cgrEv, &rplyEv); err == nil {
+				if err = cdrRun.UpdateFromCGREvent(rplyEv.CGREvent,
+					rplyEv.AlteredFields); err != nil {
+					return
+				}
+			} else if err.Error() != utils.ErrNotFound.Error() {
+				return
+			}
+		}
 		if err := LoadUserProfile(cdrRun, utils.EXTRA_FIELDS); err != nil {
 			utils.Logger.Err(fmt.Sprintf("<CDRS> UserS handling for CDR %+v, got error: %s", cdrRun, err.Error()))
 			continue
 		}
 		if err := LoadAlias(&AttrMatchingAlias{
 			Destination: cdrRun.Destination,
-			Direction:   cdrRun.Direction,
+			Direction:   utils.OUT,
 			Tenant:      cdrRun.Tenant,
 			Category:    cdrRun.Category,
 			Account:     cdrRun.Account,
 			Subject:     cdrRun.Subject,
-			Context:     utils.ALIAS_CONTEXT_RATING,
+			Context:     utils.MetaRating,
 		}, cdrRun, utils.EXTRA_FIELDS); err != nil && err != utils.ErrNotFound {
 			utils.Logger.Err(fmt.Sprintf("<CDRS> Aliasing CDR %+v, got error: %s", cdrRun, err.Error()))
 			continue
@@ -242,27 +282,13 @@ func (self *CdrServer) deriveRateStoreStatsReplicate(cdr *CDR, store, stats, rep
 			}
 		}
 	}
-	// Store AccountSummary if requested
-	if self.cgrCfg.CDRScdrAccountSummary {
-		for _, ratedCDR := range ratedCDRs {
-			if utils.IsSliceMember([]string{utils.META_PREPAID, utils.PREPAID, utils.META_PSEUDOPREPAID, utils.PSEUDOPREPAID,
-				utils.META_POSTPAID, utils.POSTPAID}, ratedCDR.RequestType) {
-				acntID := utils.ConcatenatedKey(ratedCDR.Tenant, ratedCDR.Account)
-				acnt, err := self.dataDB.GetAccount(acntID)
-				if err != nil {
-					utils.Logger.Err(fmt.Sprintf("<CDRS> Querying AccountDigest for account: %s got error: %s", acntID, err.Error()))
-				} else if acnt.ID != "" {
-					ratedCDR.AccountSummary = acnt.AsAccountSummary()
-				}
-			}
-		}
-	}
 	// Store rated CDRs
 	if store {
 		for _, ratedCDR := range ratedCDRs {
 			if ratedCDR.CostDetails != nil {
 				ratedCDR.CostDetails.UpdateCost()
 				ratedCDR.CostDetails.UpdateRatedUsage()
+				ratedCDR.CostDetails.Timespans.Compress()
 			}
 			if err := self.cdrDb.SetCDR(ratedCDR, true); err != nil {
 				utils.Logger.Err(fmt.Sprintf("<CDRS> Storing rated CDR %+v, got error: %s", ratedCDR, err.Error()))
@@ -270,11 +296,17 @@ func (self *CdrServer) deriveRateStoreStatsReplicate(cdr *CDR, store, stats, rep
 		}
 	}
 	// Attach CDR to stats
-	if stats { // Send CDR to stats
+	if cdrstats { // Send CDR to stats
 		for _, ratedCDR := range ratedCDRs {
-			var out int
-			if err := self.stats.Call("CDRStatsV1.AppendCDR", ratedCDR, &out); err != nil {
-				utils.Logger.Err(fmt.Sprintf("<CDRS> Could not send CDR to stats: %s", err.Error()))
+			if self.cdrstats != nil {
+				var out int
+				if err := self.cdrstats.Call("CDRStatsV1.AppendCDR", ratedCDR, &out); err != nil {
+					utils.Logger.Err(fmt.Sprintf("<CDRS> Could not send CDR to cdrstats: %s", err.Error()))
+				}
+			}
+			if self.stats != nil {
+				var reply string
+				go self.stats.Call(utils.StatSv1ProcessEvent, ratedCDR.AsCGREvent(), &reply)
 			}
 		}
 	}
@@ -284,28 +316,39 @@ func (self *CdrServer) deriveRateStoreStatsReplicate(cdr *CDR, store, stats, rep
 	return nil
 }
 
-func (self *CdrServer) deriveCdrs(cdr *CDR) ([]*CDR, error) {
+func (self *CdrServer) deriveCdrs(cdr *CDR) (drvdCDRs []*CDR, err error) {
 	dfltCDRRun := cdr.Clone()
 	cdrRuns := []*CDR{dfltCDRRun}
 	if cdr.RunID != utils.MetaRaw { // Only derive *raw CDRs
 		return cdrRuns, nil
 	}
 	dfltCDRRun.RunID = utils.META_DEFAULT // Rewrite *raw with *default since we have it as first run
+	if self.attrS != nil {
+		var rplyEv AttrSProcessEventReply
+		if err = self.attrS.Call(utils.AttributeSv1ProcessEvent,
+			cdr.AsCGREvent(), &rplyEv); err != nil {
+			return
+		}
+		if err = cdr.UpdateFromCGREvent(rplyEv.CGREvent,
+			rplyEv.AlteredFields); err != nil {
+			return
+		}
+	}
 	if err := LoadUserProfile(cdr, utils.EXTRA_FIELDS); err != nil {
 		return nil, err
 	}
 	if err := LoadAlias(&AttrMatchingAlias{
 		Destination: cdr.Destination,
-		Direction:   cdr.Direction,
+		Direction:   utils.OUT,
 		Tenant:      cdr.Tenant,
 		Category:    cdr.Category,
 		Account:     cdr.Account,
 		Subject:     cdr.Subject,
-		Context:     utils.ALIAS_CONTEXT_RATING,
+		Context:     utils.MetaRating,
 	}, cdr, utils.EXTRA_FIELDS); err != nil && err != utils.ErrNotFound {
 		return nil, err
 	}
-	attrsDC := &utils.AttrDerivedChargers{Tenant: cdr.Tenant, Category: cdr.Category, Direction: cdr.Direction,
+	attrsDC := &utils.AttrDerivedChargers{Tenant: cdr.Tenant, Category: cdr.Category, Direction: utils.OUT,
 		Account: cdr.Account, Subject: cdr.Subject, Destination: cdr.Destination}
 	var dcs utils.DerivedChargers
 	if err := self.rals.Call("Responder.GetDerivedChargers", attrsDC, &dcs); err != nil {
@@ -325,18 +368,14 @@ func (self *CdrServer) deriveCdrs(cdr *CDR) ([]*CDR, error) {
 			continue
 		}
 		dcRequestTypeFld, _ := utils.NewRSRField(dc.RequestTypeField)
-		dcDirFld, _ := utils.NewRSRField(dc.DirectionField)
 		dcTenantFld, _ := utils.NewRSRField(dc.TenantField)
 		dcCategoryFld, _ := utils.NewRSRField(dc.CategoryField)
 		dcAcntFld, _ := utils.NewRSRField(dc.AccountField)
 		dcSubjFld, _ := utils.NewRSRField(dc.SubjectField)
 		dcDstFld, _ := utils.NewRSRField(dc.DestinationField)
 		dcSTimeFld, _ := utils.NewRSRField(dc.SetupTimeField)
-		dcPddFld, _ := utils.NewRSRField(dc.PDDField)
 		dcATimeFld, _ := utils.NewRSRField(dc.AnswerTimeField)
 		dcDurFld, _ := utils.NewRSRField(dc.UsageField)
-		dcSupplFld, _ := utils.NewRSRField(dc.SupplierField)
-		dcDCauseFld, _ := utils.NewRSRField(dc.DisconnectCauseField)
 		dcRatedFld, _ := utils.NewRSRField(dc.RatedField)
 		dcCostFld, _ := utils.NewRSRField(dc.CostField)
 
@@ -345,8 +384,8 @@ func (self *CdrServer) deriveCdrs(cdr *CDR) ([]*CDR, error) {
 			dcExtraFields = append(dcExtraFields, &utils.RSRField{Id: key})
 		}
 
-		forkedCdr, err := cdr.ForkCdr(dc.RunID, dcRequestTypeFld, dcDirFld, dcTenantFld, dcCategoryFld, dcAcntFld, dcSubjFld, dcDstFld,
-			dcSTimeFld, dcPddFld, dcATimeFld, dcDurFld, dcSupplFld, dcDCauseFld, dcRatedFld, dcCostFld, dcExtraFields, true, self.cgrCfg.DefaultTimezone)
+		forkedCdr, err := cdr.ForkCdr(dc.RunID, dcRequestTypeFld, dcTenantFld, dcCategoryFld, dcAcntFld, dcSubjFld, dcDstFld,
+			dcSTimeFld, dcATimeFld, dcDurFld, dcRatedFld, dcCostFld, dcExtraFields, true, self.cgrCfg.DefaultTimezone)
 		if err != nil {
 			utils.Logger.Err(fmt.Sprintf("Could not fork CGR with cgrid %s, run: %s, error: %s", cdr.CGRID, dc.RunID, err.Error()))
 			continue // do not add it to the forked CDR list
@@ -370,7 +409,8 @@ func (self *CdrServer) rateCDR(cdr *CDR) ([]*CDR, error) {
 	cdr.ExtraInfo = "" // Clean previous ExtraInfo, useful when re-rating
 	var cdrsRated []*CDR
 	_, hasLastUsed := cdr.ExtraFields[utils.LastUsed]
-	if utils.IsSliceMember([]string{utils.META_PREPAID, utils.PREPAID}, cdr.RequestType) && (cdr.Usage != 0 || hasLastUsed) { // ToDo: Get rid of PREPAID as soon as we don't want to support it backwards
+	if utils.IsSliceMember([]string{utils.META_PREPAID, utils.PREPAID}, cdr.RequestType) &&
+		(cdr.Usage != 0 || hasLastUsed) { // ToDo: Get rid of PREPAID as soon as we don't want to support it backwards
 		// Should be previously calculated and stored in DB
 		fib := utils.Fib()
 		var smCosts []*SMCost
@@ -379,7 +419,8 @@ func (self *CdrServer) rateCDR(cdr *CDR) ([]*CDR, error) {
 			cgrID = "" // for queries involving originIDPrefix we ignore CGRID
 		}
 		for i := 0; i < self.cgrCfg.CDRSSMCostRetries; i++ {
-			smCosts, err = self.cdrDb.GetSMCosts(cgrID, cdr.RunID, cdr.OriginHost, cdr.ExtraFields[utils.OriginIDPrefix])
+			smCosts, err = self.cdrDb.GetSMCosts(cgrID, cdr.RunID, cdr.OriginHost,
+				cdr.ExtraFields[utils.OriginIDPrefix])
 			if err == nil && len(smCosts) != 0 {
 				break
 			}
@@ -392,7 +433,7 @@ func (self *CdrServer) rateCDR(cdr *CDR) ([]*CDR, error) {
 				cdrClone := cdr.Clone()
 				cdrClone.OriginID = smCost.OriginID
 				if cdr.Usage == 0 {
-					cdrClone.Usage = time.Duration(smCost.Usage * utils.NANO_MULTIPLIER) // Usage is float as seconds, convert back to duration
+					cdrClone.Usage = smCost.Usage
 				}
 				cdrClone.Cost = smCost.CostDetails.Cost
 				cdrClone.CostDetails = smCost.CostDetails
@@ -401,7 +442,9 @@ func (self *CdrServer) rateCDR(cdr *CDR) ([]*CDR, error) {
 			}
 			return cdrsRated, nil
 		} else { //calculate CDR as for pseudoprepaid
-			utils.Logger.Warning(fmt.Sprintf("<Cdrs> WARNING: Could not find CallCostLog for cgrid: %s, source: %s, runid: %s, will recalculate", cdr.CGRID, utils.SESSION_MANAGER_SOURCE, cdr.RunID))
+			utils.Logger.Warning(
+				fmt.Sprintf("<Cdrs> WARNING: Could not find CallCostLog for cgrid: %s, source: %s, runid: %s, originID: %s, will recalculate",
+					cdr.CGRID, utils.SESSION_MANAGER_SOURCE, cdr.RunID, cdr.OriginID))
 			qryCC, err = self.getCostFromRater(cdr)
 		}
 	} else {
@@ -426,7 +469,7 @@ func (self *CdrServer) getCostFromRater(cdr *CDR) (*CallCost, error) {
 	}
 	cd := &CallDescriptor{
 		TOR:             cdr.ToR,
-		Direction:       cdr.Direction,
+		Direction:       utils.OUT,
 		Tenant:          cdr.Tenant,
 		Category:        cdr.Category,
 		Subject:         cdr.Subject,
@@ -460,7 +503,7 @@ func (self *CdrServer) replicateCDRs(cdrs []*CDR) (err error) {
 			continue
 		}
 		if err = cdre.ExportCDRs(); err != nil {
-			utils.Logger.Err(fmt.Sprintf("<CDRS> Replicating CDR: %+v, got error: <%s>", err.Error()))
+			utils.Logger.Err(fmt.Sprintf("<CDRS> Replicating CDR: %+v, got error: <%s>", cdrs, err.Error()))
 			continue
 		}
 	}
@@ -495,10 +538,10 @@ func (self *CdrServer) V1ProcessCDR(cdr *CDR, reply *string) error {
 		return item.Err
 	}
 	if err := self.processCdr(cdr); err != nil {
-		self.getCache().Cache(cacheKey, &cache.CacheItem{Err: err})
+		self.getCache().Cache(cacheKey, &utils.ResponseCacheItem{Err: err})
 		return utils.NewErrServerError(err)
 	}
-	self.getCache().Cache(cacheKey, &cache.CacheItem{Value: utils.OK})
+	self.getCache().Cache(cacheKey, &utils.ResponseCacheItem{Value: utils.OK})
 	*reply = utils.OK
 	return nil
 }
@@ -518,10 +561,10 @@ func (self *CdrServer) V1StoreSMCost(attr AttrCDRSStoreSMCost, reply *string) er
 		return item.Err
 	}
 	if err := self.storeSMCost(attr.Cost, attr.CheckDuplicate); err != nil {
-		self.getCache().Cache(cacheKey, &cache.CacheItem{Err: err})
+		self.getCache().Cache(cacheKey, &utils.ResponseCacheItem{Err: err})
 		return utils.NewErrServerError(err)
 	}
-	self.getCache().Cache(cacheKey, &cache.CacheItem{Value: utils.OK})
+	self.getCache().Cache(cacheKey, &utils.ResponseCacheItem{Value: utils.OK})
 	*reply = utils.OK
 	return nil
 }
@@ -552,6 +595,7 @@ func (cdrs *CdrServer) V2StoreSMCost(args ArgsV2CDRSStoreSMCost, reply *string) 
 			utils.Logger.Err(fmt.Sprintf("<CDRS> RefundRounding for cc: %+v, got error: %s", cc, err.Error()))
 		}
 	}
+	cc.Timespans.Compress() // Compress increments before storing the cost
 	if err := cdrs.storeSMCost(&SMCost{
 		CGRID:       args.Cost.CGRID,
 		RunID:       args.Cost.RunID,
@@ -561,11 +605,11 @@ func (cdrs *CdrServer) V2StoreSMCost(args ArgsV2CDRSStoreSMCost, reply *string) 
 		Usage:       args.Cost.Usage,
 		CostDetails: cc,
 	}, args.CheckDuplicate); err != nil {
-		cdrs.getCache().Cache(cacheKey, &cache.CacheItem{Err: err})
+		cdrs.getCache().Cache(cacheKey, &utils.ResponseCacheItem{Err: err})
 		return utils.NewErrServerError(err)
 	}
 	*reply = utils.OK
-	cdrs.getCache().Cache(cacheKey, &cache.CacheItem{Value: *reply})
+	cdrs.getCache().Cache(cacheKey, &utils.ResponseCacheItem{Value: *reply})
 	return nil
 
 }
@@ -584,7 +628,7 @@ func (self *CdrServer) V1RateCDRs(attrs utils.AttrRateCDRs, reply *string) error
 	if attrs.StoreCDRs != nil {
 		storeCDRs = *attrs.StoreCDRs
 	}
-	sendToStats := self.stats != nil
+	sendToStats := self.cdrstats != nil
 	if attrs.SendToStatS != nil {
 		sendToStats = *attrs.SendToStatS
 	}

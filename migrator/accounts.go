@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package migrator
 
 import (
@@ -23,9 +24,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/utils"
-	"gopkg.in/mgo.v2/bson"
 )
 
 const (
@@ -33,93 +34,130 @@ const (
 	v1AccountTBL      = "userbalances"
 )
 
-func (m *Migrator) migrateAccounts() (err error) {
-	switch m.dataDBType {
-	case utils.REDIS:
-		var acntV1Keys []string
-		acntV1Keys, err = m.dataDB.GetKeysForPrefix(v1AccountDBPrefix)
-		if err != nil {
-			return
-		}
-		for _, acntV1Key := range acntV1Keys {
-			v1Acnt, err := m.getV1AccountFromDB(acntV1Key)
-			if err != nil {
-				return err
-			}
-			if v1Acnt != nil {
-				acnt := v1Acnt.AsAccount()
-				if err = m.dataDB.SetAccount(acnt); err != nil {
-					return err
-				}
-			}
-		}
-		// All done, update version wtih current one
-		vrs := engine.Versions{utils.Accounts: engine.CurrentStorDBVersions()[utils.Accounts]}
-		if err = m.dataDB.SetVersions(vrs, false); err != nil {
-			return utils.NewCGRError(utils.Migrator,
-				utils.ServerErrorCaps,
-				err.Error(),
-				fmt.Sprintf("error: <%s> when updating Accounts version into StorDB", err.Error()))
-		}
-		return
-	case utils.MONGO:
-		dataDB := m.dataDB.(*engine.MongoStorage)
-		mgoDB := dataDB.DB()
-		defer mgoDB.Session.Close()
-		var accn v1Account
-		iter := mgoDB.C(v1AccountDBPrefix).Find(nil).Iter()
-		for iter.Next(&accn) {
-			if acnt := accn.AsAccount(); acnt != nil {
-				if err = m.dataDB.SetAccount(acnt); err != nil {
-					return err
-				}
-			}
-		}
-		// All done, update version wtih current one
-		vrs := engine.Versions{utils.Accounts: engine.CurrentStorDBVersions()[utils.Accounts]}
-		if err = m.dataDB.SetVersions(vrs, false); err != nil {
-			return utils.NewCGRError(utils.Migrator,
-				utils.ServerErrorCaps,
-				err.Error(),
-				fmt.Sprintf("error: <%s> when updating Accounts version into StorDB", err.Error()))
-		}
-		return
-	default:
-		return utils.NewCGRError(utils.Migrator,
-			utils.ServerErrorCaps,
-			utils.UnsupportedDB,
-			fmt.Sprintf("error: unsupported: <%s> for migrateAccounts method", m.dataDBType))
+func (m *Migrator) migrateCurrentAccounts() (err error) {
+	var ids []string
+	ids, err = m.dmIN.DataDB().GetKeysForPrefix(utils.ACCOUNT_PREFIX)
+	if err != nil {
+		return err
 	}
+	for _, id := range ids {
+		idg := strings.TrimPrefix(id, utils.ACCOUNT_PREFIX)
+		acc, err := m.dmIN.DataDB().GetAccount(idg)
+		if err != nil {
+			return err
+		}
+		if acc != nil {
+			if m.dryRun != true {
+				if err := m.dmOut.DataDB().SetAccount(acc); err != nil {
+					return err
+				}
+				m.stats[utils.Accounts] += 1
+			}
+		}
+	}
+	return
 }
 
-func (m *Migrator) getV1AccountFromDB(key string) (*v1Account, error) {
-	switch m.dataDBType {
-	case utils.REDIS:
-		dataDB := m.dataDB.(*engine.RedisStorage)
-		if strVal, err := dataDB.Cmd("GET", key).Bytes(); err != nil {
-			return nil, err
-		} else {
-			v1Acnt := &v1Account{Id: key}
-			if err := m.mrshlr.Unmarshal(strVal, v1Acnt); err != nil {
-				return nil, err
+func (m *Migrator) migrateV1Accounts() (err error) {
+	var v1Acnt *v1Account
+	for {
+		v1Acnt, err = m.oldDataDB.getv1Account()
+		if err != nil && err != utils.ErrNoMoreData {
+			return err
+		}
+		if err == utils.ErrNoMoreData {
+			break
+		}
+		if v1Acnt != nil {
+			acnt := v1Acnt.V1toV3Account()
+			if m.dryRun != true {
+				if err = m.dmOut.DataDB().SetAccount(acnt); err != nil {
+					return err
+				}
+				m.stats[utils.Accounts] += 1
 			}
-			return v1Acnt, nil
 		}
-	case utils.MONGO:
-		dataDB := m.dataDB.(*engine.MongoStorage)
-		mgoDB := dataDB.DB()
-		defer mgoDB.Session.Close()
-		v1Acnt := new(v1Account)
-		if err := mgoDB.C(v1AccountTBL).Find(bson.M{"id": key}).One(v1Acnt); err != nil {
-			return nil, err
-		}
-		return v1Acnt, nil
-	default:
-		return nil, utils.NewCGRError(utils.Migrator,
-			utils.ServerErrorCaps,
-			utils.UnsupportedDB,
-			fmt.Sprintf("error: unsupported: <%s> for getV1AccountFromDB method", m.dataDBType))
 	}
+	if m.dryRun != true {
+		// All done, update version wtih current one
+		vrs := engine.Versions{utils.Accounts: engine.CurrentStorDBVersions()[utils.Accounts]}
+		if err = m.dmOut.DataDB().SetVersions(vrs, false); err != nil {
+			return utils.NewCGRError(utils.Migrator,
+				utils.ServerErrorCaps,
+				err.Error(),
+				fmt.Sprintf("error: <%s> when updating Accounts version into StorDB", err.Error()))
+		}
+	}
+	return
+}
+
+func (m *Migrator) migrateV2Accounts() (err error) {
+	var v2Acnt *v2Account
+	for {
+		v2Acnt, err = m.oldDataDB.getv2Account()
+		if err != nil && err != utils.ErrNoMoreData {
+			return err
+		}
+		if err == utils.ErrNoMoreData {
+			break
+		}
+		if v2Acnt != nil {
+			acnt := v2Acnt.V2toV3Account()
+			if m.dryRun != true {
+				if err = m.dmOut.DataDB().SetAccount(acnt); err != nil {
+					return err
+				}
+				m.stats[utils.Accounts] += 1
+			}
+		}
+	}
+	if m.dryRun != true {
+		// All done, update version wtih current one
+		vrs := engine.Versions{utils.Accounts: engine.CurrentStorDBVersions()[utils.Accounts]}
+		if err = m.dmOut.DataDB().SetVersions(vrs, false); err != nil {
+			return utils.NewCGRError(utils.Migrator,
+				utils.ServerErrorCaps,
+				err.Error(),
+				fmt.Sprintf("error: <%s> when updating Accounts version into StorDB", err.Error()))
+		}
+	}
+	return
+}
+
+func (m *Migrator) migrateAccounts() (err error) {
+	var vrs engine.Versions
+	current := engine.CurrentDataDBVersions()
+	vrs, err = m.dmOut.DataDB().GetVersions(utils.TBLVersions)
+	if err != nil {
+		return utils.NewCGRError(utils.Migrator,
+			utils.ServerErrorCaps,
+			err.Error(),
+			fmt.Sprintf("error: <%s> when querying oldDataDB for versions", err.Error()))
+	} else if len(vrs) == 0 {
+		return utils.NewCGRError(utils.Migrator,
+			utils.MandatoryIEMissingCaps,
+			utils.UndefinedVersion,
+			"version number is not defined for ActionTriggers model")
+	}
+	switch vrs[utils.Accounts] {
+	case current[utils.Accounts]:
+		if m.sameDataDB {
+			return
+		}
+		if err := m.migrateCurrentAccounts(); err != nil {
+			return err
+		}
+		return
+	case 1:
+		if err := m.migrateV1Accounts(); err != nil {
+			return err
+		}
+	case 2:
+		if err := m.migrateV2Accounts(); err != nil {
+			return err
+		}
+	}
+	return
 }
 
 type v1Account struct {
@@ -147,11 +185,21 @@ type v1Balance struct {
 	TimingIDs      string
 	Disabled       bool
 }
+
 type v1UnitsCounter struct {
 	Direction   string
 	BalanceType string
-	//	Units     float64
-	Balances v1BalanceChain // first balance is the general one (no destination)
+	Balances    v1BalanceChain // first balance is the general one (no destination)
+}
+
+type v2Account struct {
+	ID                string
+	BalanceMap        map[string]engine.Balances
+	UnitCounters      engine.UnitCounters
+	ActionTriggers    engine.ActionTriggers
+	AllowNegative     bool
+	Disabled          bool
+	executingTriggers bool
 }
 
 func (b *v1Balance) IsDefault() bool {
@@ -164,7 +212,7 @@ func (b *v1Balance) IsDefault() bool {
 		b.Disabled == false
 }
 
-func (v1Acc v1Account) AsAccount() (ac *engine.Account) {
+func (v1Acc v1Account) V1toV3Account() (ac *engine.Account) {
 	// transfer data into new structure
 	ac = &engine.Account{
 		ID:             v1Acc.Id,
@@ -183,14 +231,19 @@ func (v1Acc v1Account) AsAccount() (ac *engine.Account) {
 	for oldBalKey, oldBalChain := range v1Acc.BalanceMap {
 		keyElements := strings.Split(oldBalKey, "*")
 		newBalKey := "*" + keyElements[1]
-		newBalDirection := "*" + idElements[0]
+		newBalDirection := idElements[0]
 		ac.BalanceMap[newBalKey] = make(engine.Balances, len(oldBalChain))
 		for index, oldBal := range oldBalChain {
+			balVal := oldBal.Value
+			if newBalKey == utils.VOICE {
+				balVal = utils.Round(balVal/float64(time.Second),
+					config.CgrConfig().RoundingDecimals, utils.ROUNDING_MIDDLE)
+			}
 			// check default to set new id
 			ac.BalanceMap[newBalKey][index] = &engine.Balance{
 				Uuid:           oldBal.Uuid,
 				ID:             oldBal.Id,
-				Value:          oldBal.Value,
+				Value:          balVal,
 				Directions:     utils.ParseStringMap(newBalDirection),
 				ExpirationDate: oldBal.ExpirationDate,
 				Weight:         oldBal.Weight,
@@ -296,9 +349,6 @@ func (v1Acc v1Account) AsAccount() (ac *engine.Account) {
 		if oldAtr.BalanceWeight != 0 {
 			bf.Weight = utils.Float64Pointer(oldAtr.BalanceWeight)
 		}
-		if oldAtr.BalanceDisabled != false {
-			bf.Disabled = utils.BoolPointer(oldAtr.BalanceDisabled)
-		}
 		if !oldAtr.BalanceExpirationDate.IsZero() {
 			bf.ExpirationDate = utils.TimePointer(oldAtr.BalanceExpirationDate)
 		}
@@ -309,5 +359,49 @@ func (v1Acc v1Account) AsAccount() (ac *engine.Account) {
 			ac.ActionTriggers[index].ThresholdType = strings.Replace(ac.ActionTriggers[index].ThresholdType, "_", "_event_", 1)
 		}
 	}
+	return
+}
+
+func (v2Acc v2Account) V2toV3Account() (ac *engine.Account) {
+	ac = &engine.Account{
+		ID:             v2Acc.ID,
+		BalanceMap:     make(map[string]engine.Balances, len(v2Acc.BalanceMap)),
+		UnitCounters:   make(engine.UnitCounters, len(v2Acc.UnitCounters)),
+		ActionTriggers: make(engine.ActionTriggers, len(v2Acc.ActionTriggers)),
+		AllowNegative:  v2Acc.AllowNegative,
+		Disabled:       v2Acc.Disabled,
+	}
+	// balances
+	for balType, oldBalChain := range v2Acc.BalanceMap {
+		ac.BalanceMap[balType] = make(engine.Balances, len(oldBalChain))
+		for index, oldBal := range oldBalChain {
+			balVal := oldBal.Value
+			if balType == utils.VOICE {
+				balVal = utils.Round(balVal*float64(time.Second),
+					config.CgrConfig().RoundingDecimals, utils.ROUNDING_MIDDLE)
+			}
+			// check default to set new id
+			ac.BalanceMap[balType][index] = &engine.Balance{
+				Uuid:           oldBal.Uuid,
+				ID:             oldBal.ID,
+				Value:          balVal,
+				Directions:     oldBal.Directions,
+				ExpirationDate: oldBal.ExpirationDate,
+				Weight:         oldBal.Weight,
+				DestinationIDs: oldBal.DestinationIDs,
+				RatingSubject:  oldBal.RatingSubject,
+				Categories:     oldBal.Categories,
+				SharedGroups:   oldBal.SharedGroups,
+				Timings:        oldBal.Timings,
+				TimingIDs:      oldBal.TimingIDs,
+				Disabled:       oldBal.Disabled,
+				Factor:         oldBal.Factor,
+			}
+		}
+	}
+	// unit counters
+	ac.UnitCounters = v2Acc.UnitCounters
+	//action triggers
+	ac.ActionTriggers = v2Acc.ActionTriggers
 	return
 }

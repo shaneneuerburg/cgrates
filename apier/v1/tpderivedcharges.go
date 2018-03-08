@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -47,9 +48,10 @@ func (self *ApierV1) GetTPDerivedChargers(attrs AttrGetTPDerivedChargers, reply 
 	filter := &utils.TPDerivedChargers{TPid: attrs.TPid}
 	filter.SetDerivedChargersId(attrs.DerivedChargersId)
 	if dcs, err := self.StorDb.GetTPDerivedChargers(filter); err != nil {
-		return utils.NewErrServerError(err)
-	} else if len(dcs) == 0 {
-		return utils.ErrNotFound
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = *dcs[0]
 	}
@@ -67,9 +69,10 @@ func (self *ApierV1) GetTPDerivedChargerIds(attrs AttrGetTPDerivedChargeIds, rep
 		return utils.NewErrMandatoryIeMissing(missing...)
 	}
 	if ids, err := self.StorDb.GetTpTableIds(attrs.TPid, utils.TBLTPDerivedChargers, utils.TPDistinctIds{"loadid", "direction", "tenant", "category", "account", "subject"}, nil, &attrs.Paginator); err != nil {
-		return utils.NewErrServerError(err)
-	} else if ids == nil {
-		return utils.ErrNotFound
+		if err.Error() != utils.ErrNotFound.Error() {
+			err = utils.NewErrServerError(err)
+		}
+		return err
 	} else {
 		*reply = ids
 	}

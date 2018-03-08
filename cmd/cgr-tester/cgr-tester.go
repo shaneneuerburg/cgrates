@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package main
 
 import (
@@ -56,20 +57,19 @@ var (
 	loadHistorySize = flag.Int("load_history_size", cgrConfig.LoadHistorySize, "Limit the number of records in the load history")
 	version         = flag.Bool("version", false, "Prints the application version.")
 	nilDuration     = time.Duration(0)
+	usage           = flag.String("usage", "1m", "The duration to use in call simulation.")
 )
 
 func durInternalRater(cd *engine.CallDescriptor) (time.Duration, error) {
-	dataDb, err := engine.ConfigureDataStorage(*datadb_type, *datadb_host, *datadb_port, *datadb_name, *datadb_user, *datadb_pass, *dbdata_encoding, cgrConfig.CacheConfig, *loadHistorySize)
+	dm, err := engine.ConfigureDataStorage(*datadb_type, *datadb_host, *datadb_port,
+		*datadb_name, *datadb_user, *datadb_pass, *dbdata_encoding, cgrConfig.CacheCfg(), *loadHistorySize)
 	if err != nil {
 		return nilDuration, fmt.Errorf("Could not connect to data database: %s", err.Error())
 	}
-	defer dataDb.Close()
-	engine.SetDataStorage(dataDb)
-	if err := dataDb.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
+	defer dm.DataDB().Close()
+	engine.SetDataStorage(dm)
+	if err := dm.LoadDataDBCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
 		return nilDuration, fmt.Errorf("Cache rating error: %s", err.Error())
-	}
-	if err := dataDb.LoadAccountingCache(nil, nil, nil); err != nil {
-		return nilDuration, fmt.Errorf("Cache accounting error: %s", err.Error())
 	}
 	log.Printf("Runnning %d cycles...", *runs)
 	var result *engine.CallCost
@@ -91,6 +91,7 @@ func durInternalRater(cd *engine.CallDescriptor) (time.Duration, error) {
 		j = i
 	}
 	log.Print(result, j, err)
+
 	memstats := new(runtime.MemStats)
 	runtime.ReadMemStats(memstats)
 	log.Printf("memstats before GC: Kbytes = %d footprint = %d",
@@ -153,9 +154,14 @@ func main() {
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
 	}
+	var timeparsed time.Duration
+	var err error
+	tstart := time.Now()
+	timeparsed, err = utils.ParseDurationWithNanosecs(*usage)
+	tend := tstart.Add(timeparsed)
 	cd := &engine.CallDescriptor{
-		TimeStart:     time.Date(2014, time.December, 11, 55, 30, 0, 0, time.UTC),
-		TimeEnd:       time.Date(2014, time.December, 11, 55, 31, 0, 0, time.UTC),
+		TimeStart:     tstart,
+		TimeEnd:       tend,
 		DurationIndex: 60 * time.Second,
 		Direction:     "*out",
 		TOR:           *tor,
@@ -165,7 +171,6 @@ func main() {
 		Destination:   *destination,
 	}
 	var duration time.Duration
-	var err error
 	if len(*raterAddress) == 0 {
 		duration, err = durInternalRater(cd)
 	} else {

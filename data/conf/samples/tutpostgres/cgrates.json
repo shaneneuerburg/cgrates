@@ -4,11 +4,13 @@
 // Used for cgradmin
 // Starts rater, scheduler
 
+
 "listen": {
 	"rpc_json": ":2012",				// RPC JSON listening address
 	"rpc_gob": ":2013",					// RPC GOB listening address
 	"http": ":2080",					// HTTP listening address
 },
+
 
 "stor_db": {
 	"db_type": "postgres",					// stor database type to use: <mysql|postgres>
@@ -16,8 +18,12 @@
 	"db_password": "CGRateS.org",
 },
 
+
 "rals": {
-	"enabled": true,					// enable Rater service: <true|false>
+	"enabled": true,
+	"thresholds_conns": [
+		{"address": "*internal"}
+	],
 	"cdrstats_conns": [
 		{"address": "*internal"}
 	],
@@ -32,9 +38,11 @@
 	],
 },
 
+
 "scheduler": {
 	"enabled": true,					// start Scheduler service: <true|false>
 },
+
 
 "cdrs": {
 	"enabled": true,					// start the CDR Server service:  <true|false>
@@ -43,9 +51,11 @@
 	],
 },
 
+
 "cdrstats": {
 	"enabled": true,					// starts the cdrstats service: <true|false>
 },
+
 
 "pubsubs": {
 	"enabled": true,				// starts PubSub service: <true|false>.
@@ -53,15 +63,46 @@
 
 
 "users": {
-	"enabled": true,				// starts User service: <true|false>.
-	"indexes": ["Uuid"],			// user profile field indexes
+	"enabled": true,
+	"indexes": ["Uuid"],
 },
+
 
 "aliases": {
 	"enabled": true,							// starts Aliases service: <true|false>.
 },
 
-"sm_generic": {
+
+"resources": {
+	"enabled": true,
+	"store_interval": "1s",
+	"thresholds_conns": [
+		{"address": "*internal"}
+	],
+},
+
+
+"stats": {
+	"enabled": true,
+	"store_interval": "1s",
+	"thresholds_conns": [
+		{"address": "*internal"}
+	],
+},
+
+
+"thresholds": {
+	"enabled": true,
+	"store_interval": "1s",
+},
+
+
+"suppliers": {
+	"enabled": true,
+},
+
+
+"sessions": {
 	"enabled": true,
 },
 

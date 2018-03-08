@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -57,9 +58,6 @@ func (apier *ApierV1) DebitUsageWithOptions(args AttrDebitUsageWithOptions, repl
 	}
 	if usageRecord.RequestType == "" {
 		usageRecord.RequestType = apier.Config.DefaultReqType
-	}
-	if usageRecord.Direction == "" {
-		usageRecord.Direction = utils.OUT
 	}
 	if usageRecord.Tenant == "" {
 		usageRecord.Tenant = apier.Config.DefaultTenant

@@ -21,21 +21,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/cgrates/cache"
 	"github.com/cgrates/cgrates/config"
 	"github.com/cgrates/cgrates/engine"
 	"github.com/cgrates/cgrates/utils"
 )
 
-var dbAuth engine.DataDB
+var dbAuth *engine.DataManager
 var rsponder *engine.Responder
 
 func TestAuthSetStorage(t *testing.T) {
-	dbAuth, _ = engine.NewMapStorageJson()
+	config.CgrConfig().CacheCfg()[utils.CacheRatingPlans].Precache = true // precache rating plan
+	data, _ := engine.NewMapStorageJson()
+	dbAuth = engine.NewDataManager(data)
 	engine.SetDataStorage(dbAuth)
-	cfg, _ := config.NewDefaultCGRConfig()
-	config.SetCgrConfig(cfg)
-	rsponder = new(engine.Responder)
+	rsponder = &engine.Responder{MaxComputedUsage: config.CgrConfig().RALsMaxComputedUsage}
 
 }
 
@@ -61,49 +60,57 @@ RP_ANY,DR_ANY_1CNT,*any,10`
 	users := ``
 	aliases := ``
 	resLimits := ``
-	csvr := engine.NewTpReader(dbAuth, engine.NewStringCSVStorage(',', destinations, timings, rates, destinationRates, ratingPlans, ratingProfiles,
-		sharedGroups, lcrs, actions, actionPlans, actionTriggers, accountActions, derivedCharges, cdrStats, users, aliases, resLimits), "", "")
+	stats := ``
+	thresholds := ``
+	filters := ``
+	suppliers := ``
+	aliasProfiles := ``
+	csvr := engine.NewTpReader(dbAuth.DataDB(), engine.NewStringCSVStorage(',', destinations, timings, rates, destinationRates,
+		ratingPlans, ratingProfiles, sharedGroups, lcrs, actions, actionPlans, actionTriggers, accountActions,
+		derivedCharges, cdrStats, users, aliases, resLimits, stats, thresholds, filters, suppliers, aliasProfiles), "", "")
 	if err := csvr.LoadAll(); err != nil {
 		t.Fatal(err)
 	}
 	csvr.WriteToDatabase(false, false, false)
-	if acnt, err := dbAuth.GetAccount("cgrates.org:testauthpostpaid1"); err != nil {
+	if acnt, err := dbAuth.DataDB().GetAccount("cgrates.org:testauthpostpaid1"); err != nil {
 		t.Error(err)
 	} else if acnt == nil {
 		t.Error("No account saved")
 	}
 
-	cache.Flush()
-	dbAuth.LoadRatingCache(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	dbAuth.LoadAccountingCache(nil, nil, nil)
+	engine.Cache.Clear(nil)
+	dbAuth.LoadDataDBCache(nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil)
 
-	if cachedDests := cache.CountEntries(utils.DESTINATION_PREFIX); cachedDests != 0 {
+	if cachedDests := len(engine.Cache.GetItemIDs(utils.CacheDestinations, "")); cachedDests != 0 {
 		t.Error("Wrong number of cached destinations found", cachedDests)
 	}
-	if cachedRPlans := cache.CountEntries(utils.RATING_PLAN_PREFIX); cachedRPlans != 2 {
+	if cachedRPlans := len(engine.Cache.GetItemIDs(utils.CacheRatingPlans, "")); cachedRPlans != 2 {
 		t.Error("Wrong number of cached rating plans found", cachedRPlans)
 	}
-	if cachedRProfiles := cache.CountEntries(utils.RATING_PROFILE_PREFIX); cachedRProfiles != 0 {
+	if cachedRProfiles := len(engine.Cache.GetItemIDs(utils.CacheRatingProfiles, "")); cachedRProfiles != 0 {
 		t.Error("Wrong number of cached rating profiles found", cachedRProfiles)
 	}
-	if cachedActions := cache.CountEntries(utils.ACTION_PREFIX); cachedActions != 0 {
+	if cachedActions := len(engine.Cache.GetItemIDs(utils.CacheActions, "")); cachedActions != 0 {
 		t.Error("Wrong number of cached actions found", cachedActions)
 	}
 }
 
 func TestAuthPostpaidNoAcnt(t *testing.T) {
-	cdr := &engine.CDR{ToR: utils.VOICE, RequestType: utils.META_POSTPAID, Direction: "*out", Tenant: "cgrates.org",
+	cdr := &engine.CDR{ToR: utils.VOICE, RequestType: utils.META_POSTPAID, Tenant: "cgrates.org",
 		Category: "call", Account: "nonexistent", Subject: "testauthpostpaid1",
 		Destination: "4986517174963", SetupTime: time.Date(2015, 8, 27, 11, 26, 0, 0, time.UTC)}
 	var maxSessionTime float64
-	if err := rsponder.GetDerivedMaxSessionTime(cdr, &maxSessionTime); err == nil || err != utils.ErrAccountNotFound {
+	if err := rsponder.GetDerivedMaxSessionTime(cdr, &maxSessionTime); err == nil ||
+		err != utils.ErrAccountNotFound {
 		t.Error(err)
 	}
 }
 
 func TestAuthPostpaidNoDestination(t *testing.T) {
 	// Test subject which does not have destination attached
-	cdr := &engine.CDR{ToR: utils.VOICE, RequestType: utils.META_POSTPAID, Direction: "*out", Tenant: "cgrates.org",
+	cdr := &engine.CDR{ToR: utils.VOICE, RequestType: utils.META_POSTPAID, Tenant: "cgrates.org",
 		Category: "call", Account: "testauthpostpaid1", Subject: "testauthpostpaid1",
 		Destination: "441231234", SetupTime: time.Date(2015, 8, 27, 11, 26, 0, 0, time.UTC)}
 	var maxSessionTime float64
@@ -114,7 +121,7 @@ func TestAuthPostpaidNoDestination(t *testing.T) {
 
 func TestAuthPostpaidFallbackDest(t *testing.T) {
 	// Test subject which has fallback for destination
-	cdr := &engine.CDR{ToR: utils.VOICE, RequestType: utils.META_POSTPAID, Direction: "*out", Tenant: "cgrates.org",
+	cdr := &engine.CDR{ToR: utils.VOICE, RequestType: utils.META_POSTPAID, Tenant: "cgrates.org",
 		Category: "call", Account: "testauthpostpaid1", Subject: "testauthpostpaid2",
 		Destination: "441231234", SetupTime: time.Date(2015, 8, 27, 11, 26, 0, 0, time.UTC)}
 	var maxSessionTime float64
@@ -127,7 +134,7 @@ func TestAuthPostpaidFallbackDest(t *testing.T) {
 
 func TestAuthPostpaidWithDestination(t *testing.T) {
 	// Test subject which does not have destination attached
-	cdr := &engine.CDR{ToR: utils.VOICE, RequestType: utils.META_POSTPAID, Direction: "*out", Tenant: "cgrates.org",
+	cdr := &engine.CDR{ToR: utils.VOICE, RequestType: utils.META_POSTPAID, Tenant: "cgrates.org",
 		Category: "call", Account: "testauthpostpaid1", Subject: "testauthpostpaid1",
 		Destination: "4986517174963", SetupTime: time.Date(2015, 8, 27, 11, 26, 0, 0, time.UTC)}
 	var maxSessionTime float64

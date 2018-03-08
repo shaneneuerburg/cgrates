@@ -1,12 +1,12 @@
 {
 // CGRateS Configuration file
 //
-// Used for cgradmin
-// Starts rater, scheduler
+
 
 "general": {
 	"log_level": 7,
 },
+
 
 "listen": {
 	"rpc_json": ":2012",
@@ -15,8 +15,8 @@
 },
 
 
-"stor_db": {								// database used to store offline tariff plans and CDRs
-	"db_password": "CGRateS.org",						// password to use when connecting to stordb
+"stor_db": {
+	"db_password": "CGRateS.org",
 },
 
 
@@ -25,7 +25,7 @@
 	"reverse_destinations": {"limit": 10000, "ttl":"0s", "precache": true},
 	"rating_plans": {"limit": 10000, "ttl":"0s","precache": true},
 	"rating_profiles": {"limit": 10000, "ttl":"0s", "precache": true},
-	"lcr": {"limit": 10000, "ttl":"0s", "precache": true},
+	"lcr_rules": {"limit": 10000, "ttl":"0s", "precache": true},
 	"cdr_stats": {"limit": 10000, "ttl":"0s", "precache": true},
 	"actions": {"limit": 10000, "ttl":"0s", "precache": true},
 	"action_plans": {"limit": 10000, "ttl":"0s", "precache": true},
@@ -35,12 +35,33 @@
 	"aliases": {"limit": 10000, "ttl":"0s", "precache": true},
 	"reverse_aliases": {"limit": 10000, "ttl":"0s", "precache": true},
 	"derived_chargers": {"limit": 10000, "ttl":"0s", "precache": true},
-	"resource_limits": {"limit": 10000, "ttl":"0s", "precache": true},
+	"resource_profiles": {"limit": 10000, "ttl":"0s", "precache": true},
+	"resources": {"limit": 10000, "ttl":"0s", "precache": true},
+	"statqueues": {"limit": 10000, "ttl":"0s", "precache": true},
+	"statqueue_profiles": {"limit": 10000, "ttl":"0s", "precache": true},
+	"thresholds": {"limit": 10000, "ttl":"0s", "precache": true},
+	"threshold_profiles": {"limit": 10000, "ttl":"0s", "precache": true},
+	"filters": {"limit": 10000, "ttl":"0s", "precache": true},
+	"supplier_profiles": {"limit": 10000, "ttl":"0s", "precache": true},
+	"attribute_profiles": {"limit": 10000, "ttl":"0s", "precache": true},
+	"resource_filter_indexes" :{"limit": 10000, "ttl":"0s", "precache": true},
+	"resource_filter_revindexes" : {"limit": 10000, "ttl":"0s", "precache": true},
+	"stat_filter_indexes" : {"limit": 10000, "ttl":"0s", "precache": true},
+	"stat_filter_revindexes" : {"limit": 10000, "ttl":"0s", "precache": true},
+	"threshold_filter_indexes" : {"limit": 10000, "ttl":"0s", "precache": true},
+	"threshold_filter_revindexes" : {"limit": 10000, "ttl":"0s", "precache": true},
+	"supplier_filter_indexes" : {"limit": 10000, "ttl":"0s", "precache": true},
+	"supplier_filter_revindexes" :{"limit": 10000, "ttl":"0s", "precache": true},
+	"attribute_filter_indexes" : {"limit": 10000, "ttl":"0s", "precache": true},
+	"attribute_filter_revindexes" : {"limit": 10000, "ttl":"0s", "precache": true},
 },
 
 
 "rals": {
 	"enabled": true,
+	"thresholds_conns": [
+		{"address": "*internal"}
+	],
 	"cdrstats_conns": [
 		{"address": "*internal"}
 	],
@@ -54,6 +75,7 @@
 		{"address": "*internal"}
 	],
 },
+
 
 "scheduler": {
 	"enabled": true,
@@ -70,7 +92,7 @@
 
 "cdre": {
 	"TestTutITExportCDR": {
-		"content_fields": [								// template of the exported content fields
+		"content_fields": [
 			{"tag": "CGRID", "type": "*composed", "value": "CGRID"},
 			{"tag": "RunID", "type": "*composed", "value": "RunID"},
 			{"tag":"OriginID", "type": "*composed", "value": "OriginID"},
@@ -89,37 +111,62 @@
 
 
 "cdrstats": {
-	"enabled": true,					// starts the cdrstats service: <true|false>
+	"enabled": true,
 },
 
 
 "pubsubs": {
-	"enabled": true,				// starts PubSub service: <true|false>.
+	"enabled": true,
 },
 
 
 "users": {
-	"enabled": true,				// starts User service: <true|false>.
-	"indexes": ["Uuid"],			// user profile field indexes
+	"enabled": true,
+	"indexes": ["Uuid"],
 },
 
-"rls": {
-	"enabled": true,						// starts ResourceLimiter service: <true|false>.
-	"cdrstats_conns": [],					// address where to reach the cdrstats service, empty to disable stats functionality: <""|*internal|x.y.z.y:1234>					
-	"cache_dump_interval": "0s",			// dump cache regularly to dataDB, 0 - dump at start/shutdown: <""|*never|dur>
-	"usage_ttl": "3h",						// expire usage records if older than this duration <""|*never|dur>
+
+"attributes": {								// Attribute service
+	"enabled": true,						// starts Alias service: <true|false>.
 },
 
-"historys": {
+
+"resources": {
+	"enabled": true,
+	"store_interval": "1s",
+	"thresholds_conns": [
+		{"address": "*internal"}
+	],
+},
+
+
+"stats": {
+	"enabled": true,
+	"store_interval": "1s",
+	"thresholds_conns": [
+		{"address": "*internal"}
+	],
+},
+
+"thresholds": {
+	"enabled": true,
+	"store_interval": "1s",
+},
+
+
+"suppliers": {
 	"enabled": true,
 },
+
 
 "aliases": {
-	"enabled": true,							// starts Aliases service: <true|false>.
-},
-
-"sm_generic": {
 	"enabled": true,
 },
+
+
+"sessions": {
+	"enabled": true,
+},
+
 
 }

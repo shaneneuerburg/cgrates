@@ -15,23 +15,24 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
 	"fmt"
-
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/jinzhu/gorm"
+	"time"
 
 	"github.com/cgrates/cgrates/utils"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/jinzhu/gorm"
 )
 
 type MySQLStorage struct {
 	SQLStorage
 }
 
-func NewMySQLStorage(host, port, name, user, password string, maxConn, maxIdleConn int) (*SQLStorage, error) {
-	connectString := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8&loc=Local&parseTime=true", user, password, host, port, name)
+func NewMySQLStorage(host, port, name, user, password string, maxConn, maxIdleConn, connMaxLifetime int) (*SQLStorage, error) {
+	connectString := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8&loc=Local&parseTime=true&sql_mode='ALLOW_INVALID_DATES,NO_AUTO_CREATE_USER'", user, password, host, port, name)
 	db, err := gorm.Open("mysql", connectString)
 	if err != nil {
 		return nil, err
@@ -41,6 +42,7 @@ func NewMySQLStorage(host, port, name, user, password string, maxConn, maxIdleCo
 	}
 	db.DB().SetMaxIdleConns(maxIdleConn)
 	db.DB().SetMaxOpenConns(maxConn)
+	db.DB().SetConnMaxLifetime(time.Duration(connMaxLifetime) * time.Second)
 	//db.LogMode(true)
 	mySQLStorage := new(MySQLStorage)
 	mySQLStorage.db = db
@@ -82,4 +84,8 @@ func (self *MySQLStorage) notExtraFieldsExistsQry(field string) string {
 
 func (self *MySQLStorage) notExtraFieldsValueQry(field, value string) string {
 	return fmt.Sprintf(" extra_fields NOT LIKE '%%\"%s\":\"%s\"%%'", field, value)
+}
+
+func (self *MySQLStorage) GetStorageType() string {
+	return utils.MYSQL
 }

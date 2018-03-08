@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v2
 
 import (
@@ -37,8 +38,7 @@ func (self *ApierV2) GetAccounts(attr utils.AttrGetAccounts, reply *[]*engine.Ac
 	var accountKeys []string
 	var err error
 	if len(attr.AccountIds) == 0 {
-		log.Print("<ApierV2.Accounts> getting account keys!")
-		if accountKeys, err = self.DataDB.GetKeysForPrefix(utils.ACCOUNT_PREFIX + attr.Tenant); err != nil {
+		if accountKeys, err = self.DataManager.DataDB().GetKeysForPrefix(utils.ACCOUNT_PREFIX + attr.Tenant); err != nil {
 			log.Print(fmt.Sprintf("<ApierV2.Accounts> Error retrieving account keys: %s", err.Error()))
 			return err
 		}
@@ -72,7 +72,7 @@ func (self *ApierV2) GetAccounts(attr utils.AttrGetAccounts, reply *[]*engine.Ac
 	log.Print("<ApierV2.Accounts> Retrieving accounts!")
 	retAccounts := make([]*engine.Account, 0)
 	for _, acntKey := range limitedAccounts {
-		if acnt, err := self.DataDB.GetAccount(acntKey[len(utils.ACCOUNT_PREFIX):]); err != nil && err != utils.ErrNotFound { // Not found is not an error here
+		if acnt, err := self.DataManager.DataDB().GetAccount(acntKey[len(utils.ACCOUNT_PREFIX):]); err != nil && err != utils.ErrNotFound { // Not found is not an error here
 			log.Print(fmt.Sprintf("<ApierV2.Accounts> Error account: %s", err.Error()))
 			return err
 		} else if acnt != nil {
@@ -86,7 +86,7 @@ func (self *ApierV2) GetAccounts(attr utils.AttrGetAccounts, reply *[]*engine.Ac
 // Get balance
 func (self *ApierV2) GetAccount(attr *utils.AttrGetAccount, reply *engine.Account) error {
 	tag := fmt.Sprintf("%s:%s", attr.Tenant, attr.Account)
-	account, err := self.DataDB.GetAccount(tag)
+	account, err := self.DataManager.DataDB().GetAccount(tag)
 	if err != nil {
 		return err
 	}
@@ -114,8 +114,9 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 	accID := utils.AccountKey(attr.Tenant, attr.Account)
 	dirtyActionPlans := make(map[string]*engine.ActionPlan)
 	var ub *engine.Account
+	var schedNeedsReload bool
 	_, err := guardian.Guardian.Guard(func() (interface{}, error) {
-		if bal, _ := self.DataDB.GetAccount(accID); bal != nil {
+		if bal, _ := self.DataManager.DataDB().GetAccount(accID); bal != nil {
 			ub = bal
 		} else { // Not found in db, create it here
 			ub = &engine.Account{
@@ -124,7 +125,7 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 		}
 		if attr.ActionPlanIDs != nil {
 			_, err := guardian.Guardian.Guard(func() (interface{}, error) {
-				acntAPids, err := self.DataDB.GetAccountActionPlans(accID, false, utils.NonTransactional)
+				acntAPids, err := self.DataManager.DataDB().GetAccountActionPlans(accID, false, utils.NonTransactional)
 				if err != nil && err != utils.ErrNotFound {
 					return 0, err
 				}
@@ -136,7 +137,7 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 							i++      // increase index since we don't remove from slice
 							continue // not removing the ones where
 						}
-						ap, err := self.DataDB.GetActionPlan(apID, false, utils.NonTransactional)
+						ap, err := self.DataManager.DataDB().GetActionPlan(apID, false, utils.NonTransactional)
 						if err != nil {
 							return 0, err
 						}
@@ -146,20 +147,12 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 					}
 				}
 				for _, apID := range *attr.ActionPlanIDs {
-					if utils.IsSliceMember(acntAPids, apID) {
-						continue // Already there
-					}
-					ap, err := self.DataDB.GetActionPlan(apID, false, utils.NonTransactional)
+					ap, err := self.DataManager.DataDB().GetActionPlan(apID, false, utils.NonTransactional)
 					if err != nil {
 						return 0, err
 					}
-					if ap.AccountIDs == nil {
-						ap.AccountIDs = make(utils.StringMap)
-					}
-					ap.AccountIDs[accID] = true
-					dirtyActionPlans[apID] = ap
-					acntAPids = append(acntAPids, apID)
 					// create tasks
+					var schedTasks int // keep count on the number of scheduled tasks so we can compare with actions needed
 					for _, at := range ap.ActionTimings {
 						if at.IsASAP() {
 							t := &engine.Task{
@@ -167,28 +160,45 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 								AccountID: accID,
 								ActionsID: at.ActionsID,
 							}
-							if err = self.DataDB.PushTask(t); err != nil {
+							if err = self.DataManager.DataDB().PushTask(t); err != nil {
 								return 0, err
 							}
+							schedTasks++
 						}
 					}
+					if schedTasks != 0 && !schedNeedsReload {
+						schedNeedsReload = true
+					}
+					if schedTasks == len(ap.ActionTimings) || // scheduled all actions, no need to add account to AP
+						utils.IsSliceMember(acntAPids, apID) {
+						continue // No need to reschedule since already there
+					}
+					if ap.AccountIDs == nil {
+						ap.AccountIDs = make(utils.StringMap)
+					}
+					ap.AccountIDs[accID] = true
+					dirtyActionPlans[apID] = ap
+					acntAPids = append(acntAPids, apID)
+				}
+				if len(dirtyActionPlans) != 0 && !schedNeedsReload {
+					schedNeedsReload = true
 				}
 				apIDs := make([]string, len(dirtyActionPlans))
 				i := 0
 				for actionPlanID, ap := range dirtyActionPlans {
-					if err := self.DataDB.SetActionPlan(actionPlanID, ap, true, utils.NonTransactional); err != nil {
+					if err := self.DataManager.DataDB().SetActionPlan(actionPlanID, ap, true, utils.NonTransactional); err != nil {
 						return 0, err
 					}
 					apIDs[i] = actionPlanID
 					i++
 				}
-				if err := self.DataDB.CacheDataFromDB(utils.ACTION_PLAN_PREFIX, apIDs, true); err != nil {
+				if err := self.DataManager.CacheDataFromDB(utils.ACTION_PLAN_PREFIX, apIDs, true); err != nil {
 					return 0, err
 				}
-				if err := self.DataDB.SetAccountActionPlans(accID, acntAPids, true); err != nil {
+				if err := self.DataManager.DataDB().SetAccountActionPlans(accID, acntAPids, true); err != nil {
 					return 0, err
 				}
-				if err = self.DataDB.CacheDataFromDB(utils.AccountActionPlansPrefix, []string{accID}, true); err != nil {
+				if err = self.DataManager.CacheDataFromDB(utils.AccountActionPlansPrefix, []string{accID}, true); err != nil {
 					return 0, err
 				}
 				return 0, nil
@@ -203,7 +213,7 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 				ub.ActionTriggers = make(engine.ActionTriggers, 0)
 			}
 			for _, actionTriggerID := range *attr.ActionTriggerIDs {
-				atrs, err := self.DataDB.GetActionTriggers(actionTriggerID, false, utils.NonTransactional)
+				atrs, err := self.DataManager.GetActionTriggers(actionTriggerID, false, utils.NonTransactional)
 				if err != nil {
 					return 0, err
 				}
@@ -221,6 +231,7 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 				}
 			}
 		}
+
 		ub.InitCounters()
 		if attr.AllowNegative != nil {
 			ub.AllowNegative = *attr.AllowNegative
@@ -229,7 +240,7 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 			ub.Disabled = *attr.Disabled
 		}
 		// All prepared, save account
-		if err := self.DataDB.SetAccount(ub); err != nil {
+		if err := self.DataManager.DataDB().SetAccount(ub); err != nil {
 			return 0, err
 		}
 		return 0, nil
@@ -237,7 +248,7 @@ func (self *ApierV2) SetAccount(attr AttrSetAccount, reply *string) error {
 	if err != nil {
 		return utils.NewErrServerError(err)
 	}
-	if attr.ReloadScheduler && len(dirtyActionPlans) != 0 {
+	if attr.ReloadScheduler && schedNeedsReload {
 		sched := self.ServManager.GetScheduler()
 		if sched == nil {
 			return errors.New(utils.SchedulerNotRunningCaps)

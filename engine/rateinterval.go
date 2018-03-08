@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -347,11 +348,10 @@ func (i *RateInterval) Equal(o *RateInterval) bool {
 }
 
 func (i *RateInterval) GetCost(duration, startSecond time.Duration) float64 {
-	price, _, rateUnit := i.
-		GetRateParameters(startSecond)
-	price /= rateUnit.Seconds()
-	d := duration.Seconds()
-	return d * price
+	price, _, rateUnit := i.GetRateParameters(startSecond)
+	price /= float64(rateUnit.Nanoseconds())
+	d := float64(duration.Nanoseconds())
+	return utils.Round(d*price, globalRoundingDecimals, utils.ROUNDING_MIDDLE)
 }
 
 // Gets the price for a the provided start second

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import (
@@ -45,7 +46,7 @@ type ActionTrigger struct {
 	LastExecutionTime time.Time
 }
 
-func (at *ActionTrigger) Execute(ub *Account, sq *StatsQueueTriggered) (err error) {
+func (at *ActionTrigger) Execute(ub *Account, sq *CDRStatsQueueTriggered) (err error) {
 	// check for min sleep time
 	if at.Recurrent && !at.LastExecutionTime.IsZero() && time.Since(at.LastExecutionTime) < at.MinSleep {
 		return
@@ -56,7 +57,7 @@ func (at *ActionTrigger) Execute(ub *Account, sq *StatsQueueTriggered) (err erro
 	}
 	// does NOT need to Lock() because it is triggered from a method that took the Lock
 	var aac Actions
-	aac, err = dataStorage.GetActions(at.ActionsID, false, utils.NonTransactional)
+	aac, err = dm.GetActions(at.ActionsID, false, utils.NonTransactional)
 	if err != nil {
 		utils.Logger.Err(fmt.Sprintf("Failed to get actions: %v", err))
 		return
@@ -112,7 +113,7 @@ func (at *ActionTrigger) Execute(ub *Account, sq *StatsQueueTriggered) (err erro
 			"Id":        at.ID,
 			"ActionIds": at.ActionsID,
 		})
-		dataStorage.SetAccount(ub)
+		dm.DataDB().SetAccount(ub)
 	}
 	return
 }
@@ -144,7 +145,7 @@ func (at *ActionTrigger) Match(a *Action) bool {
 		thresholdType = t.ThresholdType == "" || at.ThresholdType == t.ThresholdType
 	}
 
-	return thresholdType && at.Balance.CreateBalance().MatchFilter(a.Balance, false)
+	return thresholdType && at.Balance.CreateBalance().MatchFilter(a.Balance, false, false)
 }
 
 func (at *ActionTrigger) CreateBalance() *Balance {

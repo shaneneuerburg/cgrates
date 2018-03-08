@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package v1
 
 import (
@@ -33,7 +34,7 @@ var (
 func init() {
 	apierAcntsAcntStorage, _ = engine.NewMapStorage()
 	cfg, _ := config.NewDefaultCGRConfig()
-	apierAcnts = &ApierV1{DataDB: engine.DataDB(apierAcntsAcntStorage), Config: cfg}
+	apierAcnts = &ApierV1{DataManager: engine.NewDataManager(apierAcntsAcntStorage), Config: cfg}
 }
 
 func TestSetAccounts(t *testing.T) {
@@ -58,7 +59,7 @@ func TestSetAccounts(t *testing.T) {
 	//apierAcntsAcntStorage.CacheRatingPrefixes(utils.ACTION_PREFIX)
 }
 
-/*
+/* This was a comment
 func TestGetAccountIds(t *testing.T) {
 	var accountIds []string
 	var attrs AttrGetAccountIds

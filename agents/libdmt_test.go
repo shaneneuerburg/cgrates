@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/cgrates/cgrates/config"
-	"github.com/cgrates/cgrates/sessionmanager"
+	"github.com/cgrates/cgrates/sessions"
 	"github.com/cgrates/cgrates/utils"
 	"github.com/fiorix/go-diameter/diam"
 	"github.com/fiorix/go-diameter/diam/avp"
@@ -59,25 +59,25 @@ func TestDisectUsageForCCR(t *testing.T) {
 }
 
 func TestUsageFromCCR(t *testing.T) {
-	if usage := usageFromCCR(1, 0, 300, 0, time.Duration(300)*time.Second); usage != time.Duration(300)*time.Second {
+	if usage := usageFromCCR(1, 0, 0, time.Duration(300)*time.Second); usage != time.Duration(300)*time.Second {
 		t.Error(usage)
 	}
-	if usage := usageFromCCR(2, 0, 300, 300, time.Duration(300)*time.Second); usage != time.Duration(300)*time.Second {
+	if usage := usageFromCCR(2, 0, 300, time.Duration(300)*time.Second); usage != time.Duration(300)*time.Second {
 		t.Error(usage)
 	}
-	if usage := usageFromCCR(2, 3, 300, 300, time.Duration(300)*time.Second); usage != time.Duration(300)*time.Second {
+	if usage := usageFromCCR(2, 3, 300, time.Duration(300)*time.Second); usage != time.Duration(300)*time.Second {
 		t.Error(usage.Seconds())
 	}
-	if usage := usageFromCCR(3, 3, 0, 10, time.Duration(300)*time.Second); usage != time.Duration(610)*time.Second {
+	if usage := usageFromCCR(3, 3, 10, time.Duration(300)*time.Second); usage != time.Duration(610)*time.Second {
 		t.Error(usage)
 	}
-	if usage := usageFromCCR(3, 4, 0, 35, time.Duration(300)*time.Second); usage != time.Duration(935)*time.Second {
+	if usage := usageFromCCR(3, 4, 35, time.Duration(300)*time.Second); usage != time.Duration(935)*time.Second {
 		t.Error(usage)
 	}
-	if usage := usageFromCCR(3, 1, 0, 35, time.Duration(300)*time.Second); usage != time.Duration(35)*time.Second {
+	if usage := usageFromCCR(3, 1, 35, time.Duration(300)*time.Second); usage != time.Duration(35)*time.Second {
 		t.Error(usage)
 	}
-	if usage := usageFromCCR(1, 0, 360, 0, time.Duration(360)*time.Second); usage != time.Duration(360)*time.Second {
+	if usage := usageFromCCR(1, 0, 0, time.Duration(360)*time.Second); usage != time.Duration(360)*time.Second {
 		t.Error(usage)
 	}
 }
@@ -108,12 +108,17 @@ func TestMetaValueExponent(t *testing.T) {
 			}),
 		},
 	})
-	if val, err := metaValueExponent(m, utils.ParseRSRFieldsMustCompile("Requested-Service-Unit>CC-Money>Unit-Value>Value-Digits;^|;Requested-Service-Unit>CC-Money>Unit-Value>Exponent", utils.INFIELD_SEP), 10); err != nil {
+	if val, err := metaValueExponent(m, nil, utils.ParseRSRFieldsMustCompile(
+		"Requested-Service-Unit>CC-Money>Unit-Value>Value-Digits;^|;Requested-Service-Unit>CC-Money>Unit-Value>Exponent",
+		utils.INFIELD_SEP), 10); err != nil {
 		t.Error(err)
 	} else if val != "0.1" {
 		t.Error("Received: ", val)
 	}
-	if _, err = metaValueExponent(m, utils.ParseRSRFieldsMustCompile("Requested-Service-Unit>CC-Money>Unit-Value>Value-Digits;Requested-Service-Unit>CC-Money>Unit-Value>Exponent", utils.INFIELD_SEP), 10); err == nil {
+	if _, err = metaValueExponent(m, nil,
+		utils.ParseRSRFieldsMustCompile(
+			"Requested-Service-Unit>CC-Money>Unit-Value>Value-Digits;Requested-Service-Unit>CC-Money>Unit-Value>Exponent",
+			utils.INFIELD_SEP), 10); err == nil {
 		t.Error("Should have received error") // Insufficient number arguments
 	}
 }
@@ -136,12 +141,17 @@ func TestMetaSum(t *testing.T) {
 			}),
 		},
 	})
-	if val, err := metaSum(m, utils.ParseRSRFieldsMustCompile("Requested-Service-Unit>CC-Money>Unit-Value>Value-Digits;^|;Requested-Service-Unit>CC-Money>Unit-Value>Exponent", utils.INFIELD_SEP), 0, 10); err != nil {
+	if val, err := metaSum(m, nil,
+		utils.ParseRSRFieldsMustCompile(
+			"Requested-Service-Unit>CC-Money>Unit-Value>Value-Digits;^|;Requested-Service-Unit>CC-Money>Unit-Value>Exponent",
+			utils.INFIELD_SEP), 0, 10); err != nil {
 		t.Error(err)
 	} else if val != "9995" {
 		t.Error("Received: ", val)
 	}
-	if _, err = metaSum(m, utils.ParseRSRFieldsMustCompile("Requested-Service-Unit>CC-Money>Unit-Value>Value-Digits;Requested-Service-Unit>CC-Money>Unit-Value>Exponent", utils.INFIELD_SEP), 0, 10); err == nil {
+	if _, err = metaSum(m, nil, utils.ParseRSRFieldsMustCompile(
+		"Requested-Service-Unit>CC-Money>Unit-Value>Value-Digits;Requested-Service-Unit>CC-Money>Unit-Value>Exponent",
+		utils.INFIELD_SEP), 0, 10); err == nil {
 		t.Error("Should have received error") // Insufficient number arguments
 	}
 }
@@ -171,7 +181,7 @@ func TestFieldOutVal(t *testing.T) {
 	} else if fldOut != eOut {
 		t.Errorf("Expecting:\n%s\nReceived:\n%s", eOut, fldOut)
 	}
-	cfgFld = &config.CfgCdrField{Tag: "ComposedTest", Type: utils.META_COMPOSED, FieldId: utils.DESTINATION,
+	cfgFld = &config.CfgCdrField{Tag: "ComposedTest", Type: utils.META_COMPOSED, FieldId: utils.Destination,
 		Value: utils.ParseRSRFieldsMustCompile("Requested-Service-Unit>CC-Time", utils.INFIELD_SEP), Mandatory: true}
 	eOut = "360"
 	if fldOut, err := fieldOutVal(m, cfgFld, time.Duration(0), nil); err != nil {
@@ -180,7 +190,7 @@ func TestFieldOutVal(t *testing.T) {
 		t.Errorf("Expecting:\n%s\nReceived:\n%s", eOut, fldOut)
 	}
 	// With filter on ProcessorVars
-	cfgFld = &config.CfgCdrField{Tag: "ComposedTestWithProcessorVarsFilter", Type: utils.META_COMPOSED, FieldId: utils.DESTINATION,
+	cfgFld = &config.CfgCdrField{Tag: "ComposedTestWithProcessorVarsFilter", Type: utils.META_COMPOSED, FieldId: utils.Destination,
 		FieldFilter: utils.ParseRSRFieldsMustCompile("CGRError(INSUFFICIENT_CREDIT)", utils.INFIELD_SEP),
 		Value:       utils.ParseRSRFieldsMustCompile("Requested-Service-Unit>CC-Time", utils.INFIELD_SEP), Mandatory: true}
 	if _, err := fieldOutVal(m, cfgFld, time.Duration(0), nil); err == nil {
@@ -233,31 +243,46 @@ func TestSerializeAVPValueFromString(t *testing.T) {
 
 func TestMessageSetAVPsWithPath(t *testing.T) {
 	eMessage := diam.NewRequest(diam.CreditControl, 4, nil)
-	eMessage.NewAVP("Session-Id", avp.Mbit, 0, datatype.UTF8String("simuhuawei;1449573472;00002"))
-	m := diam.NewMessage(diam.CreditControl, diam.RequestFlag, 4, eMessage.Header.HopByHopID, eMessage.Header.EndToEndID, nil)
-	if err := messageSetAVPsWithPath(m, []interface{}{"Session-Id", "Unknown"}, "simuhuawei;1449573472;00002", false, "UTC"); err == nil || err.Error() != "Could not find AVP Unknown" {
+	eMessage.NewAVP("Session-Id", avp.Mbit, 0,
+		datatype.UTF8String("simuhuawei;1449573472;00002"))
+	m := diam.NewMessage(diam.CreditControl, diam.RequestFlag, 4,
+		eMessage.Header.HopByHopID, eMessage.Header.EndToEndID, nil)
+	if err := messageSetAVPsWithPath(m,
+		[]interface{}{"Session-Id", "Unknown"}, "simuhuawei;1449573472;00002",
+		false, "UTC"); err == nil ||
+		err.Error() != "Could not find AVP Unknown" {
 		t.Error(err)
 	}
-	if err := messageSetAVPsWithPath(m, []interface{}{"Session-Id"}, "simuhuawei;1449573472;00002", false, "UTC"); err != nil {
+	if err := messageSetAVPsWithPath(m,
+		[]interface{}{"Session-Id"}, "simuhuawei;1449573472;00002",
+		false, "UTC"); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eMessage, m) {
 		t.Errorf("Expecting: %+v, received: %+v", eMessage, m)
 	}
 	// test append
-	eMessage.NewAVP("Session-Id", avp.Mbit, 0, datatype.UTF8String("simuhuawei;1449573472;00003"))
-	if err := messageSetAVPsWithPath(m, []interface{}{"Session-Id"}, "simuhuawei;1449573472;00003", true, "UTC"); err != nil {
+	eMessage.NewAVP("Session-Id", avp.Mbit, 0,
+		datatype.UTF8String("simuhuawei;1449573472;00003"))
+	if err := messageSetAVPsWithPath(m, []interface{}{"Session-Id"},
+		"simuhuawei;1449573472;00003", true, "UTC"); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eMessage, m) {
 		t.Errorf("Expecting: %+v, received: %+v", eMessage, m)
 	}
 	// test overwrite
 	eMessage = diam.NewRequest(diam.CreditControl, 4, nil)
-	eMessage.NewAVP("Session-Id", avp.Mbit, 0, datatype.UTF8String("simuhuawei;1449573472;00002"))
-	m = diam.NewMessage(diam.CreditControl, diam.RequestFlag, 4, eMessage.Header.HopByHopID, eMessage.Header.EndToEndID, nil)
-	if err := messageSetAVPsWithPath(m, []interface{}{"Session-Id"}, "simuhuawei;1449573472;00001", false, "UTC"); err != nil {
+	eMessage.NewAVP("Session-Id", avp.Mbit, 0,
+		datatype.UTF8String("simuhuawei;1449573472;00002"))
+	m = diam.NewMessage(diam.CreditControl, diam.RequestFlag, 4,
+		eMessage.Header.HopByHopID, eMessage.Header.EndToEndID, nil)
+	if err := messageSetAVPsWithPath(m,
+		[]interface{}{"Session-Id"}, "simuhuawei;1449573472;00001",
+		false, "UTC"); err != nil {
 		t.Error(err)
 	}
-	if err := messageSetAVPsWithPath(m, []interface{}{"Session-Id"}, "simuhuawei;1449573472;00002", false, "UTC"); err != nil {
+	if err := messageSetAVPsWithPath(m,
+		[]interface{}{"Session-Id"}, "simuhuawei;1449573472;00002",
+		false, "UTC"); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eMessage, m) {
 		t.Errorf("Expecting: %+v, received: %+v", eMessage, m)
@@ -267,8 +292,11 @@ func TestMessageSetAVPsWithPath(t *testing.T) {
 		AVP: []*diam.AVP{
 			diam.NewAVP(444, avp.Mbit, 0, datatype.UTF8String("33708000003")), // Subscription-Id-Data
 		}})
-	m = diam.NewMessage(diam.CreditControl, diam.RequestFlag, 4, eMessage.Header.HopByHopID, eMessage.Header.EndToEndID, nil)
-	if err := messageSetAVPsWithPath(m, []interface{}{"Subscription-Id", "Subscription-Id-Data"}, "33708000003", false, "UTC"); err != nil {
+	m = diam.NewMessage(diam.CreditControl, diam.RequestFlag, 4,
+		eMessage.Header.HopByHopID, eMessage.Header.EndToEndID, nil)
+	if err := messageSetAVPsWithPath(m,
+		[]interface{}{"Subscription-Id", "Subscription-Id-Data"},
+		"33708000003", false, "UTC"); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eMessage, m) {
 		t.Errorf("Expecting: %+v, received: %+v", eMessage, m)
@@ -278,7 +306,9 @@ func TestMessageSetAVPsWithPath(t *testing.T) {
 		AVP: []*diam.AVP{
 			diam.NewAVP(450, avp.Mbit, 0, datatype.Enumerated(0)), // Subscription-Id-Data
 		}})
-	if err := messageSetAVPsWithPath(m, []interface{}{"Subscription-Id", "Subscription-Id-Type"}, "0", true, "UTC"); err != nil {
+	if err := messageSetAVPsWithPath(m,
+		[]interface{}{"Subscription-Id", "Subscription-Id-Type"},
+		"0", true, "UTC"); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eMessage, m) {
 		t.Errorf("Expecting: %+v, received: %+v", eMessage, m)
@@ -434,7 +464,7 @@ func TestCCRAsSMGenericEvent(t *testing.T) {
 	})
 	ccr.diamMessage.NewAVP("FramedIPAddress", avp.Mbit, 0, datatype.OctetString("0AE40041"))
 	cfgFlds := make([]*config.CfgCdrField, 0)
-	eSMGEv := sessionmanager.SMGenericEvent{"EventName": "DIAMETER_CCR"}
+	eSMGEv := sessions.SMGenericEvent{"EventName": "DIAMETER_CCR"}
 	if rSMGEv, err := ccr.AsSMGenericEvent(cfgFlds); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eSMGEv, rSMGEv) {
@@ -451,7 +481,7 @@ func TestCCRAsSMGenericEvent(t *testing.T) {
 			Mandatory:   true,
 		},
 	}
-	eSMGEv = sessionmanager.SMGenericEvent{"EventName": "DIAMETER_CCR", "LastUsed": "54239"}
+	eSMGEv = sessions.SMGenericEvent{"EventName": "DIAMETER_CCR", "LastUsed": "54239"}
 	if rSMGEv, err := ccr.AsSMGenericEvent(cfgFlds); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eSMGEv, rSMGEv) {
@@ -468,7 +498,7 @@ func TestCCRAsSMGenericEvent(t *testing.T) {
 			Mandatory:   true,
 		},
 	}
-	eSMGEv = sessionmanager.SMGenericEvent{"EventName": "DIAMETER_CCR", "LastUsed": "4420"}
+	eSMGEv = sessions.SMGenericEvent{"EventName": "DIAMETER_CCR", "LastUsed": "4420"}
 	if rSMGEv, err := ccr.AsSMGenericEvent(cfgFlds); err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(eSMGEv, rSMGEv) {

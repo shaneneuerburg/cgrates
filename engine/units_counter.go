@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package engine
 
 import "github.com/cgrates/cgrates/utils"
@@ -78,7 +79,7 @@ func (ucs UnitCounters) addUnits(amount float64, kind string, cc *CallCost, b *B
 				continue
 			}
 
-			if uc.CounterType == utils.COUNTER_BALANCE && b != nil && b.MatchFilter(c.Filter, true) {
+			if uc.CounterType == utils.COUNTER_BALANCE && b != nil && b.MatchFilter(c.Filter, true, false) {
 				c.Value += amount
 				continue
 			}

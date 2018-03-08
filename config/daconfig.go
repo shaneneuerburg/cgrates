@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>
 */
+
 package config
 
 import (
@@ -27,7 +28,7 @@ type DiameterAgentCfg struct {
 	Enabled            bool   // enables the diameter agent: <true|false>
 	Listen             string // address where to listen for diameter requests <x.y.z.y:1234>
 	DictionariesDir    string
-	SMGenericConns     []*HaPoolConfig // connections towards SMG component
+	SessionSConns      []*HaPoolConfig // connections towards SMG component
 	PubSubConns        []*HaPoolConfig // connection towards pubsubs
 	CreateCDR          bool
 	CDRRequiresSession bool
@@ -53,11 +54,11 @@ func (self *DiameterAgentCfg) loadFromJsonCfg(jsnCfg *DiameterAgentJsonCfg) erro
 	if jsnCfg.Dictionaries_dir != nil {
 		self.DictionariesDir = *jsnCfg.Dictionaries_dir
 	}
-	if jsnCfg.Sm_generic_conns != nil {
-		self.SMGenericConns = make([]*HaPoolConfig, len(*jsnCfg.Sm_generic_conns))
-		for idx, jsnHaCfg := range *jsnCfg.Sm_generic_conns {
-			self.SMGenericConns[idx] = NewDfltHaPoolConfig()
-			self.SMGenericConns[idx].loadFromJsonCfg(jsnHaCfg)
+	if jsnCfg.Sessions_conns != nil {
+		self.SessionSConns = make([]*HaPoolConfig, len(*jsnCfg.Sessions_conns))
+		for idx, jsnHaCfg := range *jsnCfg.Sessions_conns {
+			self.SessionSConns[idx] = NewDfltHaPoolConfig()
+			self.SessionSConns[idx].loadFromJsonCfg(jsnHaCfg)
 		}
 	}
 	if jsnCfg.Pubsubs_conns != nil {
@@ -75,7 +76,7 @@ func (self *DiameterAgentCfg) loadFromJsonCfg(jsnCfg *DiameterAgentJsonCfg) erro
 	}
 	if jsnCfg.Debit_interval != nil {
 		var err error
-		if self.DebitInterval, err = utils.ParseDurationWithSecs(*jsnCfg.Debit_interval); err != nil {
+		if self.DebitInterval, err = utils.ParseDurationWithNanosecs(*jsnCfg.Debit_interval); err != nil {
 			return err
 		}
 	}
